@@ -1786,7 +1786,7 @@ export default function App() {
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            justifyContent: 'flex-end',
+            justifyContent: 'flex-start',
           }}
         >
           {auth.enabled && auth.authenticated && (
