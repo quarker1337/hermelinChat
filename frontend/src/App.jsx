@@ -342,6 +342,62 @@ const SearchHitRow = ({ hit, active, onClick }) => {
   )
 }
 
+const AlignmentEasterEgg = () => {
+  const [open, setOpen] = useState(false)
+  const [hovered, setHovered] = useState(false)
+
+  const opacity = open ? 0.75 : hovered ? 0.25 : 0.08
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={(e) => {
+        e.stopPropagation()
+        setOpen((v) => !v)
+        // keep typing without needing another click
+        setTimeout(() => {
+          try {
+            document.querySelector('.xterm-helper-textarea')?.focus()
+          } catch {
+            // ignore
+          }
+        }, 0)
+      }}
+      style={{
+        position: 'absolute',
+        right: 14,
+        bottom: 14,
+        cursor: 'pointer',
+        zIndex: 12,
+        opacity,
+        transition: 'all 0.35s ease',
+        transform: open ? 'scale(1.15)' : 'scale(1)',
+        filter: open ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
+        userSelect: 'none',
+      }}
+      title="the ermine knows…"
+    >
+      <InvertelinSmall size={18} />
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 24,
+            right: 0,
+            whiteSpace: 'nowrap',
+            fontSize: 9,
+            color: AMBER[400],
+            textShadow: `0 0 8px ${AMBER[400]}40`,
+          }}
+        >
+          aligned to you…
+        </div>
+      )}
+    </div>
+  )
+}
+
 const PeekDrawer = ({ loading, error, context, hit, onClose, onOpenSession }) => {
   const title = context?.session_title || hit?.session_title || hit?.session_id || 'peek'
   const sid = context?.session_id || hit?.session_id
@@ -1213,7 +1269,10 @@ export default function App() {
         <div style={{ flex: 1, display: 'flex', position: 'relative' }}>
           <div style={{ flex: 1, position: 'relative' }}>
             {auth.authenticated ? (
-              <TerminalPane resumeId={activeResumeId} onConnectionChange={setConnected} />
+              <>
+                <TerminalPane resumeId={activeResumeId} onConnectionChange={setConnected} />
+                <AlignmentEasterEgg />
+              </>
             ) : (
               <div
                 style={{
