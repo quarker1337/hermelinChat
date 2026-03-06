@@ -300,6 +300,48 @@ const SessionRow = ({ title, preview, right, active, onClick }) => {
   )
 }
 
+const SearchHitRow = ({ hit, active, onClick }) => {
+  const [hovered, setHovered] = useState(false)
+
+  const role = (hit?.role || '').toLowerCase()
+  const badge = role === 'assistant' ? '⚡' : '●'
+  const badgeColor = role === 'assistant' ? AMBER[500] : SLATE.textBright
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onClick}
+      style={{
+        padding: '6px 12px 6px 28px',
+        borderRadius: 6,
+        cursor: 'pointer',
+        background: active ? `${AMBER[900]}33` : hovered ? `${SLATE.elevated}` : 'transparent',
+        transition: 'all 0.15s ease',
+        marginTop: 2,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <div style={{ width: 44, fontSize: 10, color: SLATE.muted, flexShrink: 0 }}>{isoToTimeLabel(hit?.timestamp_iso)}</div>
+        <div style={{ width: 14, color: badgeColor, flexShrink: 0 }}>{badge}</div>
+        <div
+          style={{
+            flex: 1,
+            fontSize: 11,
+            color: SLATE.muted,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={hit?.snippet}
+        >
+          <HighlightedSnippet text={hit?.snippet} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function buildWsUrl(resumeId) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const params = new URLSearchParams()
@@ -465,6 +507,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
+  const [expandedSearchSessions, setExpandedSearchSessions] = useState({})
 
   const refreshAuth = async () => {
     try {
@@ -532,6 +575,55 @@ export default function App() {
       }
     }
   }, [searchQuery, auth.authenticated])
+
+  useEffect(() => {
+    const q = (searchQuery || '').trim()
+    if (!q) {
+      setExpandedSearchSessions({})
+      return
+    }
+
+    const sessionIds = Array.from(new Set((searchResults || []).map((r) => r.session_id)))
+    setExpandedSearchSessions((prev) => {
+      const next = {}
+      for (const id of sessionIds) {
+        next[id] = prev[id] ?? true
+      }
+      return next
+    })
+  }, [searchQuery, searchResults])
+
+  const searchGroups = useMemo(() => {
+    const groups = new Map()
+
+    for (const r of searchResults || []) {
+      const sid = r.session_id
+      if (!sid) continue
+
+      if (!groups.has(sid)) {
+        groups.set(sid, {
+          session_id: sid,
+          title: r.session_title || sid,
+          model: r.session_model || null,
+          hits: [],
+        })
+      }
+      groups.get(sid).hits.push(r)
+    }
+
+    const out = Array.from(groups.values())
+    for (const g of out) {
+      g.hits.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+    }
+
+    out.sort((a, b) => {
+      const at = a.hits[0]?.timestamp || 0
+      const bt = b.hits[0]?.timestamp || 0
+      return bt - at
+    })
+
+    return out
+  }, [searchResults])
 
   const doLogin = async () => {
     setLoginError('')
@@ -764,19 +856,51 @@ export default function App() {
                   <div style={{ padding: '8px 12px', fontSize: 11, color: SLATE.muted }}>No results</div>
                 )}
 
-                {searchResults.map((r) => (
-                  <SessionRow
-                    key={`${r.session_id}-${r.id}`}
-                    title={r.session_title || r.session_id}
-                    preview={<HighlightedSnippet text={r.snippet} />}
-                    right={isoToTimeLabel(r.timestamp_iso)}
-                    active={activeResumeId === r.session_id}
-                    onClick={() => {
-                      setSearchQuery('')
-                      setActiveResumeId(r.session_id)
-                    }}
-                  />
-                ))}
+                {searchGroups.map((g) => {
+                  const isOpen = !!expandedSearchSessions[g.session_id]
+                  const top = g.hits[0]
+
+                  return (
+                    <div key={g.session_id} style={{ marginBottom: 6 }}>
+                      <SessionRow
+                        title={`${isOpen ? '▾' : '▸'} ${g.title}`}
+                        preview={
+                          <span>
+                            <span style={{ color: SLATE.muted }}>{g.hits.length} hits</span>
+                            {g.model && <span style={{ color: SLATE.muted }}>{` · ${g.model}`}</span>}
+                            {top?.snippet && (
+                              <>
+                                <span style={{ color: SLATE.muted }}> · </span>
+                                <HighlightedSnippet text={top.snippet} />
+                              </>
+                            )}
+                          </span>
+                        }
+                        right={isoToTimeLabel(top?.timestamp_iso)}
+                        active={activeResumeId === g.session_id}
+                        onClick={() =>
+                          setExpandedSearchSessions((prev) => ({
+                            ...prev,
+                            [g.session_id]: !isOpen,
+                          }))
+                        }
+                      />
+
+                      {isOpen && (
+                        <div style={{ marginTop: 2 }}>
+                          {g.hits.map((hit) => (
+                            <SearchHitRow
+                              key={hit.id}
+                              hit={hit}
+                              active={activeResumeId === g.session_id}
+                              onClick={() => setActiveResumeId(g.session_id)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             ) : (
               ['Today', 'Yesterday', 'Earlier'].map((k) => {
