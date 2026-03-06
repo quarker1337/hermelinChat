@@ -743,14 +743,22 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
 
   return (
     <div
-      ref={containerRef}
       style={{
         position: 'absolute',
         inset: 0,
-        padding: '12px 12px 12px 12px',
+        padding: '12px 12px 20px 12px',
         zIndex: 5,
+        boxSizing: 'border-box',
       }}
-    />
+    >
+      <div
+        ref={containerRef}
+        style={{
+          width: '100%',
+          height: '100%',
+        }}
+      />
+    </div>
   )
 }
 
