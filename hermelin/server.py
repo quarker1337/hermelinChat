@@ -20,6 +20,7 @@ from .auth import (
     verify_session_token,
 )
 from .config import HermelinConfig
+from .meta_db import ensure_meta_db, get_titles_map
 from .pty_handler import PtyProcess
 from .security import extract_client_ip, ip_allowed
 from .state_reader import get_message_context, list_sessions, search_messages
@@ -27,6 +28,14 @@ from .state_reader import get_message_context, list_sessions, search_messages
 
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
     config = config or HermelinConfig()
+
+    # Ensure meta DB exists (titles, etc.)
+    try:
+        ensure_meta_db(config.meta_db_path)
+    except Exception:
+        # Non-fatal; UI will just fall back to first message titles.
+        pass
+
     app = FastAPI(title="hermelinChat", version="0.1.0", docs_url="/api/docs", redoc_url=None)
 
     # Dev-friendly; production should lock this down.
@@ -172,8 +181,25 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         offset: int = 0,
         source: Optional[str] = None,
     ):
+        sessions = list_sessions(config.db_path, limit=limit, offset=offset, source=source)
+
+        # Overlay custom titles from meta DB, if present.
+        try:
+            titles = get_titles_map(config.meta_db_path, [s.get("id") for s in sessions])
+        except Exception:
+            titles = {}
+
+        for s in sessions:
+            sid = s.get("id")
+            t = titles.get(sid)
+            if t:
+                s["title"] = t
+                s["title_source"] = "meta"
+            else:
+                s["title_source"] = "first_message"
+
         return {
-            "sessions": list_sessions(config.db_path, limit=limit, offset=offset, source=source),
+            "sessions": sessions,
         }
 
     @app.get("/api/search")
@@ -183,14 +209,28 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         offset: int = 0,
         session_id: Optional[str] = None,
     ):
+        results = search_messages(
+            config.db_path,
+            query=q,
+            limit=limit,
+            offset=offset,
+            session_id=session_id,
+        )
+
+        # Overlay session titles in search results.
+        try:
+            titles = get_titles_map(config.meta_db_path, {r.get("session_id") for r in results})
+        except Exception:
+            titles = {}
+
+        for r in results:
+            sid = r.get("session_id")
+            t = titles.get(sid)
+            if t:
+                r["session_title"] = t
+
         return {
-            "results": search_messages(
-                config.db_path,
-                query=q,
-                limit=limit,
-                offset=offset,
-                session_id=session_id,
-            ),
+            "results": results,
         }
 
     @app.get("/api/messages/context")
@@ -202,6 +242,16 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         ctx = get_message_context(config.db_path, message_id=message_id, before=before, after=after)
         if ctx is None:
             return JSONResponse({"detail": "not found"}, status_code=404)
+
+        # Overlay custom title if available.
+        try:
+            sid = ctx.get("session_id")
+            t = get_titles_map(config.meta_db_path, [sid]).get(sid) if sid else None
+            if t:
+                ctx["session_title"] = t
+        except Exception:
+            pass
+
         return ctx
 
     @app.websocket("/ws/pty")

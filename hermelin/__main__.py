@@ -21,6 +21,14 @@ def main() -> None:
     p.add_argument("--hermes-cmd", default=os.getenv("HERMELIN_HERMES_CMD", "hermes"))
     p.add_argument("--hermes-home", default=os.getenv("HERMES_HOME", str(Path.home() / ".hermes")))
     p.add_argument("--spawn-cwd", default=os.getenv("HERMELIN_SPAWN_CWD", os.getcwd()))
+    p.add_argument(
+        "--meta-db",
+        default=os.getenv(
+            "HERMELIN_META_DB_PATH",
+            str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))) / "hermilin_meta.db"),
+        ),
+        help="Path to hermilinChat metadata DB (titles, etc.). Default: $HERMES_HOME/hermilin_meta.db",
+    )
 
     p.add_argument(
         "--allowed-ips",
@@ -45,6 +53,7 @@ def main() -> None:
         os.environ["HERMELIN_HERMES_CMD"] = str(args.hermes_cmd)
         os.environ["HERMES_HOME"] = str(args.hermes_home)
         os.environ["HERMELIN_SPAWN_CWD"] = str(args.spawn_cwd)
+        os.environ["HERMELIN_META_DB_PATH"] = str(args.meta_db)
         os.environ["HERMELIN_ALLOWED_IPS"] = str(args.allowed_ips)
         os.environ["HERMELIN_TRUST_X_FORWARDED_FOR"] = "1" if args.trust_xff else "0"
 
@@ -63,6 +72,7 @@ def main() -> None:
         port=int(args.port),
         hermes_cmd=str(args.hermes_cmd),
         hermes_home=Path(args.hermes_home).expanduser(),
+        meta_db_path=Path(args.meta_db).expanduser(),
         spawn_cwd=Path(args.spawn_cwd).expanduser(),
         allowed_ips=str(args.allowed_ips),
         trust_x_forwarded_for=bool(args.trust_xff),

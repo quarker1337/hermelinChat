@@ -9,6 +9,10 @@ def _env_bool(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+_DEFAULT_HERMES_HOME = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+_DEFAULT_META_DB = _DEFAULT_HERMES_HOME / "hermilin_meta.db"
+
+
 @dataclass(frozen=True)
 class HermelinConfig:
     host: str = os.getenv("HERMELIN_HOST", "127.0.0.1")
@@ -21,7 +25,10 @@ class HermelinConfig:
     hermes_cmd: str = os.getenv("HERMELIN_HERMES_CMD", "hermes")
 
     # Hermes Agent home (contains state.db, config.yaml, etc.)
-    hermes_home: Path = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+    hermes_home: Path = _DEFAULT_HERMES_HOME
+
+    # hermilinChat metadata DB (titles, etc.)
+    meta_db_path: Path = Path(os.getenv("HERMELIN_META_DB_PATH", str(_DEFAULT_META_DB))).expanduser()
 
     # Working directory to run the hermes CLI in.
     # Defaults to the directory hermelinChat is started from.

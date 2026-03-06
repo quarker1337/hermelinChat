@@ -68,6 +68,7 @@ This is intentionally a hybrid UI:
    # Optional
    # HERMELIN_HERMES_CMD=/home/you/.local/bin/hermes
    # HERMES_HOME=/home/you/.hermes
+   # HERMELIN_META_DB_PATH=/home/you/.hermes/hermilin_meta.db
    # HERMELIN_SPAWN_CWD=/home/you
    ```
 
@@ -122,6 +123,27 @@ Useful flags:
 - `--skip-frontend` if you know the frontend didn’t change (skips npm build)
 - `--skip-python` if you only changed frontend assets
 - `--service NAME` if your systemd service name isn’t `hermelin`
+
+## Auto session titles (optional)
+
+hermilinChat can show better session titles using a separate metadata DB:
+
+- default: `$HERMES_HOME/hermilin_meta.db`
+- table: `session_titles`
+
+If no meta title exists, hermilinChat falls back to using the first user message.
+
+To install an auto-titling job into Hermes’ cron system (runs every 5 minutes):
+
+```bash
+cd hermilinChat
+python3 scripts/install_autotitle_cronjob.py
+```
+
+Make sure cron jobs actually run (pick one):
+
+- Run the Hermes gateway as a service (recommended): `hermes gateway install`
+- Or run ticks yourself (e.g. OS cron/systemd timer): `hermes cron tick`
 
 ## Dev mode (2 processes)
 
@@ -201,6 +223,7 @@ Core:
 - `HERMES_HOME`: path to Hermes home (default: `~/.hermes`)
 - `HERMELIN_HERMES_CMD`: hermes executable to spawn (default: `hermes`)
 - `HERMELIN_SPAWN_CWD`: working directory to start hermes in (default: current working dir)
+- `HERMELIN_META_DB_PATH`: metadata DB path for custom session titles (default: `$HERMES_HOME/hermilin_meta.db`)
 - `HERMELIN_HOST` / `HERMELIN_PORT`: server bind
 
 Security:
