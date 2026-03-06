@@ -145,6 +145,21 @@ Make sure cron jobs actually run (pick one):
 - Run the Hermes gateway as a service (recommended): `hermes gateway install`
 - Or run ticks yourself (e.g. OS cron/systemd timer): `hermes cron tick`
 
+## UI whispers (optional)
+
+The bottom-right mascot easter egg can show a random short "whisper" string.
+
+- stored in: `$HERMES_HOME/hermilin_meta.db` (table: `ui_whispers`)
+- API: `GET /api/whisper`
+- supports `{user}` placeholder (replaced with the Linux username; override with `HERMELIN_DISPLAY_NAME`)
+
+To install a whisper generator job into Hermes’ cron system (runs daily):
+
+```bash
+cd hermilinChat
+python3 scripts/install_whispers_cronjob.py
+```
+
 ## Dev mode (2 processes)
 
 Backend (FastAPI + WebSocket PTY proxy):
@@ -224,6 +239,7 @@ Core:
 - `HERMELIN_HERMES_CMD`: hermes executable to spawn (default: `hermes`)
 - `HERMELIN_SPAWN_CWD`: working directory to start hermes in (default: current working dir)
 - `HERMELIN_META_DB_PATH`: metadata DB path for custom session titles (default: `$HERMES_HOME/hermilin_meta.db`)
+- `HERMELIN_DISPLAY_NAME`: display name used for `{user}` substitutions in UI whispers (default: `$USER`)
 - `HERMELIN_HOST` / `HERMELIN_PORT`: server bind
 
 Security:

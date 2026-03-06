@@ -20,7 +20,7 @@ from .auth import (
     verify_session_token,
 )
 from .config import HermelinConfig
-from .meta_db import ensure_meta_db, get_titles_map
+from .meta_db import ensure_meta_db, get_random_whisper, get_titles_map
 from .pty_handler import PtyProcess
 from .security import extract_client_ip, ip_allowed
 from .state_reader import get_message_context, list_sessions, search_messages
@@ -134,6 +134,37 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "hermes_cmd": config.hermes_cmd,
             "hermes_home": str(config.hermes_home),
         }
+
+    @app.get("/api/whisper")
+    async def api_whisper():
+        # Return a very short UI "whisper" string (randomly sampled).
+        try:
+            raw = get_random_whisper(config.meta_db_path)
+        except Exception:
+            raw = None
+
+        text = (raw or "aligned to you…").strip()
+
+        # Template substitutions
+        display_name = (
+            os.getenv("HERMELIN_DISPLAY_NAME")
+            or os.getenv("USER")
+            or os.getenv("LOGNAME")
+            or "you"
+        ).strip() or "you"
+
+        text = (
+            text.replace("{user}", display_name)
+            .replace("$Username", display_name)
+            .replace("$USER", display_name)
+        )
+
+        # Ensure single-line + sane max length
+        text = " ".join(str(text).splitlines()).strip()
+        if len(text) > 80:
+            text = text[:79] + "…"
+
+        return {"text": text}
 
     # -----------------------------------------------------------------
     # Auth (password -> signed session cookie)

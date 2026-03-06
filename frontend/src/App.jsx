@@ -367,8 +367,27 @@ const SearchHitRow = ({ hit, active, onClick }) => {
 const AlignmentEasterEgg = () => {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState(false)
+  const [whisper, setWhisper] = useState('aligned to you…')
 
   const opacity = open ? 0.75 : hovered ? 0.25 : 0.08
+
+  const fetchWhisper = useCallback(async () => {
+    try {
+      const r = await fetch('/api/whisper')
+      if (!r.ok) throw new Error(`http ${r.status}`)
+      const data = await r.json()
+      const t = (data?.text || '').toString().trim()
+      setWhisper(t || 'aligned to you…')
+    } catch {
+      setWhisper('aligned to you…')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    setWhisper('…')
+    fetchWhisper()
+  }, [open, fetchWhisper])
 
   return (
     <div
@@ -413,7 +432,7 @@ const AlignmentEasterEgg = () => {
             textShadow: `0 0 8px ${AMBER[400]}40`,
           }}
         >
-          aligned to you…
+          {whisper}
         </div>
       )}
     </div>

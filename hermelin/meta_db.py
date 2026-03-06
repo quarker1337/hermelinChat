@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 
 _SCHEMA_SQL = """
@@ -16,6 +16,19 @@ CREATE TABLE IF NOT EXISTS session_titles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_session_titles_source ON session_titles(source);
+
+CREATE TABLE IF NOT EXISTS ui_whispers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL UNIQUE,
+    source TEXT NOT NULL DEFAULT 'auto',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    last_used_at REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ui_whispers_source ON ui_whispers(source);
+CREATE INDEX IF NOT EXISTS idx_ui_whispers_updated ON ui_whispers(updated_at DESC);
 """
 
 
@@ -83,3 +96,60 @@ def upsert_title(db_path: Path, *, session_id: str, title: str, source: str = "a
             (session_id, title, source, now, now),
         )
         conn.commit()
+
+
+def insert_whispers(db_path: Path, whispers: Iterable[str], source: str = "auto") -> int:
+    source = str(source or "auto").strip() or "auto"
+    items: list[str] = []
+    for w in whispers or []:
+        s = str(w or "").strip()
+        if not s:
+            continue
+        items.append(s)
+
+    if not items:
+        return 0
+
+    now = time.time()
+    inserted = 0
+    with _connect(db_path) as conn:
+        conn.executescript(_SCHEMA_SQL)
+        cur = conn.cursor()
+        for s in items:
+            try:
+                cur.execute(
+                    "INSERT OR IGNORE INTO ui_whispers (text, source, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                    (s, source, now, now),
+                )
+                if cur.rowcount and cur.rowcount > 0:
+                    inserted += 1
+            except Exception:
+                continue
+        conn.commit()
+
+    return inserted
+
+
+def get_random_whisper(db_path: Path) -> Optional[str]:
+    with _connect(db_path) as conn:
+        conn.executescript(_SCHEMA_SQL)
+        conn.commit()
+
+        row = conn.execute("SELECT id, text FROM ui_whispers ORDER BY RANDOM() LIMIT 1").fetchone()
+        if not row:
+            return None
+
+        wid = row["id"]
+        text = row["text"]
+
+        now = time.time()
+        try:
+            conn.execute(
+                "UPDATE ui_whispers SET used_count = used_count + 1, last_used_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, int(wid)),
+            )
+            conn.commit()
+        except Exception:
+            pass
+
+    return str(text) if text is not None else None
