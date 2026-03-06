@@ -495,7 +495,9 @@ function TerminalPane({ resumeId, onConnectionChange }) {
       convertEol: true,
       allowTransparency: true,
       theme: {
-        background: SLATE.bg,
+        // Transparent terminal so the ParticleField (and grain) can show through.
+        // NOTE: allowTransparency must be true for this to work.
+        background: 'rgba(0,0,0,0)',
         foreground: SLATE.textBright,
         cursor: AMBER[400],
         selectionBackground: `${AMBER[700]}44`,
