@@ -10,7 +10,7 @@ This is intentionally a hybrid UI:
 ## Requirements
 
 - Linux (PTY-based). macOS may work. Windows is not supported.
-- Python 3.12+
+- Python 3.10+
 - Node.js 18+ (only needed to build/run the frontend)
 - A working Hermes Agent install, providing:
   - `hermes` on PATH (or configure `HERMELIN_HERMES_CMD`)
