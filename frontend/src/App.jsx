@@ -1267,26 +1267,10 @@ export default function App() {
             padding: sidebarCollapsed ? '14px 8px 12px' : '14px 14px 12px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-end',
             borderBottom: `1px solid ${SLATE.border}`,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: sidebarCollapsed ? 0 : 10 }}>
-            <InvertelinSmall size={20} />
-            {!sidebarCollapsed && (
-              <span
-                style={{
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: AMBER[400],
-                  letterSpacing: '0.02em',
-                }}
-              >
-                hermelinChat
-              </span>
-            )}
-          </div>
-
           <div
             onClick={() => setSidebarCollapsed((v) => !v)}
             title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
