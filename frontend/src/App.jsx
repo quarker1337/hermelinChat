@@ -597,6 +597,8 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
       fontSize: 13,
       lineHeight: 1.2,
       cursorBlink: true,
+      cursorStyle: 'bar',
+      cursorWidth: 1,
       scrollback: 10000,
       convertEol: true,
       allowTransparency: true,
