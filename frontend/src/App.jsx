@@ -903,6 +903,17 @@ export default function App() {
         ::-webkit-scrollbar-thumb { background: ${SLATE.border}; border-radius: 2px }
         ::-webkit-scrollbar-thumb:hover { background: ${SLATE.muted} }
         ::selection { background: ${AMBER[700]}44 }
+
+        /* xterm: make viewport/screen transparent so our ParticleField shows through */
+        .xterm, .xterm .xterm-viewport, .xterm .xterm-screen {
+          background-color: transparent !important;
+        }
+        .xterm canvas {
+          background-color: transparent !important;
+        }
+        .xterm .composition-view {
+          background: transparent !important;
+        }
       `}</style>
 
       {/* Sidebar */}
