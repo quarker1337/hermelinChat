@@ -756,6 +756,7 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
 
 export default function App() {
   const [sessions, setSessions] = useState([])
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   // Terminal connection mode:
   // - ptyResumeId=null means "start a fresh Hermes session"
@@ -1249,7 +1250,7 @@ export default function App() {
       {/* Sidebar */}
       <div
         style={{
-          width: 290,
+          width: sidebarCollapsed ? 64 : 290,
           flexShrink: 0,
           background: SLATE.surface,
           borderRight: `1px solid ${SLATE.border}`,
@@ -1257,34 +1258,62 @@ export default function App() {
           flexDirection: 'column',
           position: 'relative',
           zIndex: 2,
+          overflow: 'hidden',
+          transition: 'width 0.25s ease',
         }}
       >
         <div
           style={{
-            padding: '14px 14px 12px',
+            padding: sidebarCollapsed ? '14px 8px 12px' : '14px 14px 12px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             borderBottom: `1px solid ${SLATE.border}`,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: sidebarCollapsed ? 0 : 10 }}>
             <InvertelinSmall size={20} />
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: AMBER[400],
-                letterSpacing: '0.02em',
-              }}
-            >
-              hermelinChat
-            </span>
+            {!sidebarCollapsed && (
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: AMBER[400],
+                  letterSpacing: '0.02em',
+                }}
+              >
+                hermelinChat
+              </span>
+            )}
           </div>
-          <div style={{ fontSize: 11, color: SLATE.muted }}>{locked ? 'locked' : 'sessions'}</div>
+
+          <div
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 6,
+              border: `1px solid ${SLATE.border}`,
+              background: SLATE.elevated,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              userSelect: 'none',
+              color: AMBER[400],
+              fontSize: 16,
+              lineHeight: '16px',
+              opacity: 0.9,
+            }}
+          >
+            {sidebarCollapsed ? '▸' : '◂'}
+          </div>
         </div>
 
-        <div style={{ padding: '10px 10px 6px' }}>
+        {!sidebarCollapsed && (
+          <>
+            <div style={{ padding: '10px 10px 6px' }}>
           <div
             style={{
               display: 'flex',
@@ -1511,6 +1540,8 @@ export default function App() {
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
 
       {/* Main */}
