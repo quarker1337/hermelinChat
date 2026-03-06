@@ -290,6 +290,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         websocket: WebSocket,
         resume: Optional[str] = None,
         cont: bool = Query(False, alias="continue"),
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
         cols: int = 120,
         rows: int = 30,
     ):
@@ -311,10 +313,62 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 return
 
         argv = shlex.split(config.hermes_cmd)
+
+        # WS query params can override model/provider for NEW sessions.
+        # Hermes only accepts these flags on the `chat` subcommand, so we try to
+        # ensure we end up running: hermes chat ...
+        is_chat = len(argv) >= 2 and argv[1] == "chat"
+
+        try:
+            is_hermes = bool(argv) and Path(argv[0]).name == "hermes"
+        except Exception:
+            is_hermes = False
+
+        if is_hermes and (model or provider) and not is_chat:
+            hermes_subcommands = {
+                "chat",
+                "model",
+                "gateway",
+                "setup",
+                "whatsapp",
+                "login",
+                "logout",
+                "status",
+                "cron",
+                "doctor",
+                "config",
+                "pairing",
+                "skills",
+                "tools",
+                "sessions",
+                "version",
+                "update",
+                "uninstall",
+            }
+
+            if len(argv) == 1:
+                argv.append("chat")
+            elif len(argv) >= 2 and (argv[1].startswith("-") or argv[1] not in hermes_subcommands):
+                argv.insert(1, "chat")
+
+        is_chat = len(argv) >= 2 and argv[1] == "chat"
+
         if resume:
             argv += ["--resume", resume]
         elif cont:
             argv += ["--continue"]
+
+        if is_chat:
+            m = (model or "").strip()
+            p = (provider or "").strip()
+
+            if p and p not in {"auto", "openrouter", "nous", "openai-codex"}:
+                p = ""
+
+            if p:
+                argv += ["--provider", p]
+            if m:
+                argv += ["--model", m]
 
         env = os.environ.copy()
         env.setdefault("TERM", "xterm-256color")

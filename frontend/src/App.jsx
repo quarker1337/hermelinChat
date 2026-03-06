@@ -632,17 +632,73 @@ const PeekDrawer = ({ loading, error, context, hit, onClose, onOpenSession }) =>
   )
 }
 
-const SettingsPanel = ({ open, onClose }) => {
+const CollapsiblePanel = ({ title, defaultOpen = false, dense = false, children }) => {
+  const [open, setOpen] = useState(defaultOpen)
+  const headerPad = dense ? '8px 10px' : '10px 12px'
+  const bodyPad = dense ? '8px 10px 10px 22px' : '10px 12px 12px 22px'
+  const fs = dense ? 11 : 12
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${SLATE.border}`,
+        borderRadius: 8,
+        overflow: 'hidden',
+        background: SLATE.surface,
+      }}
+    >
+      <div
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          padding: headerPad,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          cursor: 'pointer',
+          userSelect: 'none',
+          color: SLATE.textBright,
+          fontSize: fs,
+          fontWeight: 600,
+          background: open ? SLATE.elevated : 'transparent',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = SLATE.elevated
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = open ? SLATE.elevated : 'transparent'
+        }}
+      >
+        <span style={{ color: open ? AMBER[400] : SLATE.muted }}>{open ? '▾' : '▸'}</span>
+        <span style={{ flex: 1 }}>{title}</span>
+      </div>
+
+      {open && <div style={{ padding: bodyPad }}>{children}</div>}
+    </div>
+  )
+}
+
+const SettingsPanel = ({
+  onClose,
+  locked = false,
+  defaultModel,
+  activeModel,
+  spawnModel,
+  setSpawnModel,
+  spawnProvider,
+  setSpawnProvider,
+  onStartNewSession,
+}) => {
+  const [customModel, setCustomModel] = useState(() => spawnModel || '')
+
   useEffect(() => {
-    if (!open) return
     const onKey = (e) => {
       if (e.key === 'Escape') onClose?.()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [onClose])
 
-  if (!open) return null
+  const nextModel = spawnModel ? spawnModel : defaultModel || '—'
 
   return (
     <div
@@ -662,7 +718,7 @@ const SettingsPanel = ({ open, onClose }) => {
           top: 0,
           right: 0,
           bottom: 0,
-          width: 360,
+          width: 380,
           borderLeft: `1px solid ${SLATE.border}`,
           background: `${SLATE.surface}f8`,
           padding: 16,
@@ -685,11 +741,213 @@ const SettingsPanel = ({ open, onClose }) => {
           </div>
         </div>
 
-        <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45 }}>
-          Settings UI is not wired yet. This panel is a placeholder for future options.
-        </div>
+        <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <CollapsiblePanel title="Model" defaultOpen>
+            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
+              Choose what model Hermes should use for <span style={{ color: AMBER[400] }}>new sessions</span>.{' '}
+              Changes do not affect sessions you resume.
+            </div>
 
-        <div style={{ flex: 1 }} />
+            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ color: SLATE.muted }}>hermes default:</div>
+                <div style={{ color: AMBER[500] }}>{defaultModel || '—'}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <div style={{ color: SLATE.muted }}>active:</div>
+                <div style={{ color: AMBER[500] }}>{activeModel || '—'}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <div style={{ color: SLATE.muted }}>next:</div>
+                <div style={{ color: AMBER[500] }}>{nextModel}</div>
+                <div style={{ color: SLATE.muted }}>{spawnModel ? '(override)' : '(default)'}</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <CollapsiblePanel title="Presets" defaultOpen dense>
+                {[
+                  {
+                    label: 'use hermes default',
+                    value: '',
+                    hint: defaultModel || '—',
+                  },
+                  ...(activeModel
+                    ? [
+                        {
+                          label: 'use active session model',
+                          value: activeModel,
+                          hint: activeModel,
+                        },
+                      ]
+                    : []),
+                  { label: 'openai/gpt-5.2', value: 'openai/gpt-5.2', hint: 'OpenAI (via your configured provider)' },
+                  {
+                    label: 'anthropic/claude-sonnet-4',
+                    value: 'anthropic/claude-sonnet-4',
+                    hint: 'Anthropic Claude Sonnet 4',
+                  },
+                  {
+                    label: 'google/gemini-2.5-pro',
+                    value: 'google/gemini-2.5-pro',
+                    hint: 'Google Gemini 2.5 Pro',
+                  },
+                  {
+                    label: 'google/gemini-3-flash-preview',
+                    value: 'google/gemini-3-flash-preview',
+                    hint: 'Fast / cheap-ish',
+                  },
+                ].map((p) => {
+                  const active = (spawnModel || '') === (p.value || '')
+                  return (
+                    <div
+                      key={`${p.label}:${p.value}`}
+                      onClick={() => {
+                        setSpawnModel?.(p.value)
+                        setCustomModel(p.value)
+                      }}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: `1px solid ${active ? AMBER[700] : SLATE.border}`,
+                        background: active ? `${AMBER[900]}55` : SLATE.elevated,
+                        cursor: 'pointer',
+                        userSelect: 'none',
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: active ? AMBER[400] : SLATE.textBright, fontWeight: 600 }}>
+                        {p.label}
+                      </div>
+                      <div style={{ fontSize: 10, color: SLATE.muted, marginTop: 2 }}>{p.hint}</div>
+                    </div>
+                  )
+                })}
+              </CollapsiblePanel>
+
+              <CollapsiblePanel title="Custom" dense>
+                <div style={{ fontSize: 11, color: SLATE.muted, marginBottom: 8 }}>
+                  Enter any Hermes model string (example:{' '}
+                  <span style={{ color: AMBER[500] }}>anthropic/claude-sonnet-4</span>).
+                </div>
+
+                <input
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const v = (customModel || '').trim()
+                      setCustomModel(v)
+                      setSpawnModel?.(v)
+                    }
+                  }}
+                  placeholder={defaultModel || 'openai/gpt-5.2'}
+                  style={{
+                    width: '100%',
+                    background: SLATE.elevated,
+                    border: `1px solid ${SLATE.border}`,
+                    color: SLATE.textBright,
+                    padding: '10px 10px',
+                    fontFamily: "'JetBrains Mono',monospace",
+                    fontSize: 12,
+                    outline: 'none',
+                    borderRadius: 8,
+                  }}
+                />
+
+                <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                  <div
+                    onClick={() => {
+                      const v = (customModel || '').trim()
+                      setCustomModel(v)
+                      setSpawnModel?.(v)
+                    }}
+                    style={{
+                      padding: '9px 12px',
+                      border: `1px solid ${AMBER[700]}`,
+                      background: `${AMBER[900]}55`,
+                      color: AMBER[400],
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      userSelect: 'none',
+                      borderRadius: 8,
+                    }}
+                  >
+                    apply
+                  </div>
+                  <div
+                    onClick={() => {
+                      setCustomModel('')
+                      setSpawnModel?.('')
+                    }}
+                    style={{
+                      padding: '9px 12px',
+                      border: `1px solid ${SLATE.border}`,
+                      background: SLATE.elevated,
+                      color: SLATE.muted,
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      userSelect: 'none',
+                      borderRadius: 8,
+                    }}
+                  >
+                    reset
+                  </div>
+                </div>
+              </CollapsiblePanel>
+
+              <CollapsiblePanel title="Provider" dense>
+                <div style={{ fontSize: 11, color: SLATE.muted, marginBottom: 8 }}>
+                  Usually leave this on <span style={{ color: AMBER[500] }}>auto</span>. Only affects new sessions.
+                </div>
+                <select
+                  value={spawnProvider || 'auto'}
+                  onChange={(e) => setSpawnProvider?.(e.target.value)}
+                  style={{
+                    width: '100%',
+                    background: SLATE.elevated,
+                    border: `1px solid ${SLATE.border}`,
+                    color: SLATE.textBright,
+                    padding: '10px 10px',
+                    fontFamily: "'JetBrains Mono',monospace",
+                    fontSize: 12,
+                    outline: 'none',
+                    borderRadius: 8,
+                  }}
+                >
+                  {['auto', 'openrouter', 'nous', 'openai-codex'].map((p) => (
+                    <option key={p} value={p} style={{ background: SLATE.surface, color: SLATE.textBright }}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </CollapsiblePanel>
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div
+                  onClick={() => {
+                    if (locked) return
+                    onStartNewSession?.()
+                  }}
+                  title={locked ? 'Login required' : 'Start a new session using these settings'}
+                  style={{
+                    padding: '9px 12px',
+                    border: `1px solid ${AMBER[700]}`,
+                    background: `${AMBER[900]}55`,
+                    color: AMBER[400],
+                    cursor: locked ? 'default' : 'pointer',
+                    fontSize: 12,
+                    userSelect: 'none',
+                    borderRadius: 8,
+                    opacity: locked ? 0.4 : 1,
+                  }}
+                >
+                  new session
+                </div>
+                <div style={{ flex: 1 }} />
+              </div>
+            </div>
+          </CollapsiblePanel>
+        </div>
 
         <div style={{ fontSize: 10, color: SLATE.muted }}>
           tip: press <span style={{ color: AMBER[400] }}>Esc</span> to close
@@ -699,27 +957,53 @@ const SettingsPanel = ({ open, onClose }) => {
   )
 }
 
-function buildWsUrl(resumeId) {
+
+function buildWsUrl(resumeId, { model, provider } = {}) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const params = new URLSearchParams()
-  if (resumeId) params.set('resume', resumeId)
+
+  if (resumeId) {
+    params.set('resume', resumeId)
+  } else {
+    if (model) params.set('model', model)
+    if (provider && provider !== 'auto') params.set('provider', provider)
+  }
+
   const q = params.toString()
   return `${proto}://${window.location.host}/ws/pty${q ? `?${q}` : ''}`
 }
 
+// eslint-disable-next-line no-control-regex
+const ANSI_CSI_RE = new RegExp('\\u001b\\[[0-9;]*[a-zA-Z]', 'g')
+// eslint-disable-next-line no-control-regex
+const ANSI_OSC_RE = new RegExp('\\u001b\\][^\\u0007]*(?:\\u0007|\\u001b\\\\)', 'g')
+
 function stripAnsi(s) {
   // Best-effort ANSI escape stripping for parsing session IDs from terminal output.
   // (We still render the raw bytes to xterm; this is only for metadata detection.)
-  return (s || '')
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
+  return (s || '').replace(ANSI_CSI_RE, '').replace(ANSI_OSC_RE, '')
 }
 
-function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId }) {
+function TerminalPane({ resumeId, spawnNonce, model, provider, onConnectionChange, onSessionId }) {
   const containerRef = useRef(null)
   const termRef = useRef(null)
   const fitRef = useRef(null)
   const wsRef = useRef(null)
+
+  const onSessionIdRef = useRef(onSessionId)
+  useEffect(() => {
+    onSessionIdRef.current = onSessionId
+  }, [onSessionId])
+
+  const modelRef = useRef(model)
+  useEffect(() => {
+    modelRef.current = model
+  }, [model])
+
+  const providerRef = useRef(provider)
+  useEffect(() => {
+    providerRef.current = provider
+  }, [provider])
 
   useEffect(() => {
     const container = containerRef.current
@@ -781,7 +1065,7 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
     term.reset()
     term.clear()
 
-    const wsUrl = buildWsUrl(resumeId)
+    const wsUrl = buildWsUrl(resumeId, { model: modelRef.current, provider: providerRef.current })
     const ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
@@ -795,14 +1079,15 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
     let lastDetectedSid = null
 
     const maybeDetectSessionId = (text) => {
-      if (!text || !onSessionId) return
+      const cb = onSessionIdRef.current
+      if (!text || !cb) return
       detectTail = (detectTail + text).slice(-6000)
       const clean = stripAnsi(detectTail)
       const m = clean.match(/Session:\s*([0-9]{8}_[0-9]{6}_[0-9a-f]{6})/i)
       const sid = m?.[1] || null
       if (sid && sid !== lastDetectedSid) {
         lastDetectedSid = sid
-        onSessionId(sid)
+        cb(sid)
       }
     }
 
@@ -901,6 +1186,42 @@ export default function App() {
   const [sessions, setSessions] = useState([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // Model/provider override applied when spawning NEW sessions.
+  // (Resumed sessions keep their original model.)
+  const [spawnModel, setSpawnModel] = useState(() => {
+    try {
+      return localStorage.getItem('hermilinChat.spawnModel') || ''
+    } catch {
+      return ''
+    }
+  })
+
+  const [spawnProvider, setSpawnProvider] = useState(() => {
+    try {
+      return localStorage.getItem('hermilinChat.spawnProvider') || 'auto'
+    } catch {
+      return 'auto'
+    }
+  })
+
+  useEffect(() => {
+    try {
+      if (!spawnModel) localStorage.removeItem('hermilinChat.spawnModel')
+      else localStorage.setItem('hermilinChat.spawnModel', spawnModel)
+    } catch {
+      // ignore
+    }
+  }, [spawnModel])
+
+  useEffect(() => {
+    try {
+      if (!spawnProvider || spawnProvider === 'auto') localStorage.removeItem('hermilinChat.spawnProvider')
+      else localStorage.setItem('hermilinChat.spawnProvider', spawnProvider)
+    } catch {
+      // ignore
+    }
+  }, [spawnProvider])
 
   // Terminal connection mode:
   // - ptyResumeId=null means "start a fresh Hermes session"
@@ -1377,7 +1698,8 @@ export default function App() {
     return sessions.find((s) => s.id === activeSessionId) || null
   }, [sessions, activeSessionId])
 
-  const currentModel = activeSession?.model || runtimeInfo.default_model || null
+  const currentModel =
+    activeSession?.model || (ptyResumeId === null && spawnModel ? spawnModel : runtimeInfo.default_model) || null
   const currentCwd = runtimeInfo.spawn_cwd || null
 
   const locked = !auth.loading && auth.enabled && !auth.authenticated
@@ -1936,6 +2258,8 @@ export default function App() {
                 <TerminalPane
                   resumeId={ptyResumeId}
                   spawnNonce={ptySpawnNonce}
+                  model={spawnModel}
+                  provider={spawnProvider}
                   onConnectionChange={handleConnectionChange}
                   onSessionId={handleDetectedSessionId}
                 />
@@ -2073,7 +2397,22 @@ export default function App() {
         )}
       </div>
 
-      <SettingsPanel open={settingsOpen} onClose={closeSettings} />
+      {settingsOpen && (
+        <SettingsPanel
+          onClose={closeSettings}
+          locked={locked}
+          defaultModel={runtimeInfo.default_model}
+          activeModel={activeSession?.model || null}
+          spawnModel={spawnModel}
+          setSpawnModel={setSpawnModel}
+          spawnProvider={spawnProvider}
+          setSpawnProvider={setSpawnProvider}
+          onStartNewSession={() => {
+            startNewSession()
+            closeSettings()
+          }}
+        />
+      )}
     </div>
   )
 }
