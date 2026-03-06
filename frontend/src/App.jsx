@@ -116,6 +116,22 @@ const SettingsIcon = ({ size = 16 }) => (
   </svg>
 )
 
+const PlusIcon = ({ size = 16 }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+)
+
 // ─── PARTICLE FIELD ────────────────────────────────────────────────
 const ParticleField = () => {
   const canvasRef = useRef(null)
@@ -1101,6 +1117,18 @@ export default function App() {
     setPeekHit(null)
   }
 
+  const startNewSession = () => {
+    if (!auth.authenticated) return
+    setSearchQuery('')
+    ptyResumeIdRef.current = null
+    activeSessionIdRef.current = null
+    setPtyResumeId(null)
+    setActiveSessionId(null)
+    setPtySpawnNonce((n) => n + 1)
+    setNewSessionStartedAt(Date.now() / 1000)
+    closePeek()
+  }
+
   useEffect(() => {
     if (!auth.authenticated) {
       closePeek()
@@ -1473,6 +1501,82 @@ export default function App() {
           )}
         </div>
 
+        {sidebarCollapsed && (
+          <div
+            style={{
+              padding: '12px 0',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            <div
+              onClick={startNewSession}
+              title={auth.authenticated ? 'New session' : 'Login required'}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: auth.authenticated ? 'pointer' : 'default',
+                color: SLATE.muted,
+                background: 'transparent',
+                border: '1px solid transparent',
+                opacity: auth.authenticated ? 1 : 0.35,
+                transition: 'all 0.15s ease',
+                userSelect: 'none',
+              }}
+              onMouseEnter={(e) => {
+                if (!auth.authenticated) return
+                e.currentTarget.style.background = SLATE.elevated
+                e.currentTarget.style.borderColor = SLATE.border
+                e.currentTarget.style.color = AMBER[400]
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.borderColor = 'transparent'
+                e.currentTarget.style.color = SLATE.muted
+              }}
+            >
+              <PlusIcon size={18} />
+            </div>
+
+            <div
+              onClick={() => setSettingsOpen(true)}
+              title="Settings"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: SLATE.muted,
+                background: 'transparent',
+                border: '1px solid transparent',
+                transition: 'all 0.15s ease',
+                userSelect: 'none',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = SLATE.elevated
+                e.currentTarget.style.borderColor = SLATE.border
+                e.currentTarget.style.color = AMBER[400]
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.borderColor = 'transparent'
+                e.currentTarget.style.color = SLATE.muted
+              }}
+            >
+              <SettingsIcon size={18} />
+            </div>
+          </div>
+        )}
+
         {!sidebarCollapsed && (
           <>
             <div style={{ padding: '10px 10px 6px' }}>
@@ -1537,19 +1641,14 @@ export default function App() {
             Active
           </div>
           <SidebarItem
-            label="New session"
+            label={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <PlusIcon size={14} />
+                <span>New session</span>
+              </span>
+            }
             active={activeSessionId === null}
-            onClick={() => {
-              if (!auth.authenticated) return
-              setSearchQuery('')
-              ptyResumeIdRef.current = null
-              activeSessionIdRef.current = null
-              setPtyResumeId(null)
-              setActiveSessionId(null)
-              setPtySpawnNonce((n) => n + 1)
-              setNewSessionStartedAt(Date.now() / 1000)
-              closePeek()
-            }}
+            onClick={startNewSession}
           />
 
           {auth.authenticated &&
