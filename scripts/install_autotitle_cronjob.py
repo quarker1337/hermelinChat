@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 JOB_NAME = "hermilin-autotitle"
@@ -203,7 +203,8 @@ def _ensure_job(data: dict, *, minutes: int) -> str:
     }
 
     now = datetime.now()
-    next_run_at = (now + timedelta(minutes=int(minutes))).isoformat()
+    # Make the first run due immediately (next cron tick will execute it).
+    next_run_at = now.isoformat()
 
     for job in jobs:
         if job.get("name") == JOB_NAME:
