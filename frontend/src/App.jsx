@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -532,7 +532,15 @@ function buildWsUrl(resumeId) {
   return `${proto}://${window.location.host}/ws/pty${q ? `?${q}` : ''}`
 }
 
-function TerminalPane({ resumeId, onConnectionChange }) {
+function stripAnsi(s) {
+  // Best-effort ANSI escape stripping for parsing session IDs from terminal output.
+  // (We still render the raw bytes to xterm; this is only for metadata detection.)
+  return (s || '')
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
+}
+
+function TerminalPane({ resumeId, onConnectionChange, onSessionId }) {
   const containerRef = useRef(null)
   const termRef = useRef(null)
   const fitRef = useRef(null)
@@ -603,6 +611,24 @@ function TerminalPane({ resumeId, onConnectionChange }) {
 
     const encoder = new TextEncoder()
 
+    // Try to detect the Hermes session ID from the terminal output so the UI can
+    // auto-select the correct session in the sidebar/topbar.
+    const decoder = new TextDecoder('utf-8')
+    let detectTail = ''
+    let lastDetectedSid = null
+
+    const maybeDetectSessionId = (text) => {
+      if (!text || !onSessionId) return
+      detectTail = (detectTail + text).slice(-6000)
+      const clean = stripAnsi(detectTail)
+      const m = clean.match(/Session:\s*([0-9]{8}_[0-9]{6}_[0-9a-f]{6})/i)
+      const sid = m?.[1] || null
+      if (sid && sid !== lastDetectedSid) {
+        lastDetectedSid = sid
+        onSessionId(sid)
+      }
+    }
+
     const sendResize = () => {
       try {
         fit.fit()
@@ -639,11 +665,18 @@ function TerminalPane({ resumeId, onConnectionChange }) {
 
     ws.onmessage = (ev) => {
       if (ev.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(ev.data))
+        const u8 = new Uint8Array(ev.data)
+        term.write(u8)
+        try {
+          maybeDetectSessionId(decoder.decode(u8, { stream: true }))
+        } catch {
+          // ignore
+        }
         return
       }
       if (typeof ev.data === 'string') {
         term.write(ev.data)
+        maybeDetectSessionId(ev.data)
       }
     }
 
@@ -681,8 +714,44 @@ function TerminalPane({ resumeId, onConnectionChange }) {
 
 export default function App() {
   const [sessions, setSessions] = useState([])
-  const [activeResumeId, setActiveResumeId] = useState(null)
+
+  // Terminal connection mode:
+  // - ptyResumeId=null means "start a fresh Hermes session"
+  // - ptyResumeId=<id> means "spawn hermes --resume <id>"
+  const [ptyResumeId, setPtyResumeId] = useState(null)
+
+  // What session the UI considers "active" (sidebar highlight + topbar label).
+  // For new sessions, we discover this from terminal output / DB after spawn.
+  const [activeSessionId, setActiveSessionId] = useState(null)
+
   const [connected, setConnected] = useState(false)
+  const [newSessionStartedAt, setNewSessionStartedAt] = useState(null)
+
+  // Keep some state in refs so callbacks passed to TerminalPane can stay stable
+  // (and not cause a WS reconnect on every render).
+  const ptyResumeIdRef = useRef(ptyResumeId)
+  useEffect(() => {
+    ptyResumeIdRef.current = ptyResumeId
+  }, [ptyResumeId])
+
+  const activeSessionIdRef = useRef(activeSessionId)
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId
+  }, [activeSessionId])
+
+  const handleConnectionChange = useCallback((isUp) => {
+    setConnected(isUp)
+    if (isUp && ptyResumeIdRef.current === null) {
+      setNewSessionStartedAt(Date.now() / 1000)
+    }
+  }, [])
+
+  const handleDetectedSessionId = useCallback((sid) => {
+    if (!sid) return
+    if (ptyResumeIdRef.current !== null) return
+    if (activeSessionIdRef.current) return
+    setActiveSessionId(sid)
+  }, [])
 
   const [auth, setAuth] = useState({ loading: true, enabled: false, authenticated: false })
   const [password, setPassword] = useState('')
@@ -925,7 +994,9 @@ export default function App() {
       setConnected(false)
       setSearchQuery('')
       setSearchResults([])
-      setActiveResumeId(null)
+      setPtyResumeId(null)
+      setActiveSessionId(null)
+      setNewSessionStartedAt(null)
       closePeek()
       await refreshAuth()
     }
@@ -963,6 +1034,113 @@ export default function App() {
     }
   }, [auth.authenticated])
 
+  // Keep the active session in sync when explicitly resuming a session.
+  useEffect(() => {
+    if (ptyResumeId) setActiveSessionId(ptyResumeId)
+  }, [ptyResumeId])
+
+  // Once we know which session we're in, we no longer need the "new session started" timestamp.
+  useEffect(() => {
+    if (activeSessionId) setNewSessionStartedAt(null)
+  }, [activeSessionId])
+
+  const activeSessionMissing = useMemo(() => {
+    if (!activeSessionId) return false
+    return !sessions.some((s) => s.id === activeSessionId)
+  }, [sessions, activeSessionId])
+
+  // If we have an activeSessionId but it hasn't shown up in the sidebar yet,
+  // poll quickly for a short time (Hermes may only write state.db after the first message).
+  useEffect(() => {
+    if (!auth.authenticated) return
+    if (!activeSessionId) return
+    if (!activeSessionMissing) return
+
+    let cancelled = false
+    let tries = 0
+    let timer = null
+
+    const tick = async () => {
+      tries += 1
+      try {
+        const r = await fetch('/api/sessions?limit=50')
+        if (r.status === 401) {
+          if (!cancelled) setAuth((a) => ({ ...a, authenticated: false }))
+          if (timer) clearInterval(timer)
+          return
+        }
+        const data = await r.json()
+        if (!cancelled) setSessions(data.sessions || [])
+        const hasIt = (data.sessions || []).some((s) => s.id === activeSessionId)
+        if (hasIt || tries >= 15) {
+          if (timer) clearInterval(timer)
+        }
+      } catch {
+        if (tries >= 15) {
+          if (timer) clearInterval(timer)
+        }
+      }
+    }
+
+    tick()
+    timer = setInterval(tick, 1000)
+
+    return () => {
+      cancelled = true
+      if (timer) clearInterval(timer)
+    }
+  }, [auth.authenticated, activeSessionId, activeSessionMissing])
+
+  // Fallback: if we started a new PTY session and haven't detected a session ID yet,
+  // poll the DB for a session that started around that time.
+  useEffect(() => {
+    if (!auth.authenticated) return
+    if (!connected) return
+    if (ptyResumeId !== null) return
+    if (activeSessionId !== null) return
+    if (!newSessionStartedAt) return
+
+    let cancelled = false
+    let tries = 0
+    let timer = null
+
+    const tick = async () => {
+      tries += 1
+      try {
+        const r = await fetch('/api/sessions?limit=50')
+        if (r.status === 401) {
+          if (!cancelled) setAuth((a) => ({ ...a, authenticated: false }))
+          if (timer) clearInterval(timer)
+          return
+        }
+        const data = await r.json()
+        const list = data.sessions || []
+        if (!cancelled) setSessions(list)
+
+        const candidate = list.find((s) => (s.started_at || 0) >= newSessionStartedAt - 10)
+        if (candidate?.id) {
+          setActiveSessionId(candidate.id)
+          if (timer) clearInterval(timer)
+          return
+        }
+      } catch {
+        // ignore
+      }
+
+      if (tries >= 20) {
+        if (timer) clearInterval(timer)
+      }
+    }
+
+    tick()
+    timer = setInterval(tick, 1000)
+
+    return () => {
+      cancelled = true
+      if (timer) clearInterval(timer)
+    }
+  }, [auth.authenticated, connected, ptyResumeId, activeSessionId, newSessionStartedAt])
+
   const grouped = useMemo(() => {
     const out = { Today: [], Yesterday: [], Earlier: [] }
     const now = new Date()
@@ -979,9 +1157,9 @@ export default function App() {
   }, [sessions])
 
   const activeSession = useMemo(() => {
-    if (!activeResumeId) return null
-    return sessions.find((s) => s.id === activeResumeId) || null
-  }, [sessions, activeResumeId])
+    if (!activeSessionId) return null
+    return sessions.find((s) => s.id === activeSessionId) || null
+  }, [sessions, activeSessionId])
 
   const currentModel = activeSession?.model || runtimeInfo.default_model || null
   const currentCwd = runtimeInfo.spawn_cwd || null
@@ -1122,11 +1300,13 @@ export default function App() {
           </div>
           <SidebarItem
             label="New session"
-            active={activeResumeId === null}
+            active={activeSessionId === null}
             onClick={() => {
               if (!auth.authenticated) return
               setSearchQuery('')
-              setActiveResumeId(null)
+              setPtyResumeId(null)
+              setActiveSessionId(null)
+              setNewSessionStartedAt(Date.now() / 1000)
               closePeek()
             }}
           />
@@ -1172,7 +1352,7 @@ export default function App() {
                           </span>
                         }
                         right={isoToTimeLabel(top?.timestamp_iso)}
-                        active={activeResumeId === g.session_id || peekHit?.session_id === g.session_id}
+                        active={activeSessionId === g.session_id || peekHit?.session_id === g.session_id}
                         onClick={() =>
                           setExpandedSearchSessions((prev) => ({
                             ...prev,
@@ -1221,10 +1401,16 @@ export default function App() {
                         title={s.title || s.id}
                         preview={s.preview || s.model}
                         right={isoToTimeLabel(s.started_at_iso)}
-                        active={activeResumeId === s.id}
+                        active={activeSessionId === s.id}
                         onClick={() => {
                           setSearchQuery('')
-                          setActiveResumeId(s.id)
+                          if (ptyResumeId === null && activeSessionId === s.id) {
+                            closePeek()
+                            return
+                          }
+                          setPtyResumeId(s.id)
+                          setActiveSessionId(s.id)
+                          setNewSessionStartedAt(null)
                           closePeek()
                         }}
                       />
@@ -1299,7 +1485,13 @@ export default function App() {
           <span style={{ fontSize: 12, fontWeight: 600, color: AMBER[400] }}>hermes</span>
           <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
           <span style={{ fontSize: 11, color: SLATE.muted }}>
-            {auth.loading ? 'auth…' : locked ? 'login required' : activeResumeId ? `resume ${activeResumeId}` : 'new session'}
+            {auth.loading
+              ? 'auth…'
+              : locked
+                ? 'login required'
+                : activeSessionId
+                  ? activeSession?.title || `session ${activeSessionId}`
+                  : 'new session'}
           </span>
 
           <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
@@ -1342,7 +1534,11 @@ export default function App() {
           <div style={{ flex: 1, position: 'relative' }}>
             {auth.authenticated ? (
               <>
-                <TerminalPane resumeId={activeResumeId} onConnectionChange={setConnected} />
+                <TerminalPane
+                  resumeId={ptyResumeId}
+                  onConnectionChange={handleConnectionChange}
+                  onSessionId={handleDetectedSessionId}
+                />
                 <AlignmentEasterEgg />
               </>
             ) : (
@@ -1371,7 +1567,14 @@ export default function App() {
               hit={peekHit}
               onClose={closePeek}
               onOpenSession={(sid) => {
-                setActiveResumeId(sid)
+                if (!sid) return
+                if (ptyResumeId === null && activeSessionId === sid) {
+                  closePeek()
+                  return
+                }
+                setPtyResumeId(sid)
+                setActiveSessionId(sid)
+                setNewSessionStartedAt(null)
                 closePeek()
               }}
             />
