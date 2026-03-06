@@ -48,6 +48,7 @@ Config
 Env vars:
 - HERMES_HOME: path to Hermes home (default: ~/.hermes)
 - HERMELIN_HERMES_CMD: hermes executable to spawn (default: hermes)
+- HERMELIN_SPAWN_CWD: working directory to start hermes in (default: current working dir)
 - HERMELIN_HOST / HERMELIN_PORT: server bind
 - HERMELIN_ALLOWED_IPS: comma-separated allowlist of IPs/CIDRs (default: 127.0.0.1,::1)
 - HERMELIN_PASSWORD: if set, enables login (password -> signed HttpOnly cookie)

@@ -23,6 +23,10 @@ class HermelinConfig:
     # Hermes Agent home (contains state.db, config.yaml, etc.)
     hermes_home: Path = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
 
+    # Working directory to run the hermes CLI in.
+    # Defaults to the directory hermelinChat is started from.
+    spawn_cwd: Path = Path(os.getenv("HERMELIN_SPAWN_CWD", os.getcwd())).expanduser()
+
     # Security:
     # Comma-separated allowlist of IPs/CIDRs that can access HTTP + WebSocket.
     # Default is localhost-only.

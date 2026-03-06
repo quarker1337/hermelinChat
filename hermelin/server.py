@@ -89,6 +89,19 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         return await call_next(request)
 
+    def _read_default_model() -> Optional[str]:
+        cfg_path = config.hermes_home / "config.yaml"
+        try:
+            text = cfg_path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("model:"):
+                return s.split(":", 1)[1].strip() or None
+        return None
+
     @app.get("/api/health")
     async def health():
         return {
@@ -102,6 +115,15 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "cookie_name": cookie_name,
             "session_ttl_seconds": ttl_seconds,
             "cookie_secure": cookie_secure,
+        }
+
+    @app.get("/api/info")
+    async def api_info():
+        return {
+            "default_model": _read_default_model(),
+            "spawn_cwd": str(config.spawn_cwd),
+            "hermes_cmd": config.hermes_cmd,
+            "hermes_home": str(config.hermes_home),
         }
 
     # -----------------------------------------------------------------
@@ -219,7 +241,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("HERMES_HOME", str(config.hermes_home))
 
-        p = PtyProcess.spawn(argv, cwd=Path.home(), env=env, cols=cols, rows=rows)
+        p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=cols, rows=rows)
 
         async def pump_pty_to_ws() -> None:
             try:

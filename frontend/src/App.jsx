@@ -699,6 +699,8 @@ export default function App() {
   const [peekContext, setPeekContext] = useState(null)
   const [peekHit, setPeekHit] = useState(null)
 
+  const [runtimeInfo, setRuntimeInfo] = useState({ loading: true, default_model: null, spawn_cwd: null })
+
   const refreshAuth = async () => {
     try {
       const r = await fetch('/api/auth/me')
@@ -715,7 +717,46 @@ export default function App() {
 
   useEffect(() => {
     refreshAuth()
+    try {
+      document.title = 'hermilinChat'
+    } catch {
+      // ignore
+    }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const load = async () => {
+      if (!auth.authenticated) {
+        if (!cancelled) setRuntimeInfo({ loading: false, default_model: null, spawn_cwd: null })
+        return
+      }
+
+      try {
+        const r = await fetch('/api/info')
+        if (r.status === 401) {
+          if (!cancelled) setAuth((a) => ({ ...a, authenticated: false }))
+          return
+        }
+        const data = await r.json()
+        if (!cancelled) {
+          setRuntimeInfo({
+            loading: false,
+            default_model: data.default_model || null,
+            spawn_cwd: data.spawn_cwd || null,
+          })
+        }
+      } catch {
+        if (!cancelled) setRuntimeInfo({ loading: false, default_model: null, spawn_cwd: null })
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [auth.authenticated])
 
   useEffect(() => {
     let cancelled = false
@@ -936,6 +977,14 @@ export default function App() {
     }
     return out
   }, [sessions])
+
+  const activeSession = useMemo(() => {
+    if (!activeResumeId) return null
+    return sessions.find((s) => s.id === activeResumeId) || null
+  }, [sessions, activeResumeId])
+
+  const currentModel = activeSession?.model || runtimeInfo.default_model || null
+  const currentCwd = runtimeInfo.spawn_cwd || null
 
   const locked = !auth.loading && auth.enabled && !auth.authenticated
 
@@ -1252,6 +1301,29 @@ export default function App() {
           <span style={{ fontSize: 11, color: SLATE.muted }}>
             {auth.loading ? 'auth…' : locked ? 'login required' : activeResumeId ? `resume ${activeResumeId}` : 'new session'}
           </span>
+
+          <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
+          <span style={{ fontSize: 11, color: SLATE.muted }}>model:</span>
+          <span style={{ fontSize: 11, color: AMBER[500] }}>
+            {runtimeInfo.loading ? '…' : currentModel || '—'}
+          </span>
+
+          <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
+          <span style={{ fontSize: 11, color: SLATE.muted }}>cwd:</span>
+          <span
+            style={{
+              fontSize: 11,
+              color: SLATE.muted,
+              maxWidth: 520,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={currentCwd || ''}
+          >
+            {runtimeInfo.loading ? '…' : currentCwd || '—'}
+          </span>
+
           <div style={{ flex: 1 }} />
           <span
             style={{
