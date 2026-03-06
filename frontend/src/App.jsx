@@ -291,7 +291,7 @@ const SessionRow = ({ title, preview, right, active, onClick }) => {
           style={{
             flex: 1,
             fontSize: 12,
-            color: active ? AMBER[400] : SLATE.textBright,
+            color: active ? AMBER[400] : hovered ? SLATE.textBright : SLATE.muted,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -1485,7 +1485,6 @@ export default function App() {
                       <SessionRow
                         key={s.id}
                         title={s.title || s.id}
-                        preview={s.preview || s.model}
                         right={isoToTimeLabel(s.started_at_iso)}
                         active={activeSessionId === s.id}
                         onClick={() => {
