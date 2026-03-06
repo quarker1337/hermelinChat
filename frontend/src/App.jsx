@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
 import STOUT_MASCOT_RAW from './assets/stout-mascot.svg?raw'
+import HERMILIN_NOT_FLIPPED_RAW from './assets/hermilin-not-flipped.svg?raw'
 
 // ─── NOUS / HERMELIN PALETTE ───────────────────────────────────────
 const AMBER = {
@@ -58,6 +59,26 @@ const StoutMascot = ({ size = 18, color = AMBER[400] }) => {
         lineHeight: 0,
       }}
       dangerouslySetInnerHTML={{ __html: STOUT_MASCOT_SVG }}
+    />
+  )
+}
+
+const HERMILIN_NOT_FLIPPED_SVG = HERMILIN_NOT_FLIPPED_RAW
+  .replace('<svg ', '<svg width="100%" height="100%" style="display:block" ')
+  .replace(/fill="black"/g, 'fill="currentColor"')
+
+const HermilinNotFlipped = ({ size = 18, color = AMBER[400] }) => {
+  const w = Math.round(size * (370 / 238))
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: w,
+        height: size,
+        color,
+        lineHeight: 0,
+      }}
+      dangerouslySetInnerHTML={{ __html: HERMILIN_NOT_FLIPPED_SVG }}
     />
   )
 }
@@ -1512,7 +1533,7 @@ export default function App() {
             backdropFilter: 'blur(8px)',
           }}
         >
-          <InvertelinSmall size={18} />
+          <HermilinNotFlipped size={18} />
           <span style={{ fontSize: 12, fontWeight: 600, color: AMBER[400] }}>hermes</span>
           <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
           <span style={{ fontSize: 11, color: SLATE.muted }}>
