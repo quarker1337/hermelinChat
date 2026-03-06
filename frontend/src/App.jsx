@@ -30,36 +30,16 @@ const SLATE = {
 }
 
 // Small inline version for headers
+// Reuses the app favicon (yellow circle + hermelin face)
 const InvertelinSmall = ({ size = 22 }) => (
-  <svg viewBox="0 0 200 200" width={size} height={size} xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <mask id="ermine-mask-sm">
-        <circle cx="100" cy="100" r="96" fill="white" />
-        <ellipse cx="72" cy="42" rx="7" ry="14" fill="black" transform="rotate(-15 72 42)" />
-        <ellipse cx="92" cy="38" rx="7" ry="14" fill="black" transform="rotate(10 92 38)" />
-        <ellipse cx="82" cy="62" rx="22" ry="18" fill="black" />
-        <ellipse cx="64" cy="68" rx="10" ry="7" fill="black" />
-        <circle cx="56" cy="67" r="3.5" fill="white" />
-        <circle cx="76" cy="57" r="4.5" fill="white" />
-        <circle cx="77.5" cy="56" r="1.8" fill="black" />
-        <ellipse cx="95" cy="78" rx="14" ry="14" fill="black" />
-        <ellipse cx="115" cy="95" rx="30" ry="18" fill="black" transform="rotate(-8 115 95)" />
-        <ellipse cx="138" cy="108" rx="18" ry="20" fill="black" />
-        <rect x="88" y="98" width="7" height="26" rx="3" fill="black" transform="rotate(5 91 98)" />
-        <rect x="97" y="100" width="7" height="24" rx="3" fill="black" transform="rotate(-3 100 100)" />
-        <rect x="130" y="116" width="8" height="24" rx="3.5" fill="black" transform="rotate(8 134 116)" />
-        <rect x="140" y="114" width="8" height="26" rx="3.5" fill="black" transform="rotate(-5 144 114)" />
-        <ellipse cx="90" cy="126" rx="5" ry="3" fill="black" />
-        <ellipse cx="100" cy="125" rx="5" ry="3" fill="black" />
-        <ellipse cx="134" cy="141" rx="5.5" ry="3" fill="black" />
-        <ellipse cx="145" cy="141" rx="5.5" ry="3" fill="black" />
-        <path d="M 148 100 Q 168 80 160 58 Q 155 48 148 52" fill="black" />
-        <path d="M 148 100 Q 170 82 162 56 Q 157 46 150 50" fill="black" />
-        <circle cx="155" cy="50" r="6" fill="white" />
-      </mask>
-    </defs>
-    <circle cx="100" cy="100" r="96" fill={AMBER[400]} mask="url(#ermine-mask-sm)" />
-  </svg>
+  <img
+    src="/favicon.svg"
+    width={size}
+    height={size}
+    alt=""
+    draggable={false}
+    style={{ display: 'block' }}
+  />
 )
 
 const STOUT_MASCOT_SVG = STOUT_MASCOT_RAW
