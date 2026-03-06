@@ -1,0 +1,777 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
+
+// ─── NOUS / HERMELIN PALETTE ───────────────────────────────────────
+const AMBER = {
+  300: '#ffd480',
+  400: '#f5b731',
+  500: '#e0a020',
+  600: '#c48a18',
+  700: '#9a6c12',
+  800: '#6b4a0e',
+  900: '#3d2a08',
+}
+
+const SLATE = {
+  bg: '#08080a',
+  surface: '#0e0e12',
+  elevated: '#16161d',
+  border: '#232330',
+  muted: '#55556a',
+  text: '#b8b8cc',
+  textBright: '#e8e8f0',
+  accent: '#f5b731',
+  danger: '#e84057',
+  success: '#38c878',
+}
+
+// Small inline version for headers
+const InvertelinSmall = ({ size = 22 }) => (
+  <svg viewBox="0 0 200 200" width={size} height={size} xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <mask id="ermine-mask-sm">
+        <circle cx="100" cy="100" r="96" fill="white" />
+        <ellipse cx="72" cy="42" rx="7" ry="14" fill="black" transform="rotate(-15 72 42)" />
+        <ellipse cx="92" cy="38" rx="7" ry="14" fill="black" transform="rotate(10 92 38)" />
+        <ellipse cx="82" cy="62" rx="22" ry="18" fill="black" />
+        <ellipse cx="64" cy="68" rx="10" ry="7" fill="black" />
+        <circle cx="56" cy="67" r="3.5" fill="white" />
+        <circle cx="76" cy="57" r="4.5" fill="white" />
+        <circle cx="77.5" cy="56" r="1.8" fill="black" />
+        <ellipse cx="95" cy="78" rx="14" ry="14" fill="black" />
+        <ellipse cx="115" cy="95" rx="30" ry="18" fill="black" transform="rotate(-8 115 95)" />
+        <ellipse cx="138" cy="108" rx="18" ry="20" fill="black" />
+        <rect x="88" y="98" width="7" height="26" rx="3" fill="black" transform="rotate(5 91 98)" />
+        <rect x="97" y="100" width="7" height="24" rx="3" fill="black" transform="rotate(-3 100 100)" />
+        <rect x="130" y="116" width="8" height="24" rx="3.5" fill="black" transform="rotate(8 134 116)" />
+        <rect x="140" y="114" width="8" height="26" rx="3.5" fill="black" transform="rotate(-5 144 114)" />
+        <ellipse cx="90" cy="126" rx="5" ry="3" fill="black" />
+        <ellipse cx="100" cy="125" rx="5" ry="3" fill="black" />
+        <ellipse cx="134" cy="141" rx="5.5" ry="3" fill="black" />
+        <ellipse cx="145" cy="141" rx="5.5" ry="3" fill="black" />
+        <path d="M 148 100 Q 168 80 160 58 Q 155 48 148 52" fill="black" />
+        <path d="M 148 100 Q 170 82 162 56 Q 157 46 150 50" fill="black" />
+        <circle cx="155" cy="50" r="6" fill="white" />
+      </mask>
+    </defs>
+    <circle cx="100" cy="100" r="96" fill={AMBER[400]} mask="url(#ermine-mask-sm)" />
+  </svg>
+)
+
+// ─── PARTICLE FIELD ────────────────────────────────────────────────
+const ParticleField = () => {
+  const canvasRef = useRef(null)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    let animId
+    let particles = []
+
+    const init = () => {
+      canvas.width = canvas.parentElement?.offsetWidth || 800
+      canvas.height = canvas.parentElement?.offsetHeight || 600
+      particles = Array.from({ length: 60 }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 1.5 + 0.5,
+        o: Math.random() * 0.15 + 0.03,
+      }))
+    }
+
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      for (const p of particles) {
+        p.x += p.vx
+        p.y += p.vy
+        if (p.x < 0) p.x = canvas.width
+        if (p.x > canvas.width) p.x = 0
+        if (p.y < 0) p.y = canvas.height
+        if (p.y > canvas.height) p.y = 0
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(245,183,49,${p.o})`
+        ctx.fill()
+      }
+      // connections
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x
+          const dy = particles[i].y - particles[j].y
+          const d = Math.sqrt(dx * dx + dy * dy)
+          if (d < 120) {
+            ctx.beginPath()
+            ctx.moveTo(particles[i].x, particles[i].y)
+            ctx.lineTo(particles[j].x, particles[j].y)
+            ctx.strokeStyle = `rgba(245,183,49,${0.04 * (1 - d / 120)})`
+            ctx.lineWidth = 0.5
+            ctx.stroke()
+          }
+        }
+      }
+      animId = requestAnimationFrame(draw)
+    }
+
+    init()
+    window.addEventListener('resize', init)
+    draw()
+    return () => {
+      cancelAnimationFrame(animId)
+      window.removeEventListener('resize', init)
+    }
+  }, [])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        opacity: 0.5,
+        zIndex: 0,
+      }}
+    />
+  )
+}
+
+const GrainOverlay = () => (
+  <div
+    style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      pointerEvents: 'none',
+      zIndex: 10,
+      opacity: 0.03,
+      mixBlendMode: 'overlay',
+      backgroundImage:
+        "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E\")",
+    }}
+  />
+)
+
+const SidebarItem = ({ label, active, onClick }) => {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '8px 12px',
+        borderRadius: 6,
+        cursor: 'pointer',
+        fontSize: 13,
+        fontFamily: "'JetBrains Mono',monospace",
+        color: active ? AMBER[400] : hovered ? SLATE.textBright : SLATE.muted,
+        background: active ? `${AMBER[900]}40` : hovered ? `${SLATE.elevated}` : 'transparent',
+        borderLeft: active ? `2px solid ${AMBER[400]}` : '2px solid transparent',
+        transition: 'all 0.15s ease',
+      }}
+    >
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    </div>
+  )
+}
+
+function isoToLocalLabel(iso) {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleString()
+  } catch {
+    return iso
+  }
+}
+
+function buildWsUrl(resumeId) {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const params = new URLSearchParams()
+  if (resumeId) params.set('resume', resumeId)
+  const q = params.toString()
+  return `${proto}://${window.location.host}/ws/pty${q ? `?${q}` : ''}`
+}
+
+function TerminalPane({ resumeId, onConnectionChange }) {
+  const containerRef = useRef(null)
+  const termRef = useRef(null)
+  const fitRef = useRef(null)
+  const wsRef = useRef(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const term = new Terminal({
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 13,
+      lineHeight: 1.2,
+      cursorBlink: true,
+      scrollback: 10000,
+      convertEol: true,
+      allowTransparency: true,
+      theme: {
+        background: SLATE.bg,
+        foreground: SLATE.textBright,
+        cursor: AMBER[400],
+        selectionBackground: `${AMBER[700]}44`,
+      },
+    })
+
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(container)
+    fit.fit()
+
+    termRef.current = term
+    fitRef.current = fit
+
+    return () => {
+      try {
+        term.dispose()
+      } catch {
+        // ignore
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const term = termRef.current
+    const fit = fitRef.current
+    const container = containerRef.current
+    if (!term || !fit || !container) return
+
+    // Tear down previous WS
+    if (wsRef.current) {
+      try {
+        wsRef.current.close()
+      } catch {
+        // ignore
+      }
+      wsRef.current = null
+    }
+
+    term.reset()
+    term.clear()
+
+    const wsUrl = buildWsUrl(resumeId)
+    const ws = new WebSocket(wsUrl)
+    ws.binaryType = 'arraybuffer'
+    wsRef.current = ws
+
+    const encoder = new TextEncoder()
+
+    const sendResize = () => {
+      try {
+        fit.fit()
+      } catch {
+        // ignore
+      }
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+      }
+    }
+
+    const ro = new ResizeObserver(() => sendResize())
+    ro.observe(container)
+
+    const onDataDisposable = term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(encoder.encode(data))
+      }
+    })
+
+    ws.onopen = () => {
+      onConnectionChange?.(true)
+      // initial fit + resize
+      setTimeout(sendResize, 10)
+    }
+
+    ws.onclose = () => {
+      onConnectionChange?.(false)
+    }
+
+    ws.onerror = () => {
+      onConnectionChange?.(false)
+    }
+
+    ws.onmessage = (ev) => {
+      if (ev.data instanceof ArrayBuffer) {
+        term.write(new Uint8Array(ev.data))
+        return
+      }
+      if (typeof ev.data === 'string') {
+        term.write(ev.data)
+      }
+    }
+
+    return () => {
+      try {
+        ro.disconnect()
+      } catch {
+        // ignore
+      }
+      try {
+        onDataDisposable.dispose()
+      } catch {
+        // ignore
+      }
+      try {
+        ws.close()
+      } catch {
+        // ignore
+      }
+    }
+  }, [resumeId, onConnectionChange])
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        padding: '12px 12px 12px 12px',
+        zIndex: 5,
+      }}
+    />
+  )
+}
+
+export default function App() {
+  const [sessions, setSessions] = useState([])
+  const [activeResumeId, setActiveResumeId] = useState(null)
+  const [connected, setConnected] = useState(false)
+
+  const [auth, setAuth] = useState({ loading: true, enabled: false, authenticated: false })
+  const [password, setPassword] = useState('')
+  const [loginError, setLoginError] = useState('')
+
+  const refreshAuth = async () => {
+    try {
+      const r = await fetch('/api/auth/me')
+      const data = await r.json()
+      setAuth({
+        loading: false,
+        enabled: !!data.auth_enabled,
+        authenticated: !!data.authenticated,
+      })
+    } catch {
+      setAuth({ loading: false, enabled: false, authenticated: false })
+    }
+  }
+
+  useEffect(() => {
+    refreshAuth()
+  }, [])
+
+  const doLogin = async () => {
+    setLoginError('')
+    try {
+      const r = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (!r.ok) {
+        setLoginError('invalid password')
+        return
+      }
+      setPassword('')
+      await refreshAuth()
+    } catch {
+      setLoginError('login failed')
+    }
+  }
+
+  const doLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } finally {
+      setConnected(false)
+      await refreshAuth()
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!auth.authenticated) {
+      setSessions([])
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const load = async () => {
+      try {
+        const r = await fetch('/api/sessions?limit=50')
+        if (r.status === 401) {
+          if (!cancelled) setAuth((a) => ({ ...a, authenticated: false }))
+          return
+        }
+        const data = await r.json()
+        if (!cancelled) setSessions(data.sessions || [])
+      } catch {
+        if (!cancelled) setSessions([])
+      }
+    }
+
+    load()
+    const t = setInterval(load, 10_000)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
+  }, [auth.authenticated])
+
+  const grouped = useMemo(() => {
+    const out = { Today: [], Yesterday: [], Earlier: [] }
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000
+
+    for (const s of sessions) {
+      const ts = (s.started_at || 0) * 1000
+      if (ts >= startOfToday) out.Today.push(s)
+      else if (ts >= startOfYesterday) out.Yesterday.push(s)
+      else out.Earlier.push(s)
+    }
+    return out
+  }, [sessions])
+
+  const locked = !auth.loading && auth.enabled && !auth.authenticated
+
+  return (
+    <div
+      style={{
+        width: '100vw',
+        height: '100vh',
+        background: SLATE.bg,
+        display: 'flex',
+        fontFamily: "'JetBrains Mono','Fira Code',monospace",
+        color: SLATE.textBright,
+        overflow: 'hidden',
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        ::-webkit-scrollbar { width: 4px }
+        ::-webkit-scrollbar-track { background: transparent }
+        ::-webkit-scrollbar-thumb { background: ${SLATE.border}; border-radius: 2px }
+        ::-webkit-scrollbar-thumb:hover { background: ${SLATE.muted} }
+        ::selection { background: ${AMBER[700]}44 }
+      `}</style>
+
+      {/* Sidebar */}
+      <div
+        style={{
+          width: 290,
+          flexShrink: 0,
+          background: SLATE.surface,
+          borderRight: `1px solid ${SLATE.border}`,
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
+          zIndex: 2,
+        }}
+      >
+        <div
+          style={{
+            padding: '14px 14px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            borderBottom: `1px solid ${SLATE.border}`,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <InvertelinSmall size={20} />
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: AMBER[400],
+                letterSpacing: '0.02em',
+              }}
+            >
+              hermelinChat
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: SLATE.muted }}>{auth.enabled ? 'locked' : 'sessions'}</div>
+        </div>
+
+        <div style={{ padding: '10px 10px 6px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '7px 10px',
+              borderRadius: 6,
+              background: SLATE.elevated,
+              border: `1px solid ${SLATE.border}`,
+              fontSize: 12,
+              color: SLATE.muted,
+              opacity: auth.authenticated ? 1 : 0.45,
+            }}
+          >
+            Search (coming soon)
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflow: 'auto', padding: '4px 6px', opacity: auth.authenticated ? 1 : 0.4 }}>
+          <div
+            style={{
+              padding: '10px 8px 4px',
+              fontSize: 10,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: SLATE.muted,
+            }}
+          >
+            Active
+          </div>
+          <SidebarItem
+            label="New session"
+            active={activeResumeId === null}
+            onClick={() => auth.authenticated && setActiveResumeId(null)}
+          />
+
+          {auth.authenticated &&
+            ['Today', 'Yesterday', 'Earlier'].map((k) => {
+              const list = grouped[k]
+              if (!list || list.length === 0) return null
+              return (
+                <div key={k}>
+                  <div
+                    style={{
+                      padding: '14px 8px 4px',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                      color: SLATE.muted,
+                    }}
+                  >
+                    {k}
+                  </div>
+                  {list.map((s) => (
+                    <SidebarItem
+                      key={s.id}
+                      label={`${s.id}  ·  ${isoToLocalLabel(s.started_at_iso)}`}
+                      active={activeResumeId === s.id}
+                      onClick={() => setActiveResumeId(s.id)}
+                    />
+                  ))}
+                </div>
+              )
+            })}
+        </div>
+
+        <div
+          style={{
+            padding: '10px 14px',
+            borderTop: `1px solid ${SLATE.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                background: connected ? SLATE.success : SLATE.muted,
+                boxShadow: `0 0 8px ${connected ? SLATE.success : SLATE.muted}`,
+              }}
+            />
+            <div style={{ fontSize: 11, color: SLATE.muted }}>{connected ? 'connected' : locked ? 'locked' : 'disconnected'}</div>
+          </div>
+
+          {auth.enabled && auth.authenticated && (
+            <div
+              onClick={doLogout}
+              style={{
+                fontSize: 11,
+                color: AMBER[500],
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              title="Logout"
+            >
+              logout
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+        <ParticleField />
+        <GrainOverlay />
+
+        <div
+          style={{
+            height: 40,
+            flexShrink: 0,
+            borderBottom: `1px solid ${SLATE.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0 16px',
+            gap: 10,
+            background: `${SLATE.surface}ee`,
+            position: 'relative',
+            zIndex: 5,
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <InvertelinSmall size={18} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: AMBER[400] }}>hermes</span>
+          <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
+          <span style={{ fontSize: 11, color: SLATE.muted }}>
+            {auth.loading ? 'auth…' : locked ? 'login required' : activeResumeId ? `resume ${activeResumeId}` : 'new session'}
+          </span>
+          <div style={{ flex: 1 }} />
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: connected ? SLATE.success : SLATE.muted,
+              boxShadow: `0 0 6px ${connected ? SLATE.success : SLATE.muted}`,
+              transition: 'background 0.3s ease',
+            }}
+          />
+          <span style={{ fontSize: 11, color: SLATE.muted }}>PTY</span>
+        </div>
+
+        <div style={{ flex: 1, position: 'relative' }}>
+          {auth.authenticated ? (
+            <TerminalPane resumeId={activeResumeId} onConnectionChange={setConnected} />
+          ) : (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 5,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: SLATE.muted,
+                fontSize: 12,
+              }}
+            >
+              {auth.loading ? 'checking auth…' : locked ? 'locked' : 'disconnected'}
+            </div>
+          )}
+        </div>
+
+        {/* Login overlay */}
+        {locked && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 50,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(0,0,0,0.55)',
+              backdropFilter: 'blur(6px)',
+            }}
+          >
+            <div
+              style={{
+                width: 360,
+                border: `1px solid ${SLATE.border}`,
+                background: SLATE.surface,
+                padding: 16,
+                boxShadow: `0 0 30px ${AMBER[900]}55`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <InvertelinSmall size={18} />
+                <div style={{ color: AMBER[400], fontWeight: 700, fontSize: 12 }}>Login required</div>
+              </div>
+
+              <div style={{ color: SLATE.muted, fontSize: 11, marginBottom: 12 }}>
+                This UI can spawn a real Hermes terminal. Please authenticate.
+              </div>
+
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') doLogin()
+                }}
+                placeholder="Password"
+                autoFocus
+                style={{
+                  width: '100%',
+                  background: SLATE.elevated,
+                  border: `1px solid ${SLATE.border}`,
+                  color: SLATE.textBright,
+                  padding: '10px 10px',
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              />
+
+              {loginError && <div style={{ color: SLATE.danger, fontSize: 11, marginTop: 8 }}>{loginError}</div>}
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                <div
+                  onClick={doLogin}
+                  style={{
+                    padding: '9px 12px',
+                    border: `1px solid ${AMBER[700]}`,
+                    background: `${AMBER[900]}55`,
+                    color: AMBER[400],
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    userSelect: 'none',
+                  }}
+                >
+                  unlock
+                </div>
+                <div
+                  onClick={refreshAuth}
+                  style={{
+                    padding: '9px 12px',
+                    border: `1px solid ${SLATE.border}`,
+                    background: SLATE.elevated,
+                    color: SLATE.muted,
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    userSelect: 'none',
+                  }}
+                >
+                  retry
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

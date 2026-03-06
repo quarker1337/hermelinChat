@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hermelin-chat"
+version = "0.1.0"
+description = "Web UI for Hermes Agent (PTY terminal + session sidebar)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "aiofiles>=23.2.1",
+]
+
+[project.scripts]
+hermelin = "hermelin.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hermelin"]
+
+[tool.hatch.build]
+# Include built frontend when present
+include = [
+  "hermelin/static/**/*",
+]

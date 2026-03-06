@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+import asyncio
+import hmac
+import json
+import os
+import shlex
+import signal
+from pathlib import Path
+from typing import Optional
+
+from fastapi import Body, FastAPI, Query, Request, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+
+from .auth import (
+    create_session_token,
+    extract_cookie_value,
+    generate_secret_bytes,
+    verify_session_token,
+)
+from .config import HermelinConfig
+from .pty_handler import PtyProcess
+from .security import extract_client_ip, ip_allowed
+from .state_reader import list_sessions, search_messages
+
+
+def create_app(config: HermelinConfig | None = None) -> FastAPI:
+    config = config or HermelinConfig()
+    app = FastAPI(title="hermelinChat", version="0.1.0", docs_url="/api/docs", redoc_url=None)
+
+    # Dev-friendly; production should lock this down.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # ---------------------------------------------------------------------
+    # Security: IP allowlist + password session cookie
+    # ---------------------------------------------------------------------
+    allowed_spec = (config.allowed_ips or "").strip()
+    trust_xff = bool(config.trust_x_forwarded_for)
+
+    auth_password = (config.auth_password or "").strip()
+    auth_enabled = bool(auth_password)
+
+    cookie_name = (config.cookie_name or "hermelin_session").strip() or "hermelin_session"
+    ttl_seconds = int(config.session_ttl_seconds or 0) or 43200
+    cookie_secure = bool(config.cookie_secure)
+
+    cookie_secret_raw = (config.cookie_secret or "").strip()
+    cookie_secret = cookie_secret_raw.encode("utf-8") if cookie_secret_raw else generate_secret_bytes()
+
+    def _check_allowed(client_ip: str) -> bool:
+        return ip_allowed(client_ip, allowed_spec)
+
+    def _is_authenticated(token: str | None) -> bool:
+        if not auth_enabled:
+            return True
+        if not token:
+            return False
+        return verify_session_token(token=token, secret=cookie_secret)
+
+    def _is_public_path(path: str) -> bool:
+        # SPA + static: public. Guard /api (except /api/auth/*).
+        if not path.startswith("/api"):
+            return True
+        if path.startswith("/api/auth/"):
+            return True
+        return False
+
+    @app.middleware("http")
+    async def _guard(request: Request, call_next):
+        client_ip = extract_client_ip(
+            client_host=request.client.host if request.client else "",
+            headers=request.headers,
+            trust_xff=trust_xff,
+        )
+        if not _check_allowed(client_ip):
+            return JSONResponse({"detail": "forbidden"}, status_code=403)
+
+        if auth_enabled and not _is_public_path(request.url.path):
+            token = request.cookies.get(cookie_name)
+            if not _is_authenticated(token):
+                return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
+        return await call_next(request)
+
+    @app.get("/api/health")
+    async def health():
+        return {
+            "ok": True,
+            "hermes_home": str(config.hermes_home),
+            "db_path": str(config.db_path),
+            "db_exists": config.db_path.exists(),
+            "allowed_ips": allowed_spec,
+            "trust_x_forwarded_for": trust_xff,
+            "auth_enabled": auth_enabled,
+            "cookie_name": cookie_name,
+            "session_ttl_seconds": ttl_seconds,
+            "cookie_secure": cookie_secure,
+        }
+
+    # -----------------------------------------------------------------
+    # Auth (password -> signed session cookie)
+    # -----------------------------------------------------------------
+
+    @app.get("/api/auth/me")
+    async def auth_me(request: Request):
+        token = request.cookies.get(cookie_name)
+        return {
+            "auth_enabled": auth_enabled,
+            "authenticated": _is_authenticated(token),
+        }
+
+    @app.post("/api/auth/login")
+    async def auth_login(payload: dict = Body(...)):
+        if not auth_enabled:
+            return {"ok": True, "auth_enabled": False}
+
+        password = str(payload.get("password") or "")
+        if not hmac.compare_digest(password, auth_password):
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
+        token = create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
+        resp = JSONResponse({"ok": True, "auth_enabled": True})
+        resp.set_cookie(
+            key=cookie_name,
+            value=token,
+            max_age=ttl_seconds,
+            httponly=True,
+            secure=cookie_secure,
+            samesite="strict",
+            path="/",
+        )
+        return resp
+
+    @app.post("/api/auth/logout")
+    async def auth_logout():
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(cookie_name, path="/")
+        return resp
+
+    @app.get("/api/sessions")
+    async def api_sessions(
+        limit: int = 50,
+        offset: int = 0,
+        source: Optional[str] = None,
+    ):
+        return {
+            "sessions": list_sessions(config.db_path, limit=limit, offset=offset, source=source),
+        }
+
+    @app.get("/api/search")
+    async def api_search(
+        q: str,
+        limit: int = 20,
+        offset: int = 0,
+        session_id: Optional[str] = None,
+    ):
+        return {
+            "results": search_messages(
+                config.db_path,
+                query=q,
+                limit=limit,
+                offset=offset,
+                session_id=session_id,
+            ),
+        }
+
+    @app.websocket("/ws/pty")
+    async def ws_pty(
+        websocket: WebSocket,
+        resume: Optional[str] = None,
+        cont: bool = Query(False, alias="continue"),
+        cols: int = 120,
+        rows: int = 30,
+    ):
+        client_ip = extract_client_ip(
+            client_host=websocket.client.host if websocket.client else "",
+            headers=websocket.headers,
+            trust_xff=trust_xff,
+        )
+
+        await websocket.accept()
+        if not _check_allowed(client_ip):
+            await websocket.close(code=1008)
+            return
+
+        if auth_enabled:
+            token = extract_cookie_value(websocket.headers.get("cookie", ""), cookie_name)
+            if not _is_authenticated(token):
+                await websocket.close(code=1008)
+                return
+
+        argv = shlex.split(config.hermes_cmd)
+        if resume:
+            argv += ["--resume", resume]
+        elif cont:
+            argv += ["--continue"]
+
+        env = os.environ.copy()
+        env.setdefault("TERM", "xterm-256color")
+        env.setdefault("COLORTERM", "truecolor")
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env.setdefault("HERMES_HOME", str(config.hermes_home))
+
+        p = PtyProcess.spawn(argv, cwd=Path.home(), env=env, cols=cols, rows=rows)
+
+        async def pump_pty_to_ws() -> None:
+            try:
+                while True:
+                    data = await asyncio.to_thread(os.read, p.master_fd, 8192)
+                    if not data:
+                        break
+                    await websocket.send_bytes(data)
+            except Exception:
+                # WebSocket closed, PTY died, etc.
+                pass
+
+        async def pump_ws_to_pty() -> None:
+            try:
+                while True:
+                    msg = await websocket.receive()
+                    if msg.get("type") == "websocket.disconnect":
+                        break
+
+                    b = msg.get("bytes")
+                    if b is not None:
+                        if b:
+                            p.write(b)
+                        continue
+
+                    t = msg.get("text")
+                    if t is None:
+                        continue
+
+                    # Control frames are JSON over text.
+                    # Terminal keystrokes are sent as bytes frames.
+                    try:
+                        payload = json.loads(t)
+                    except json.JSONDecodeError:
+                        p.write(t.encode("utf-8", errors="ignore"))
+                        continue
+
+                    if payload.get("type") == "resize":
+                        c = int(payload.get("cols") or 0)
+                        r = int(payload.get("rows") or 0)
+                        if c > 0 and r > 0:
+                            p.resize(cols=c, rows=r)
+                        continue
+
+                    if payload.get("type") == "signal":
+                        sig = str(payload.get("sig") or "").upper()
+                        if sig in {"INT", "TERM", "HUP", "QUIT"}:
+                            try:
+                                os.killpg(p.proc.pid, getattr(signal, f"SIG{sig}"))
+                            except Exception:
+                                pass
+                        elif sig == "KILL":
+                            p.kill()
+                        continue
+            except Exception:
+                pass
+
+        t1 = asyncio.create_task(pump_pty_to_ws())
+        t2 = asyncio.create_task(pump_ws_to_pty())
+
+        done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+
+        # Ensure subprocess is gone and fds are closed
+        p.terminate()
+        p.close_fds()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+    # Serve built frontend if present
+    static_dir = config.static_dir
+    index_html = static_dir / "index.html"
+    if index_html.exists():
+
+        @app.get("/")
+        async def _spa_root():
+            return FileResponse(index_html)
+
+        @app.get("/{path:path}")
+        async def _spa_any(path: str):
+            candidate = static_dir / path
+            if candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(index_html)
+
+    return app

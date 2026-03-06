@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+.python-version
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Build artifacts (served by backend)
+hermelin/static/
+
+# OS
+.DS_Store
+
+# Secrets
+.hermelin.env
+.env
+.env.*
+
+# Logs
+*.log
