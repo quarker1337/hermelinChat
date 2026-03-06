@@ -163,3 +163,114 @@ def search_messages(
             }
         )
     return out
+
+
+def _truncate_text(s: Optional[str], n: int) -> Optional[str]:
+    if s is None:
+        return None
+    if len(s) <= n:
+        return s
+    return s[:n] + "\n…(truncated)…"
+
+
+def get_message_context(
+    db_path: Path,
+    *,
+    message_id: int,
+    before: int = 3,
+    after: int = 3,
+    max_chars: int = 12000,
+) -> Optional[dict[str, Any]]:
+    """Return a small read-only context window around a message.
+
+    Uses message.id ordering within a session (autoincrement) which matches
+    chronological insertion for a session.
+
+    Only includes user/assistant roles (skips tools).
+    """
+    if not db_path.exists():
+        return None
+
+    try:
+        mid = int(message_id)
+    except (TypeError, ValueError):
+        return None
+
+    before_n = max(0, min(int(before or 0), 20))
+    after_n = max(0, min(int(after or 0), 20))
+
+    with connect_db(db_path) as conn:
+        row = conn.execute(
+            "SELECT id, session_id, role, content, timestamp FROM messages WHERE id = ?",
+            (mid,),
+        ).fetchone()
+        if row is None:
+            return None
+
+        session_id = row["session_id"]
+
+        srow = conn.execute(
+            "SELECT s.id, s.model, s.started_at, "
+            "(SELECT m2.content FROM messages m2 "
+            "   WHERE m2.session_id = s.id AND m2.role = 'user' AND m2.content IS NOT NULL AND m2.content != '' "
+            "   ORDER BY m2.timestamp ASC LIMIT 1) AS first_user_message "
+            "FROM sessions s WHERE s.id = ?",
+            (session_id,),
+        ).fetchone()
+
+        session_title = _truncate_one_line(srow["first_user_message"] if srow else None, 60) or session_id
+        session_model = srow["model"] if srow else None
+        session_started_at = srow["started_at"] if srow else None
+
+        filter_sql = (
+            "session_id = ? AND role IN ('user','assistant') "
+            "AND content IS NOT NULL AND content != ''"
+        )
+
+        target = conn.execute(
+            f"SELECT id, role, content, timestamp FROM messages WHERE {filter_sql} AND id = ?",
+            (session_id, mid),
+        ).fetchone()
+
+        before_rows = conn.execute(
+            f"SELECT id, role, content, timestamp FROM messages WHERE {filter_sql} AND id < ? "
+            "ORDER BY id DESC LIMIT ?",
+            (session_id, mid, before_n),
+        ).fetchall()
+
+        after_rows = conn.execute(
+            f"SELECT id, role, content, timestamp FROM messages WHERE {filter_sql} AND id > ? "
+            "ORDER BY id ASC LIMIT ?",
+            (session_id, mid, after_n),
+        ).fetchall()
+
+        messages = list(reversed(before_rows))
+        if target is not None:
+            messages.append(target)
+        messages.extend(after_rows)
+
+    out_msgs: list[dict[str, Any]] = []
+    for m in messages:
+        content = m["content"]
+        truncated = content is not None and len(content) > max_chars
+        out_msgs.append(
+            {
+                "id": m["id"],
+                "role": m["role"],
+                "timestamp": m["timestamp"],
+                "timestamp_iso": _ts_to_iso(m["timestamp"]),
+                "content": _truncate_text(content, max_chars),
+                "content_truncated": truncated,
+                "is_target": m["id"] == mid,
+            }
+        )
+
+    return {
+        "session_id": session_id,
+        "session_title": session_title,
+        "session_model": session_model,
+        "session_started_at": session_started_at,
+        "session_started_at_iso": _ts_to_iso(session_started_at),
+        "target_message_id": mid,
+        "messages": out_msgs,
+    }

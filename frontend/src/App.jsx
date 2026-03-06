@@ -342,6 +342,132 @@ const SearchHitRow = ({ hit, active, onClick }) => {
   )
 }
 
+const PeekDrawer = ({ loading, error, context, hit, onClose, onOpenSession }) => {
+  const title = context?.session_title || hit?.session_title || hit?.session_id || 'peek'
+  const sid = context?.session_id || hit?.session_id
+  const model = context?.session_model || hit?.session_model
+  const messages = context?.messages || []
+
+  return (
+    <div
+      style={{
+        width: 460,
+        flexShrink: 0,
+        borderLeft: `1px solid ${SLATE.border}`,
+        background: `${SLATE.surface}f2`,
+        position: 'relative',
+        zIndex: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          padding: '10px 12px',
+          borderBottom: `1px solid ${SLATE.border}`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          background: `${SLATE.surface}ff`,
+        }}
+      >
+        <div style={{ fontSize: 11, color: AMBER[400], fontWeight: 700 }}>peek</div>
+        <div style={{ flex: 1 }} />
+        {sid && (
+          <div
+            onClick={() => onOpenSession?.(sid)}
+            style={{
+              fontSize: 11,
+              color: AMBER[500],
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+            title="Open session in terminal"
+          >
+            open
+          </div>
+        )}
+        <div
+          onClick={onClose}
+          style={{
+            fontSize: 11,
+            color: SLATE.muted,
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+          title="Close"
+        >
+          close
+        </div>
+      </div>
+
+      <div style={{ padding: '10px 12px', overflow: 'auto', flex: 1 }}>
+        <div style={{ fontSize: 12, color: SLATE.textBright, fontWeight: 600, marginBottom: 2 }} title={title}>
+          {title}
+        </div>
+        {sid && (
+          <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 10 }}>
+            {sid}
+            {model ? ` · ${model}` : ''}
+          </div>
+        )}
+
+        {hit?.snippet && (
+          <div style={{ fontSize: 11, color: SLATE.muted, marginBottom: 10 }}>
+            <HighlightedSnippet text={hit.snippet} />
+          </div>
+        )}
+
+        {loading && <div style={{ fontSize: 11, color: SLATE.muted }}>loading…</div>}
+        {error && <div style={{ fontSize: 11, color: SLATE.danger }}>{error}</div>}
+
+        {!loading && !error && messages.length === 0 && (
+          <div style={{ fontSize: 11, color: SLATE.muted }}>no context</div>
+        )}
+
+        {!loading && !error && messages.length > 0 && (
+          <div>
+            {messages.map((m) => {
+              const role = (m.role || '').toLowerCase()
+              const isAssistant = role === 'assistant'
+              const who = isAssistant ? '⚡ hermes' : '● you'
+              const whoColor = isAssistant ? AMBER[500] : SLATE.textBright
+
+              return (
+                <div
+                  key={m.id}
+                  style={{
+                    marginBottom: 12,
+                    paddingLeft: 10,
+                    borderLeft: m.is_target ? `2px solid ${AMBER[400]}` : '2px solid transparent',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 10, color: whoColor }}>{who}</span>
+                    <span style={{ fontSize: 10, color: SLATE.muted }}>{isoToLocalLabel(m.timestamp_iso)}</span>
+                    {m.content_truncated && <span style={{ fontSize: 10, color: AMBER[600] }}>truncated</span>}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: SLATE.text,
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {m.content}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function buildWsUrl(resumeId) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const params = new URLSearchParams()
@@ -509,6 +635,12 @@ export default function App() {
   const [searching, setSearching] = useState(false)
   const [expandedSearchSessions, setExpandedSearchSessions] = useState({})
 
+  const [peekOpen, setPeekOpen] = useState(false)
+  const [peekLoading, setPeekLoading] = useState(false)
+  const [peekError, setPeekError] = useState('')
+  const [peekContext, setPeekContext] = useState(null)
+  const [peekHit, setPeekHit] = useState(null)
+
   const refreshAuth = async () => {
     try {
       const r = await fetch('/api/auth/me')
@@ -625,6 +757,49 @@ export default function App() {
     return out
   }, [searchResults])
 
+  const closePeek = () => {
+    setPeekOpen(false)
+    setPeekLoading(false)
+    setPeekError('')
+    setPeekContext(null)
+    setPeekHit(null)
+  }
+
+  useEffect(() => {
+    if (!auth.authenticated) {
+      closePeek()
+    }
+  }, [auth.authenticated])
+
+  const openPeek = async (hit) => {
+    if (!auth.authenticated) return
+    if (!hit?.id) return
+
+    setPeekOpen(true)
+    setPeekHit(hit)
+    setPeekLoading(true)
+    setPeekError('')
+    setPeekContext(null)
+
+    try {
+      const r = await fetch(`/api/messages/context?message_id=${encodeURIComponent(hit.id)}&before=3&after=3`)
+      if (r.status === 401) {
+        setAuth((a) => ({ ...a, authenticated: false }))
+        return
+      }
+      if (!r.ok) {
+        setPeekError('not found')
+        return
+      }
+      const data = await r.json()
+      setPeekContext(data)
+    } catch {
+      setPeekError('peek failed')
+    } finally {
+      setPeekLoading(false)
+    }
+  }
+
   const doLogin = async () => {
     setLoginError('')
     try {
@@ -652,6 +827,7 @@ export default function App() {
       setSearchQuery('')
       setSearchResults([])
       setActiveResumeId(null)
+      closePeek()
       await refreshAuth()
     }
   }
@@ -833,6 +1009,7 @@ export default function App() {
               if (!auth.authenticated) return
               setSearchQuery('')
               setActiveResumeId(null)
+              closePeek()
             }}
           />
 
@@ -877,7 +1054,7 @@ export default function App() {
                           </span>
                         }
                         right={isoToTimeLabel(top?.timestamp_iso)}
-                        active={activeResumeId === g.session_id}
+                        active={activeResumeId === g.session_id || peekHit?.session_id === g.session_id}
                         onClick={() =>
                           setExpandedSearchSessions((prev) => ({
                             ...prev,
@@ -892,8 +1069,8 @@ export default function App() {
                             <SearchHitRow
                               key={hit.id}
                               hit={hit}
-                              active={activeResumeId === g.session_id}
-                              onClick={() => setActiveResumeId(g.session_id)}
+                              active={peekHit?.id === hit.id}
+                              onClick={() => openPeek(hit)}
                             />
                           ))}
                         </div>
@@ -930,6 +1107,7 @@ export default function App() {
                         onClick={() => {
                           setSearchQuery('')
                           setActiveResumeId(s.id)
+                          closePeek()
                         }}
                       />
                     ))}
@@ -1019,24 +1197,40 @@ export default function App() {
           <span style={{ fontSize: 11, color: SLATE.muted }}>PTY</span>
         </div>
 
-        <div style={{ flex: 1, position: 'relative' }}>
-          {auth.authenticated ? (
-            <TerminalPane resumeId={activeResumeId} onConnectionChange={setConnected} />
-          ) : (
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                zIndex: 5,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: SLATE.muted,
-                fontSize: 12,
+        <div style={{ flex: 1, display: 'flex', position: 'relative' }}>
+          <div style={{ flex: 1, position: 'relative' }}>
+            {auth.authenticated ? (
+              <TerminalPane resumeId={activeResumeId} onConnectionChange={setConnected} />
+            ) : (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: SLATE.muted,
+                  fontSize: 12,
+                }}
+              >
+                {auth.loading ? 'checking auth…' : locked ? 'locked' : 'disconnected'}
+              </div>
+            )}
+          </div>
+
+          {peekOpen && (
+            <PeekDrawer
+              loading={peekLoading}
+              error={peekError}
+              context={peekContext}
+              hit={peekHit}
+              onClose={closePeek}
+              onOpenSession={(sid) => {
+                setActiveResumeId(sid)
+                closePeek()
               }}
-            >
-              {auth.loading ? 'checking auth…' : locked ? 'locked' : 'disconnected'}
-            </div>
+            />
           )}
         </div>
 

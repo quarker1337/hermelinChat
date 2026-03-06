@@ -22,7 +22,7 @@ from .auth import (
 from .config import HermelinConfig
 from .pty_handler import PtyProcess
 from .security import extract_client_ip, ip_allowed
-from .state_reader import list_sessions, search_messages
+from .state_reader import get_message_context, list_sessions, search_messages
 
 
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
@@ -170,6 +170,17 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 session_id=session_id,
             ),
         }
+
+    @app.get("/api/messages/context")
+    async def api_message_context(
+        message_id: int,
+        before: int = 3,
+        after: int = 3,
+    ):
+        ctx = get_message_context(config.db_path, message_id=message_id, before=before, after=after)
+        if ctx is None:
+            return JSONResponse({"detail": "not found"}, status_code=404)
+        return ctx
 
     @app.websocket("/ws/pty")
     async def ws_pty(
