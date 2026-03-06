@@ -3,6 +3,8 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
+import STOUT_MASCOT_RAW from './assets/stout-mascot.svg?raw'
+
 // ─── NOUS / HERMELIN PALETTE ───────────────────────────────────────
 const AMBER = {
   300: '#ffd480',
@@ -59,6 +61,26 @@ const InvertelinSmall = ({ size = 22 }) => (
     <circle cx="100" cy="100" r="96" fill={AMBER[400]} mask="url(#ermine-mask-sm)" />
   </svg>
 )
+
+const STOUT_MASCOT_SVG = STOUT_MASCOT_RAW
+  .replace('<svg ', '<svg width="100%" height="100%" style="display:block" ')
+  .replace(/fill="black"/g, 'fill="currentColor"')
+
+const StoutMascot = ({ size = 18, color = AMBER[400] }) => {
+  const w = Math.round(size * (370 / 238))
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: w,
+        height: size,
+        color,
+        lineHeight: 0,
+      }}
+      dangerouslySetInnerHTML={{ __html: STOUT_MASCOT_SVG }}
+    />
+  )
+}
 
 // ─── PARTICLE FIELD ────────────────────────────────────────────────
 const ParticleField = () => {
@@ -376,9 +398,9 @@ const AlignmentEasterEgg = () => {
         filter: open ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
         userSelect: 'none',
       }}
-      title="the ermine knows…"
+      title="the stout knows…"
     >
-      <InvertelinSmall size={18} />
+      <StoutMascot size={18} />
       {open && (
         <div
           style={{
