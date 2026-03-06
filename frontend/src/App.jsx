@@ -746,7 +746,7 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
       style={{
         position: 'absolute',
         inset: 0,
-        padding: '12px 12px 20px 12px',
+        padding: '12px 12px 36px 12px',
         zIndex: 5,
         boxSizing: 'border-box',
       }}
