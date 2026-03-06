@@ -1786,22 +1786,9 @@ export default function App() {
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            justifyContent: 'space-between',
+            justifyContent: 'flex-end',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: '50%',
-                background: connected ? SLATE.success : SLATE.muted,
-                boxShadow: `0 0 8px ${connected ? SLATE.success : SLATE.muted}`,
-              }}
-            />
-            <div style={{ fontSize: 11, color: SLATE.muted }}>{connected ? 'connected' : locked ? 'locked' : 'disconnected'}</div>
-          </div>
-
           {auth.enabled && auth.authenticated && (
             <div
               onClick={doLogout}
@@ -1837,17 +1824,6 @@ export default function App() {
               gap: 10,
             }}
           >
-            <div
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: '50%',
-                background: connected ? SLATE.success : SLATE.muted,
-                boxShadow: `0 0 8px ${connected ? SLATE.success : SLATE.muted}`,
-              }}
-              title={connected ? 'connected' : locked ? 'locked' : 'disconnected'}
-            />
-
             {auth.enabled && auth.authenticated && (
               <div
                 onClick={doLogout}
