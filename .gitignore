@@ -25,3 +25,6 @@ hermelin/static/
 
 # Logs
 *.log
+
+# Local scratch assets
+hermilin-not-flipped.svg
