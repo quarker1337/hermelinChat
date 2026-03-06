@@ -750,7 +750,8 @@ export default function App() {
   const handleDetectedSessionId = useCallback((sid) => {
     if (!sid) return
     if (ptyResumeIdRef.current !== null) return
-    if (activeSessionIdRef.current) return
+    if (activeSessionIdRef.current === sid) return
+    activeSessionIdRef.current = sid
     setActiveSessionId(sid)
   }, [])
 
@@ -995,6 +996,8 @@ export default function App() {
       setConnected(false)
       setSearchQuery('')
       setSearchResults([])
+      ptyResumeIdRef.current = null
+      activeSessionIdRef.current = null
       setPtyResumeId(null)
       setPtySpawnNonce(0)
       setActiveSessionId(null)
@@ -1306,6 +1309,8 @@ export default function App() {
             onClick={() => {
               if (!auth.authenticated) return
               setSearchQuery('')
+              ptyResumeIdRef.current = null
+              activeSessionIdRef.current = null
               setPtyResumeId(null)
               setActiveSessionId(null)
               setPtySpawnNonce((n) => n + 1)
@@ -1411,6 +1416,8 @@ export default function App() {
                             closePeek()
                             return
                           }
+                          ptyResumeIdRef.current = s.id
+                          activeSessionIdRef.current = s.id
                           setPtyResumeId(s.id)
                           setActiveSessionId(s.id)
                           setNewSessionStartedAt(null)
@@ -1576,6 +1583,8 @@ export default function App() {
                   closePeek()
                   return
                 }
+                ptyResumeIdRef.current = sid
+                activeSessionIdRef.current = sid
                 setPtyResumeId(sid)
                 setActiveSessionId(sid)
                 setNewSessionStartedAt(null)
