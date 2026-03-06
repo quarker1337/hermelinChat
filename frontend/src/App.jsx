@@ -1267,10 +1267,25 @@ export default function App() {
             padding: sidebarCollapsed ? '14px 8px 12px' : '14px 14px 12px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-end',
+            justifyContent: sidebarCollapsed ? 'center' : 'space-between',
             borderBottom: `1px solid ${SLATE.border}`,
           }}
         >
+          {!sidebarCollapsed && (
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: SLATE.text,
+                opacity: 0.68,
+                letterSpacing: '0.02em',
+                userSelect: 'none',
+              }}
+            >
+              hermilinChat
+            </div>
+          )}
+
           <div
             onClick={() => setSidebarCollapsed((v) => !v)}
             title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
