@@ -196,6 +196,110 @@ function isoToLocalLabel(iso) {
   }
 }
 
+function isoToTimeLabel(iso) {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
+const HighlightedSnippet = ({ text }) => {
+  const s = (text || '').toString()
+  if (!s) return null
+
+  const nodes = []
+  let inside = false
+  let buf = ''
+
+  const flush = (kind) => {
+    if (!buf) return
+    if (kind === 'hit') {
+      nodes.push(
+        <span key={nodes.length} style={{ color: AMBER[400] }}>
+          {buf}
+        </span>,
+      )
+    } else {
+      nodes.push(<span key={nodes.length}>{buf}</span>)
+    }
+    buf = ''
+  }
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === '[' && !inside) {
+      flush('txt')
+      inside = true
+      continue
+    }
+    if (ch === ']' && inside) {
+      flush('hit')
+      inside = false
+      continue
+    }
+    buf += ch
+  }
+  flush(inside ? 'hit' : 'txt')
+
+  return <span>{nodes}</span>
+}
+
+const SessionRow = ({ title, preview, right, active, onClick }) => {
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onClick}
+      style={{
+        padding: '9px 12px',
+        borderRadius: 6,
+        cursor: 'pointer',
+        background: active ? `${AMBER[900]}40` : hovered ? `${SLATE.elevated}` : 'transparent',
+        borderLeft: active ? `2px solid ${AMBER[400]}` : '2px solid transparent',
+        transition: 'all 0.15s ease',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <div
+          style={{
+            flex: 1,
+            fontSize: 12,
+            color: active ? AMBER[400] : SLATE.textBright,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={title}
+        >
+          {title}
+        </div>
+        {right && (
+          <div style={{ fontSize: 10, color: SLATE.muted, whiteSpace: 'nowrap' }}>{right}</div>
+        )}
+      </div>
+      {preview && (
+        <div
+          style={{
+            marginTop: 3,
+            fontSize: 10,
+            color: SLATE.muted,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={typeof preview === 'string' ? preview : undefined}
+        >
+          {preview}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function buildWsUrl(resumeId) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const params = new URLSearchParams()
@@ -358,6 +462,10 @@ export default function App() {
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
 
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searching, setSearching] = useState(false)
+
   const refreshAuth = async () => {
     try {
       const r = await fetch('/api/auth/me')
@@ -375,6 +483,55 @@ export default function App() {
   useEffect(() => {
     refreshAuth()
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const q = (searchQuery || '').trim()
+
+    if (!auth.authenticated) {
+      setSearchResults([])
+      setSearching(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    if (!q) {
+      setSearchResults([])
+      setSearching(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setSearching(true)
+    const ctrl = new AbortController()
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=25`, { signal: ctrl.signal })
+        if (r.status === 401) {
+          if (!cancelled) setAuth((a) => ({ ...a, authenticated: false }))
+          return
+        }
+        const data = await r.json()
+        if (!cancelled) setSearchResults(data.results || [])
+      } catch {
+        if (!cancelled) setSearchResults([])
+      } finally {
+        if (!cancelled) setSearching(false)
+      }
+    }, 250)
+
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+      try {
+        ctrl.abort()
+      } catch {
+        // ignore
+      }
+    }
+  }, [searchQuery, auth.authenticated])
 
   const doLogin = async () => {
     setLoginError('')
@@ -400,6 +557,9 @@ export default function App() {
       await fetch('/api/auth/logout', { method: 'POST' })
     } finally {
       setConnected(false)
+      setSearchQuery('')
+      setSearchResults([])
+      setActiveResumeId(null)
       await refreshAuth()
     }
   }
@@ -510,7 +670,7 @@ export default function App() {
               hermelinChat
             </span>
           </div>
-          <div style={{ fontSize: 11, color: SLATE.muted }}>{auth.enabled ? 'locked' : 'sessions'}</div>
+          <div style={{ fontSize: 11, color: SLATE.muted }}>{locked ? 'locked' : 'sessions'}</div>
         </div>
 
         <div style={{ padding: '10px 10px 6px' }}>
@@ -528,7 +688,36 @@ export default function App() {
               opacity: auth.authenticated ? 1 : 0.45,
             }}
           >
-            Search (coming soon)
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={auth.authenticated ? 'Search messages' : 'Login to search'}
+              disabled={!auth.authenticated}
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                color: SLATE.textBright,
+                fontSize: 12,
+                fontFamily: "'JetBrains Mono',monospace",
+              }}
+            />
+            {searching && <span style={{ color: AMBER[500], fontSize: 11 }}>…</span>}
+            {!!searchQuery && auth.authenticated && (
+              <span
+                onClick={() => setSearchQuery('')}
+                style={{
+                  cursor: 'pointer',
+                  color: SLATE.muted,
+                  fontSize: 11,
+                  userSelect: 'none',
+                }}
+                title="Clear"
+              >
+                clear
+              </span>
+            )}
           </div>
         </div>
 
@@ -548,38 +737,82 @@ export default function App() {
           <SidebarItem
             label="New session"
             active={activeResumeId === null}
-            onClick={() => auth.authenticated && setActiveResumeId(null)}
+            onClick={() => {
+              if (!auth.authenticated) return
+              setSearchQuery('')
+              setActiveResumeId(null)
+            }}
           />
 
           {auth.authenticated &&
-            ['Today', 'Yesterday', 'Earlier'].map((k) => {
-              const list = grouped[k]
-              if (!list || list.length === 0) return null
-              return (
-                <div key={k}>
-                  <div
-                    style={{
-                      padding: '14px 8px 4px',
-                      fontSize: 10,
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                      color: SLATE.muted,
-                    }}
-                  >
-                    {k}
-                  </div>
-                  {list.map((s) => (
-                    <SidebarItem
-                      key={s.id}
-                      label={`${s.id}  ·  ${isoToLocalLabel(s.started_at_iso)}`}
-                      active={activeResumeId === s.id}
-                      onClick={() => setActiveResumeId(s.id)}
-                    />
-                  ))}
+            ((searchQuery || '').trim() ? (
+              <div>
+                <div
+                  style={{
+                    padding: '14px 8px 4px',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    color: SLATE.muted,
+                  }}
+                >
+                  Search results
                 </div>
-              )
-            })}
+
+                {searchResults.length === 0 && !searching && (
+                  <div style={{ padding: '8px 12px', fontSize: 11, color: SLATE.muted }}>No results</div>
+                )}
+
+                {searchResults.map((r) => (
+                  <SessionRow
+                    key={`${r.session_id}-${r.id}`}
+                    title={r.session_title || r.session_id}
+                    preview={<HighlightedSnippet text={r.snippet} />}
+                    right={isoToTimeLabel(r.timestamp_iso)}
+                    active={activeResumeId === r.session_id}
+                    onClick={() => {
+                      setSearchQuery('')
+                      setActiveResumeId(r.session_id)
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              ['Today', 'Yesterday', 'Earlier'].map((k) => {
+                const list = grouped[k]
+                if (!list || list.length === 0) return null
+                return (
+                  <div key={k}>
+                    <div
+                      style={{
+                        padding: '14px 8px 4px',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em',
+                        color: SLATE.muted,
+                      }}
+                    >
+                      {k}
+                    </div>
+                    {list.map((s) => (
+                      <SessionRow
+                        key={s.id}
+                        title={s.title || s.id}
+                        preview={s.preview || s.model}
+                        right={isoToTimeLabel(s.started_at_iso)}
+                        active={activeResumeId === s.id}
+                        onClick={() => {
+                          setSearchQuery('')
+                          setActiveResumeId(s.id)
+                        }}
+                      />
+                    ))}
+                  </div>
+                )
+              })
+            ))}
         </div>
 
         <div
