@@ -132,6 +132,23 @@ const PlusIcon = ({ size = 16 }) => (
   </svg>
 )
 
+const LogoutIcon = ({ size = 16 }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" />
+    <line x1="21" y1="12" x2="9" y2="12" />
+  </svg>
+)
+
 // ─── PARTICLE FIELD ────────────────────────────────────────────────
 const ParticleField = () => {
   const canvasRef = useRef(null)
@@ -1789,6 +1806,9 @@ export default function App() {
             <div
               onClick={doLogout}
               style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
                 fontSize: 11,
                 color: AMBER[500],
                 cursor: 'pointer',
@@ -1796,11 +1816,71 @@ export default function App() {
               }}
               title="Logout"
             >
+              <LogoutIcon size={14} />
               logout
             </div>
           )}
         </div>
           </>
+        )}
+
+        {sidebarCollapsed && <div style={{ flex: 1 }} />}
+
+        {sidebarCollapsed && (
+          <div
+            style={{
+              padding: '10px 0',
+              borderTop: `1px solid ${SLATE.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                background: connected ? SLATE.success : SLATE.muted,
+                boxShadow: `0 0 8px ${connected ? SLATE.success : SLATE.muted}`,
+              }}
+              title={connected ? 'connected' : locked ? 'locked' : 'disconnected'}
+            />
+
+            {auth.enabled && auth.authenticated && (
+              <div
+                onClick={doLogout}
+                title="Logout"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: AMBER[500],
+                  background: 'transparent',
+                  border: '1px solid transparent',
+                  transition: 'all 0.15s ease',
+                  userSelect: 'none',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = SLATE.elevated
+                  e.currentTarget.style.borderColor = SLATE.border
+                  e.currentTarget.style.color = AMBER[400]
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.borderColor = 'transparent'
+                  e.currentTarget.style.color = AMBER[500]
+                }}
+              >
+                <LogoutIcon size={18} />
+              </div>
+            )}
+          </div>
         )}
       </div>
 
