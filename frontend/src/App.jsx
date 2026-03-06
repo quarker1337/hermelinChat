@@ -540,7 +540,7 @@ function stripAnsi(s) {
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
 }
 
-function TerminalPane({ resumeId, onConnectionChange, onSessionId }) {
+function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId }) {
   const containerRef = useRef(null)
   const termRef = useRef(null)
   const fitRef = useRef(null)
@@ -697,7 +697,7 @@ function TerminalPane({ resumeId, onConnectionChange, onSessionId }) {
         // ignore
       }
     }
-  }, [resumeId, onConnectionChange])
+  }, [resumeId, spawnNonce, onConnectionChange])
 
   return (
     <div
@@ -719,6 +719,7 @@ export default function App() {
   // - ptyResumeId=null means "start a fresh Hermes session"
   // - ptyResumeId=<id> means "spawn hermes --resume <id>"
   const [ptyResumeId, setPtyResumeId] = useState(null)
+  const [ptySpawnNonce, setPtySpawnNonce] = useState(0)
 
   // What session the UI considers "active" (sidebar highlight + topbar label).
   // For new sessions, we discover this from terminal output / DB after spawn.
@@ -995,6 +996,7 @@ export default function App() {
       setSearchQuery('')
       setSearchResults([])
       setPtyResumeId(null)
+      setPtySpawnNonce(0)
       setActiveSessionId(null)
       setNewSessionStartedAt(null)
       closePeek()
@@ -1306,6 +1308,7 @@ export default function App() {
               setSearchQuery('')
               setPtyResumeId(null)
               setActiveSessionId(null)
+              setPtySpawnNonce((n) => n + 1)
               setNewSessionStartedAt(Date.now() / 1000)
               closePeek()
             }}
@@ -1490,7 +1493,7 @@ export default function App() {
               : locked
                 ? 'login required'
                 : activeSessionId
-                  ? activeSession?.title || `session ${activeSessionId}`
+                  ? activeSessionId
                   : 'new session'}
           </span>
 
@@ -1536,6 +1539,7 @@ export default function App() {
               <>
                 <TerminalPane
                   resumeId={ptyResumeId}
+                  spawnNonce={ptySpawnNonce}
                   onConnectionChange={handleConnectionChange}
                   onSessionId={handleDetectedSessionId}
                 />
