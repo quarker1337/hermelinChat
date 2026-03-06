@@ -101,6 +101,28 @@ This is intentionally a hybrid UI:
 
    http://localhost:3000
 
+## Updating (no re-install needed)
+
+If you cloned the repo and created a venv once, updating is just:
+
+```bash
+cd /opt/hermilinChat   # or wherever you installed it
+./scripts/update.sh
+sudo systemctl restart hermelin   # if running via systemd
+```
+
+Or do both update + restart in one go:
+
+```bash
+./scripts/update.sh --restart
+```
+
+Useful flags:
+
+- `--skip-frontend` if you know the frontend didn’t change (skips npm build)
+- `--skip-python` if you only changed frontend assets
+- `--service NAME` if your systemd service name isn’t `hermelin`
+
 ## Dev mode (2 processes)
 
 Backend (FastAPI + WebSocket PTY proxy):
