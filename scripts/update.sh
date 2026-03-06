@@ -108,8 +108,26 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
   # shellcheck disable=SC1091
   source .venv/bin/activate
 
-  python -m pip install -U pip
-  python -m pip install -e .
+  # Some environments (notably uv-created venvs) may not include pip.
+  if ! python -m pip --version >/dev/null 2>&1; then
+    echo "==> pip missing in .venv; bootstrapping with ensurepip"
+    python -m ensurepip --upgrade >/dev/null 2>&1 || true
+  fi
+
+  if python -m pip --version >/dev/null 2>&1; then
+    python -m pip install -U pip
+    python -m pip install -e .
+  elif command -v uv >/dev/null 2>&1; then
+    echo "==> pip still unavailable; using uv pip"
+    uv pip install -e .
+  else
+    echo "ERROR: pip is missing in .venv and could not be bootstrapped." >&2
+    echo "Fix options:" >&2
+    echo "  - Recreate the venv: rm -rf .venv && python3 -m venv .venv" >&2
+    echo "  - On Debian/Ubuntu install: sudo apt install python3-venv" >&2
+    echo "  - Or install uv (https://docs.astral.sh/uv/) and rerun" >&2
+    exit 1
+  fi
 fi
 
 if [[ "$SKIP_FRONTEND" -eq 0 ]]; then

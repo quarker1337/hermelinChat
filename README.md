@@ -218,3 +218,4 @@ Security:
 
 - state.db not found: run `hermes` once to initialize, or set `HERMES_HOME` correctly.
 - hermes not found: set `HERMELIN_HERMES_CMD` to the absolute path to your `hermes` binary.
+- pip missing in venv (`No module named pip`): recreate the venv (`rm -rf .venv && python3 -m venv .venv`) or install `python3-venv` (Debian/Ubuntu).
