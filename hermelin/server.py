@@ -211,6 +211,43 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return m
         return _read_default_model_from_config_file()
 
+    def _save_dotenv_value(key: str, value: str) -> None:
+        env_path = config.hermes_home / ".env"
+
+        lines: list[str] = []
+        try:
+            if env_path.exists():
+                lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        except Exception:
+            lines = []
+
+        found = False
+        out: list[str] = []
+
+        for line in lines:
+            s = line.lstrip()
+            if s.startswith("#"):
+                out.append(line)
+                continue
+
+            if s.startswith(f"{key}="):
+                out.append(f"{key}={value}\n")
+                found = True
+            else:
+                out.append(line)
+
+        if not found:
+            if out and not out[-1].endswith("\n"):
+                out[-1] = out[-1] + "\n"
+            out.append(f"{key}={value}\n")
+
+        try:
+            config.hermes_home.mkdir(parents=True, exist_ok=True)
+            env_path.write_text("".join(out), encoding="utf-8")
+        except Exception:
+            # Best effort — model is still stored in config.yaml.
+            pass
+
     def _hermes_config_set_model(model: str) -> tuple[bool, str]:
         m = (model or "").strip()
         if not m:
@@ -253,6 +290,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             if len(out) > 800:
                 out = out[:800] + "…"
             return False, out
+
+        # IMPORTANT: hermes' runtime CLI reads LLM_MODEL from ~/.hermes/.env (loaded via dotenv)
+        # and prioritizes it over config.yaml. Keep them in sync.
+        _save_dotenv_value("LLM_MODEL", m)
 
         return True, ""
 
@@ -663,6 +704,12 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         env.setdefault("COLORTERM", "truecolor")
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("HERMES_HOME", str(config.hermes_home))
+
+        # Avoid surprising overrides: hermes' runtime CLI prioritizes env vars
+        # (and loads ~/.hermes/.env via dotenv). We want config.yaml/.env to be
+        # the source of truth, not the environment hermilinChat was launched with.
+        for k in ("LLM_MODEL", "OPENAI_MODEL", "HERMES_MODEL", "HERMES_INFERENCE_PROVIDER"):
+            env.pop(k, None)
 
         p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=cols, rows=rows)
 
