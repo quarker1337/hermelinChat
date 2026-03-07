@@ -1357,6 +1357,72 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
       },
     })
 
+    // Windows Terminal-like clipboard shortcuts:
+    // - Ctrl/Cmd+C copies selection (when something is selected)
+    // - Ctrl/Cmd+V pastes (browser handles paste into xterm textarea)
+    const copyTextToClipboard = async (text) => {
+      const t = (text || '').toString()
+      if (!t) return
+
+      // Async Clipboard API (requires HTTPS or localhost)
+      try {
+        if (window.isSecureContext && navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(t)
+          return
+        }
+      } catch {
+        // ignore
+      }
+
+      // Fallback for http://<ip>: execCommand('copy')
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = t
+        ta.setAttribute('readonly', 'true')
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        ta.style.left = '-9999px'
+        ta.style.top = '-9999px'
+        document.body.appendChild(ta)
+        ta.focus()
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      } catch {
+        // ignore
+      }
+    }
+
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== 'keydown') return true
+
+      const key = (ev.key || '').toLowerCase()
+      const ctrlOrMeta = ev.ctrlKey || ev.metaKey
+
+      // Ctrl/Cmd+C: copy selection instead of sending ^C
+      if (ctrlOrMeta && key === 'c' && term.hasSelection()) {
+        ev.preventDefault()
+        ev.stopPropagation()
+        void copyTextToClipboard(term.getSelection())
+        term.clearSelection()
+        setTimeout(() => {
+          try {
+            term.focus()
+          } catch {
+            // ignore
+          }
+        }, 0)
+        return false
+      }
+
+      // Ctrl/Cmd+V: let the browser paste; just don't forward ^V to the PTY.
+      if (ctrlOrMeta && key === 'v') {
+        return false
+      }
+
+      return true
+    })
+
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
