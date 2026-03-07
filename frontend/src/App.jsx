@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 
 import STOUT_MASCOT_RAW from './assets/stout-mascot.svg?raw'
 import HERMILIN_NOT_FLIPPED_RAW from './assets/hermilin-not-flipped.svg?raw'
+import ArtifactPanel from './components/ArtifactPanel.jsx'
 
 // ─── NOUS / HERMELIN PALETTE ───────────────────────────────────────
 const AMBER = {
@@ -2116,6 +2117,7 @@ function TerminalPane({
   spawnNonce,
   onConnectionChange,
   onSessionId,
+  onControlMessage,
   cursorStyle = DEFAULT_UI_PREFS.terminal.cursorStyle,
   cursorBlink = DEFAULT_UI_PREFS.terminal.cursorBlink,
 }) {
@@ -2128,6 +2130,11 @@ function TerminalPane({
   useEffect(() => {
     onSessionIdRef.current = onSessionId
   }, [onSessionId])
+
+  const onControlMessageRef = useRef(onControlMessage)
+  useEffect(() => {
+    onControlMessageRef.current = onControlMessage
+  }, [onControlMessage])
 
 
   useEffect(() => {
@@ -2398,6 +2405,15 @@ function TerminalPane({
           return
         }
         if (typeof ev.data === 'string') {
+          try {
+            const payload = JSON.parse(ev.data)
+            const handler = onControlMessageRef.current
+            if (payload && typeof payload === 'object' && payload.type && handler?.(payload)) {
+              return
+            }
+          } catch {
+            // not a control message
+          }
           term.write(ev.data)
           maybeDetectSessionId(ev.data)
         }
@@ -2504,6 +2520,10 @@ export default function App() {
     activeSessionIdRef.current = activeSessionId
   }, [activeSessionId])
 
+  useEffect(() => {
+    artifactTabsRef.current = artifactTabs
+  }, [artifactTabs])
+
   const handleConnectionChange = useCallback((isUp) => {
     setConnected(isUp)
     if (isUp && ptyResumeIdRef.current === null) {
@@ -2573,6 +2593,13 @@ export default function App() {
   const [peekError, setPeekError] = useState('')
   const [peekContext, setPeekContext] = useState(null)
   const [peekHit, setPeekHit] = useState(null)
+
+  const [artifactTabs, setArtifactTabs] = useState([])
+  const [artifactPanelOpen, setArtifactPanelOpen] = useState(false)
+  const [artifactPanelPinned, setArtifactPanelPinned] = useState(false)
+  const [artifactPanelDismissed, setArtifactPanelDismissed] = useState(false)
+  const [activeArtifactId, setActiveArtifactId] = useState(null)
+  const artifactTabsRef = useRef([])
 
   const [runtimeInfo, setRuntimeInfo] = useState({ loading: true, default_model: null, spawn_cwd: null })
 
@@ -2739,6 +2766,128 @@ export default function App() {
     setPeekHit(null)
   }
 
+  const normalizeArtifacts = useCallback((items) => {
+    const list = Array.isArray(items) ? items : []
+    return list
+      .filter((item) => item && typeof item === 'object' && item.id)
+      .map((item) => ({ ...item, id: String(item.id), type: String(item.type || 'unknown').toLowerCase() }))
+      .sort((a, b) => Number(b?.timestamp || 0) - Number(a?.timestamp || 0))
+  }, [])
+
+  const applyArtifacts = useCallback(
+    (items, options = {}) => {
+      const openOnChange = options.openOnChange !== false
+      const next = normalizeArtifacts(items)
+      const prev = artifactTabsRef.current || []
+      const prevById = new Map(prev.map((item) => [item.id, item]))
+      const nextById = new Map(next.map((item) => [item.id, item]))
+
+      let hasAddOrUpdate = next.length > 0 && prev.length === 0
+      for (const item of next) {
+        const prevItem = prevById.get(item.id)
+        if (!prevItem || Number(prevItem?.timestamp || 0) !== Number(item?.timestamp || 0)) {
+          hasAddOrUpdate = true
+          break
+        }
+      }
+      const hasNewIds = next.some((item) => !prevById.has(item.id))
+
+      artifactTabsRef.current = next
+      setArtifactTabs(next)
+      setActiveArtifactId((current) => {
+        if (current && nextById.has(current)) return current
+        return next[0]?.id || null
+      })
+
+      if (!next.length) {
+        setArtifactPanelDismissed(false)
+        if (!artifactPanelPinned) setArtifactPanelOpen(false)
+        return
+      }
+
+      if (openOnChange && hasAddOrUpdate && (!artifactPanelDismissed || hasNewIds)) {
+        setArtifactPanelDismissed(false)
+        setArtifactPanelOpen(true)
+        closePeek()
+      }
+    },
+    [artifactPanelDismissed, artifactPanelPinned, normalizeArtifacts],
+  )
+
+  const refreshArtifacts = useCallback(
+    async (options = {}) => {
+      if (!auth.authenticated) return
+      try {
+        const r = await fetch('/api/artifacts')
+        if (r.status === 401) {
+          setAuth((a) => ({ ...a, authenticated: false }))
+          return
+        }
+        const data = await r.json()
+        applyArtifacts(data, options)
+      } catch {
+        // ignore artifact refresh failures
+      }
+    },
+    [auth.authenticated, applyArtifacts],
+  )
+
+  const deleteArtifactTab = useCallback(
+    async (artifactId) => {
+      if (!artifactId || !auth.authenticated) return
+      try {
+        await fetch(`/api/artifacts/${encodeURIComponent(artifactId)}`, { method: 'DELETE' })
+      } catch {
+        // ignore
+      } finally {
+        refreshArtifacts({ openOnChange: false })
+      }
+    },
+    [auth.authenticated, refreshArtifacts],
+  )
+
+  const handleArtifactControlMessage = useCallback(
+    (payload) => {
+      if (!payload || typeof payload !== 'object') return false
+
+      if (payload.type === 'artifact') {
+        const artifact = payload.payload
+        if (!artifact || typeof artifact !== 'object' || !artifact.id) return true
+        const current = artifactTabsRef.current || []
+        const next = [artifact, ...current.filter((item) => item.id !== artifact.id)]
+        applyArtifacts(next, { openOnChange: true })
+        return true
+      }
+
+      if (payload.type === 'artifact_list' && Array.isArray(payload.payload)) {
+        applyArtifacts(payload.payload, { openOnChange: true })
+        return true
+      }
+
+      if (payload.type === 'artifact_close') {
+        const info = payload.payload || {}
+        if (info.action === 'close_all') {
+          applyArtifacts([], { openOnChange: false })
+          return true
+        }
+        const id = info.id || info.tab_id
+        if (id) {
+          const next = (artifactTabsRef.current || []).filter((item) => item.id !== id)
+          applyArtifacts(next, { openOnChange: false })
+          return true
+        }
+      }
+
+      return false
+    },
+    [applyArtifacts],
+  )
+
+  const closeArtifactPanel = useCallback(() => {
+    setArtifactPanelDismissed(true)
+    setArtifactPanelOpen(false)
+  }, [])
+
   const startNewSession = () => {
     if (!auth.authenticated) return
     setSearchQuery('')
@@ -2754,6 +2903,10 @@ export default function App() {
   useEffect(() => {
     if (!auth.authenticated) {
       closePeek()
+      setArtifactTabs([])
+      setActiveArtifactId(null)
+      setArtifactPanelDismissed(false)
+      setArtifactPanelOpen(false)
     }
   }, [auth.authenticated])
 
@@ -2761,6 +2914,7 @@ export default function App() {
     if (!auth.authenticated) return
     if (!hit?.id) return
 
+    setArtifactPanelOpen(false)
     setPeekOpen(true)
     setPeekHit(hit)
     setPeekLoading(true)
@@ -2819,9 +2973,39 @@ export default function App() {
       setActiveSessionId(null)
       setNewSessionStartedAt(null)
       closePeek()
+      setArtifactTabs([])
+      setActiveArtifactId(null)
+      setArtifactPanelDismissed(false)
+      setArtifactPanelOpen(false)
       await refreshAuth()
     }
   }
+
+  useEffect(() => {
+    let cancelled = false
+    let intervalId = null
+
+    if (!auth.authenticated) {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const tick = async (options = {}) => {
+      if (cancelled) return
+      await refreshArtifacts(options)
+    }
+
+    void tick({ openOnChange: true })
+    intervalId = setInterval(() => {
+      void tick({ openOnChange: true })
+    }, 1500)
+
+    return () => {
+      cancelled = true
+      if (intervalId) clearInterval(intervalId)
+    }
+  }, [auth.authenticated, refreshArtifacts])
 
   useEffect(() => {
     let cancelled = false
@@ -3562,6 +3746,7 @@ export default function App() {
                   cursorBlink={uiPrefs.terminal.cursorBlink}
                   onConnectionChange={handleConnectionChange}
                   onSessionId={handleDetectedSessionId}
+                  onControlMessage={handleArtifactControlMessage}
                 />
                 <AlignmentEasterEgg toast={eggToast} />
               </>
@@ -3581,9 +3766,56 @@ export default function App() {
                 {auth.loading ? 'checking auth…' : locked ? 'locked' : 'disconnected'}
               </div>
             )}
+
+            {!artifactPanelOpen && artifactTabs.length > 0 && (
+              <div
+                onClick={() => {
+                  setArtifactPanelDismissed(false)
+                  setArtifactPanelOpen(true)
+                }}
+                title="Open artifact panel"
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: SLATE.surface,
+                  border: `1px solid ${SLATE.border}`,
+                  borderRight: 'none',
+                  borderRadius: '6px 0 0 6px',
+                  padding: '12px 6px',
+                  cursor: 'pointer',
+                  color: SLATE.muted,
+                  zIndex: 12,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 4,
+                  userSelect: 'none',
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+                <span style={{ fontSize: 8, writingMode: 'vertical-lr', letterSpacing: '0.1em', textTransform: 'uppercase' }}>PANEL</span>
+              </div>
+            )}
           </div>
 
-          {peekOpen && (
+          {artifactPanelOpen && artifactTabs.length > 0 ? (
+            <ArtifactPanel
+              artifacts={artifactTabs}
+              activeArtifactId={activeArtifactId}
+              pinned={artifactPanelPinned}
+              onSelectArtifact={setActiveArtifactId}
+              onClose={closeArtifactPanel}
+              onRefresh={() => refreshArtifacts({ openOnChange: false })}
+              onTogglePinned={() => setArtifactPanelPinned((value) => !value)}
+              onDeleteArtifact={deleteArtifactTab}
+            />
+          ) : null}
+
+          {!artifactPanelOpen && peekOpen && (
             <PeekDrawer
               loading={peekLoading}
               error={peekError}

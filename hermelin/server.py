@@ -17,6 +17,7 @@ from fastapi import Body, FastAPI, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from .artifacts import delete_artifact, is_valid_artifact_id, latest_artifact, list_artifacts
 from .auth import (
     create_session_token,
     extract_cookie_value,
@@ -144,7 +145,30 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "spawn_cwd": str(config.spawn_cwd),
             "hermes_cmd": config.hermes_cmd,
             "hermes_home": str(config.hermes_home),
+            "artifact_dir": str(config.artifact_dir),
         }
+
+    @app.get("/api/artifacts")
+    async def api_artifacts():
+        return list_artifacts(config.artifact_dir)
+
+    @app.get("/api/artifacts/latest")
+    async def api_artifacts_latest():
+        return latest_artifact(config.artifact_dir)
+
+    @app.delete("/api/artifacts/{artifact_id}")
+    async def api_delete_artifact(artifact_id: str):
+        if not is_valid_artifact_id(artifact_id):
+            return JSONResponse({"detail": "invalid artifact id"}, status_code=400)
+        try:
+            removed = delete_artifact(config.artifact_dir, artifact_id)
+        except ValueError:
+            return JSONResponse({"detail": "invalid artifact id"}, status_code=400)
+        except FileNotFoundError:
+            removed = False
+        except Exception as exc:
+            return JSONResponse({"detail": f"failed to delete artifact: {exc}"}, status_code=500)
+        return {"ok": True, "artifact_id": artifact_id, "removed": removed}
 
     def _hermes_bin() -> str:
         try:
@@ -1162,6 +1186,39 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         print(f"[hermelin] spawning PTY cols={init_cols} rows={init_rows} (query cols={cols} rows={rows})")
         p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=init_cols, rows=init_rows)
 
+        def _artifact_snapshot() -> dict[str, dict]:
+            items = list_artifacts(config.artifact_dir)
+            out: dict[str, dict] = {}
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                artifact_id = item.get("id")
+                if not artifact_id:
+                    continue
+                out[str(artifact_id)] = item
+            return out
+
+        def _artifact_changed(prev: dict | None, curr: dict) -> bool:
+            if not isinstance(prev, dict):
+                return True
+            prev_ts = float(prev.get("timestamp") or 0.0)
+            curr_ts = float(curr.get("timestamp") or 0.0)
+            if prev_ts != curr_ts:
+                return True
+            prev_updated = float(prev.get("updated_at") or 0.0)
+            curr_updated = float(curr.get("updated_at") or 0.0)
+            return prev_updated != curr_updated
+
+        def _artifact_list_payload(snapshot: dict[str, dict]) -> str:
+            payload = sorted(snapshot.values(), key=lambda item: float(item.get("timestamp") or 0.0), reverse=True)
+            return json.dumps({"type": "artifact_list", "payload": payload}, ensure_ascii=False)
+
+        def _artifact_payload(item: dict) -> str:
+            return json.dumps({"type": "artifact", "payload": item}, ensure_ascii=False)
+
+        def _artifact_close_payload(artifact_id: str) -> str:
+            return json.dumps({"type": "artifact_close", "payload": {"id": artifact_id}}, ensure_ascii=False)
+
         def _handle_ws_message(msg: dict) -> bool:
             """Return False to stop reading (disconnect)."""
             if msg.get("type") == "websocket.disconnect":
@@ -1234,12 +1291,49 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             except Exception:
                 pass
 
+        async def pump_artifacts_to_ws() -> None:
+            try:
+                previous = _artifact_snapshot()
+                if previous:
+                    await websocket.send_text(_artifact_list_payload(previous))
+
+                while True:
+                    await asyncio.sleep(0.75)
+                    current = _artifact_snapshot()
+
+                    for artifact_id in sorted(previous.keys() - current.keys()):
+                        await websocket.send_text(_artifact_close_payload(artifact_id))
+
+                    changed_ids = [
+                        artifact_id
+                        for artifact_id, item in current.items()
+                        if artifact_id not in previous or _artifact_changed(previous.get(artifact_id), item)
+                    ]
+                    changed_ids.sort(key=lambda artifact_id: float(current[artifact_id].get("timestamp") or 0.0))
+
+                    for artifact_id in changed_ids:
+                        await websocket.send_text(_artifact_payload(current[artifact_id]))
+
+                    previous = current
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+
         t1 = asyncio.create_task(pump_pty_to_ws())
         t2 = asyncio.create_task(pump_ws_to_pty())
+        t3 = asyncio.create_task(pump_artifacts_to_ws())
 
         done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+        t3.cancel()
         for task in pending:
             task.cancel()
+        try:
+            await t3
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
 
         # Ensure subprocess is gone and fds are closed
         p.terminate()

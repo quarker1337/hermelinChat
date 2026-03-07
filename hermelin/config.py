@@ -62,5 +62,12 @@ class HermelinConfig:
         return self.hermes_home / "state.db"
 
     @property
+    def artifact_dir(self) -> Path:
+        override = os.getenv("HERMELIN_ARTIFACT_DIR", "").strip()
+        if override:
+            return Path(override).expanduser()
+        return self.hermes_home / "artifacts"
+
+    @property
     def static_dir(self) -> Path:
         return Path(__file__).resolve().parent / "static"
