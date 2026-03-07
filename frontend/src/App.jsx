@@ -431,12 +431,17 @@ const SearchHitRow = ({ hit, active, onClick }) => {
   )
 }
 
-const AlignmentEasterEgg = ({ toastText }) => {
+const AlignmentEasterEgg = ({ toast }) => {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [whisper, setWhisper] = useState('aligned to you…')
 
-  const opacity = open ? 0.75 : toastText ? 0.75 : hovered ? 0.25 : 0.08
+  const toastText = (toast?.text || '').toString().trim()
+  const toastActive = !!toastText
+  const toastMs = Math.max(300, Number(toast?.ms) || 2600)
+  const toastId = toast?.id || ''
+
+  const opacity = open ? 0.75 : toastActive ? 0.75 : hovered ? 0.25 : 0.08
 
   const fetchWhisper = useCallback(async () => {
     try {
@@ -480,16 +485,18 @@ const AlignmentEasterEgg = ({ toastText }) => {
         zIndex: 12,
         opacity,
         transition: 'all 0.35s ease',
-        transform: open ? 'scale(1.15)' : toastText ? 'scale(1.1)' : 'scale(1)',
-        filter: open || toastText ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
+        transform: open ? 'scale(1.15)' : toastActive ? 'scale(1.1)' : 'scale(1)',
+        filter: open || toastActive ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
         userSelect: 'none',
       }}
       title="the stout knows…"
     >
       <StoutMascot size={18} />
 
-      {toastText && (
+      {toastActive && (
         <div
+          key={toastId}
+          className="egg-toast-anim"
           style={{
             position: 'absolute',
             bottom: 24,
@@ -503,6 +510,8 @@ const AlignmentEasterEgg = ({ toastText }) => {
             background: `${SLATE.surface}dd`,
             border: `1px solid ${AMBER[900]}55`,
             pointerEvents: 'none',
+            animation: `eggToastFade ${toastMs}ms ease-in-out forwards`,
+            willChange: 'opacity, transform',
           }}
         >
           {toastText}
@@ -513,7 +522,7 @@ const AlignmentEasterEgg = ({ toastText }) => {
         <div
           style={{
             position: 'absolute',
-            bottom: toastText ? 42 : 24,
+            bottom: toastActive ? 42 : 24,
             right: 0,
             whiteSpace: 'nowrap',
             fontSize: 9,
@@ -1190,20 +1199,24 @@ export default function App() {
     }, 0)
   }, [])
 
-  const [eggToast, setEggToast] = useState('')
+  const [eggToast, setEggToast] = useState(null) // { id, text, ms }
   const eggToastTimerRef = useRef(null)
 
   const showEggToast = useCallback((text, ms = 2600) => {
     const t = (text || '').toString().trim()
     if (!t) return
 
-    setEggToast(t)
+    const id =
+      globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+    setEggToast({ id, text: t, ms })
+
     if (eggToastTimerRef.current) {
       clearTimeout(eggToastTimerRef.current)
       eggToastTimerRef.current = null
     }
     eggToastTimerRef.current = setTimeout(() => {
-      setEggToast('')
+      setEggToast(null)
       eggToastTimerRef.current = null
     }, ms)
   }, [])
@@ -2200,7 +2213,7 @@ export default function App() {
                   onConnectionChange={handleConnectionChange}
                   onSessionId={handleDetectedSessionId}
                 />
-                <AlignmentEasterEgg toastText={eggToast} />
+                <AlignmentEasterEgg toast={eggToast} />
               </>
             ) : (
               <div

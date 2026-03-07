@@ -13,3 +13,28 @@ body {
 * {
   box-sizing: border-box;
 }
+
+@keyframes eggToastFade {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .egg-toast-anim {
+    animation: none !important;
+  }
+}
