@@ -1295,10 +1295,17 @@ const SettingsPanel = ({
 }
 
 
-function buildWsUrl(resumeId) {
+function buildWsUrl(resumeId, opts = {}) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const params = new URLSearchParams()
+
   if (resumeId) params.set('resume', resumeId)
+
+  const cols = Number(opts?.cols || 0)
+  const rows = Number(opts?.rows || 0)
+  if (cols > 0) params.set('cols', String(cols))
+  if (rows > 0) params.set('rows', String(rows))
+
   const q = params.toString()
   return `${proto}://${window.location.host}/ws/pty${q ? `?${q}` : ''}`
 }
@@ -1386,7 +1393,21 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
     term.reset()
     term.clear()
 
-    const wsUrl = buildWsUrl(resumeId)
+    // IMPORTANT: spawn the backend PTY with the *real* cols/rows from xterm.
+    // Otherwise Rich will read the default PTY width (e.g. 120 cols) and render
+    // the banner/tools list as if the terminal were wider than the viewport.
+    let initialCols = term.cols
+    let initialRows = term.rows
+    try {
+      fit.fit()
+      const proposed = fit.proposeDimensions?.()
+      if (proposed?.cols) initialCols = proposed.cols
+      if (proposed?.rows) initialRows = proposed.rows
+    } catch {
+      // ignore
+    }
+
+    const wsUrl = buildWsUrl(resumeId, { cols: initialCols, rows: initialRows })
     const ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
