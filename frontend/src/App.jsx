@@ -3503,7 +3503,7 @@ export default function App() {
           }}
         >
           <HermilinNotFlipped size={18} />
-          <span style={{ fontSize: 12, fontWeight: 600, color: AMBER[400] }}>hermes</span>
+          <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
           <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
           <span style={{ fontSize: 11, color: SLATE.muted }}>
             {auth.loading
