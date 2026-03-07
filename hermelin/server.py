@@ -99,7 +99,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         return await call_next(request)
 
-    def _read_default_model() -> Optional[str]:
+    def _read_default_model_from_config_file() -> Optional[str]:
         cfg_path = config.hermes_home / "config.yaml"
         try:
             text = cfg_path.read_text(encoding="utf-8")
@@ -151,6 +151,64 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         except Exception:
             pass
         return "hermes"
+
+    def _parse_model_from_config_show(text: str) -> Optional[str]:
+        # hermes config show output contains multiple "Model:" lines (e.g. context compression).
+        # Prefer the one in the "◆ Model" section.
+        in_model_section = False
+        for line in (text or "").splitlines():
+            s = line.strip()
+            if not s:
+                continue
+
+            if s.lower() == "◆ model":
+                in_model_section = True
+                continue
+
+            if in_model_section and s.startswith("◆"):
+                # next section
+                break
+
+            if in_model_section and s.startswith("Model:"):
+                return s.split(":", 1)[1].strip() or None
+
+        # Fallback: first Model: line in output
+        for line in (text or "").splitlines():
+            s = line.strip()
+            if s.startswith("Model:"):
+                return s.split(":", 1)[1].strip() or None
+
+        return None
+
+    def _read_default_model_from_hermes_show() -> Optional[str]:
+        env = os.environ.copy()
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env["HERMES_HOME"] = str(config.hermes_home)
+
+        cmd = [_hermes_bin(), "config", "show"]
+        try:
+            r = subprocess.run(
+                cmd,
+                cwd=str(config.spawn_cwd),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except Exception:
+            return None
+
+        if r.returncode != 0:
+            return None
+
+        return _parse_model_from_config_show(r.stdout or "")
+
+    def _read_default_model() -> Optional[str]:
+        # Prefer Hermes' own resolver (config show) so the UI matches what Hermes reports.
+        m = _read_default_model_from_hermes_show()
+        if m:
+            return m
+        return _read_default_model_from_config_file()
 
     def _hermes_config_set_model(model: str) -> tuple[bool, str]:
         m = (model or "").strip()
