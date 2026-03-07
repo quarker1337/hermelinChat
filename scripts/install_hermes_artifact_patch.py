@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -85,83 +86,70 @@ def _detect_hermes_python(hermes_exe: Path, explicit: str) -> Path:
     return Path(shebang[0]).expanduser().resolve()
 
 
-def _candidate_repo_paths(hermes_exe: Path) -> dict[str, Path] | None:
-    candidates = []
-    try:
-        candidates.append(hermes_exe.resolve().parents[2])
-    except Exception:
-        pass
-    try:
-        candidates.append(hermes_exe.parent.parent.parent.resolve())
-    except Exception:
-        pass
-
-    seen = set()
-    for root in candidates:
-        root = root.resolve()
-        if root in seen:
-            continue
-        seen.add(root)
-        model_tools = root / 'model_tools.py'
-        toolsets = root / 'toolsets.py'
-        tools_dir = root / 'tools'
-        if model_tools.is_file() and toolsets.is_file() and (tools_dir / '__init__.py').is_file():
-            return {
-                'model_tools': model_tools,
-                'toolsets': toolsets,
-                'tools_dir': tools_dir,
-            }
-    return None
-
-
 def _discover_live_paths(hermes_exe: Path, hermes_python: Path) -> dict[str, Path]:
-    repo_paths = _candidate_repo_paths(hermes_exe)
-    if repo_paths is not None:
-        return repo_paths
+    """Locate the live Hermes source files we need to patch.
+
+    This intentionally avoids importing Hermes modules (which can have side
+    effects and optional dependency imports). Instead, we ask the Hermes
+    interpreter to resolve module specs for:
+
+    - model_tools (for tool discovery imports)
+    - toolsets (for toolset definitions)
+    - tools package directory (to install render_panel_tool.py)
+
+    This works for both normal installs and editable (PEP 660) installs.
+    """
 
     code = r'''
 import json
-import site
+import importlib.util
 from pathlib import Path
 
-bases = []
-try:
-    bases.extend(Path(p).resolve() for p in site.getsitepackages())
-except Exception:
-    pass
-try:
-    user_site = site.getusersitepackages()
-    if user_site:
-        bases.append(Path(user_site).resolve())
-except Exception:
-    pass
 
-for base in bases:
-    model_tools = base / 'model_tools.py'
-    toolsets = base / 'toolsets.py'
-    tools_dir = base / 'tools'
-    if model_tools.is_file() and toolsets.is_file() and (tools_dir / '__init__.py').is_file():
-        print(json.dumps({
-            'model_tools': str(model_tools),
-            'toolsets': str(toolsets),
-            'tools_dir': str(tools_dir),
-        }))
-        raise SystemExit(0)
+def _origin(name: str) -> str:
+    spec = importlib.util.find_spec(name)
+    if spec is None:
+        raise SystemExit(f"missing module: {name}")
+    origin = spec.origin
+    if not origin:
+        raise SystemExit(f"missing origin for module: {name}")
+    return str(Path(origin).resolve())
 
-raise SystemExit(1)
+
+model_tools = _origin("model_tools")
+toolsets = _origin("toolsets")
+
+tools_spec = importlib.util.find_spec("tools")
+if tools_spec is None:
+    raise SystemExit("missing module: tools")
+
+if tools_spec.submodule_search_locations:
+    tools_dir = str(Path(list(tools_spec.submodule_search_locations)[0]).resolve())
+elif tools_spec.origin:
+    tools_dir = str(Path(tools_spec.origin).resolve().parent)
+else:
+    raise SystemExit("could not resolve tools package directory")
+
+print(json.dumps({
+    "model_tools": model_tools,
+    "toolsets": toolsets,
+    "tools_dir": tools_dir,
+}, ensure_ascii=False))
 '''
+
     result = subprocess.run(
-        [str(hermes_python), '-c', code],
+        [str(hermes_python), "-c", code],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        stderr = (result.stderr or '').strip()
+        stderr = (result.stderr or "").strip()
         raise RuntimeError(
-            'Could not locate live Hermes source files from the active installation. '
-            'If Hermes is installed in a custom location, pass --hermes-python explicitly. '
-            f'Stderr: {stderr or "<none>"}'
+            "Could not locate live Hermes source files from the active installation. "
+            "If Hermes is installed in a custom location, pass --hermes-python explicitly. "
+            f"Stderr: {stderr or '<none>'}"
         )
+
     try:
         data = json.loads(result.stdout.strip())
     except Exception as exc:

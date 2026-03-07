@@ -22,7 +22,10 @@ class HermelinConfig:
     # Examples:
     #   hermes
     #   /usr/local/bin/hermes
-    hermes_cmd: str = os.getenv("HERMELIN_HERMES_CMD", "hermes")
+    hermes_cmd: str = os.getenv(
+        "HERMELIN_HERMES_CMD",
+        'hermes chat --toolsets "hermes-cli, ui_panel"',
+    )
 
     # Hermes Agent home (contains state.db, config.yaml, etc.)
     hermes_home: Path = _DEFAULT_HERMES_HOME

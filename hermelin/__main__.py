@@ -18,7 +18,13 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="hermelin", description="hermelinChat web UI for Hermes Agent")
     p.add_argument("--host", default=os.getenv("HERMELIN_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.getenv("HERMELIN_PORT", "3000")))
-    p.add_argument("--hermes-cmd", default=os.getenv("HERMELIN_HERMES_CMD", "hermes"))
+    p.add_argument(
+        "--hermes-cmd",
+        default=os.getenv(
+            "HERMELIN_HERMES_CMD",
+            'hermes chat --toolsets "hermes-cli, ui_panel"',
+        ),
+    )
     p.add_argument("--hermes-home", default=os.getenv("HERMES_HOME", str(Path.home() / ".hermes")))
     p.add_argument("--spawn-cwd", default=os.getenv("HERMELIN_SPAWN_CWD", os.getcwd()))
     p.add_argument(
