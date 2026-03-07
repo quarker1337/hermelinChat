@@ -1393,24 +1393,15 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
     term.reset()
     term.clear()
 
-    // IMPORTANT: spawn the backend PTY with the *real* cols/rows from xterm.
-    // Otherwise Rich will read the default PTY width (e.g. 120 cols) and render
-    // the banner/tools list as if the terminal were wider than the viewport.
-    let initialCols = term.cols
-    let initialRows = term.rows
-    try {
-      fit.fit()
-      const proposed = fit.proposeDimensions?.()
-      if (proposed?.cols) initialCols = proposed.cols
-      if (proposed?.rows) initialRows = proposed.rows
-    } catch {
-      // ignore
-    }
-
-    const wsUrl = buildWsUrl(resumeId, { cols: initialCols, rows: initialRows })
-    const ws = new WebSocket(wsUrl)
-    ws.binaryType = 'arraybuffer'
-    wsRef.current = ws
+    // Webfonts (JetBrains Mono) load async. If we spawn the PTY before the font
+    // is ready, fit/proposeDimensions can compute a cols/rows value based on
+    // fallback font metrics, causing Rich to render the banner at the wrong
+    // width. We therefore wait for fonts before the initial WS connect.
+    let cancelled = false
+    let ws = null
+    let ro = null
+    let resizeTimer = null
+    let onDataDisposable = null
 
     const encoder = new TextEncoder()
 
@@ -1439,14 +1430,13 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
       } catch {
         // ignore
       }
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
       }
     }
 
     // Debounce resize events so dragging the window edge doesn't spam fit() and
     // trigger ResizeObserver loop warnings.
-    let resizeTimer = null
     const scheduleResize = () => {
       if (resizeTimer) clearTimeout(resizeTimer)
       resizeTimer = setTimeout(() => {
@@ -1455,50 +1445,88 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
       }, 50)
     }
 
-    const ro = new ResizeObserver(() => scheduleResize())
-    ro.observe(container)
-    window.addEventListener('resize', scheduleResize)
-
-    const onDataDisposable = term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(encoder.encode(data))
-      }
-    })
-
-    ws.onopen = () => {
-      onConnectionChange?.(true)
-      // initial fit + resize
-      setTimeout(sendResize, 10)
-    }
-
-    ws.onclose = () => {
-      onConnectionChange?.(false)
-    }
-
-    ws.onerror = () => {
-      onConnectionChange?.(false)
-    }
-
-    ws.onmessage = (ev) => {
-      if (ev.data instanceof ArrayBuffer) {
-        const u8 = new Uint8Array(ev.data)
-        term.write(u8)
-        try {
-          maybeDetectSessionId(decoder.decode(u8, { stream: true }))
-        } catch {
-          // ignore
+    const start = async () => {
+      try {
+        // Trigger the actual font load so document.fonts.ready includes it.
+        if (document?.fonts?.load) {
+          await document.fonts.load('13px "JetBrains Mono"')
         }
-        return
+        if (document?.fonts?.ready) {
+          await document.fonts.ready
+        }
+      } catch {
+        // ignore
       }
-      if (typeof ev.data === 'string') {
-        term.write(ev.data)
-        maybeDetectSessionId(ev.data)
+      if (cancelled) return
+
+      // IMPORTANT: spawn the backend PTY with the *real* cols/rows from xterm.
+      // Otherwise Rich will read the default PTY width (e.g. 120 cols) and render
+      // the banner/tools list as if the terminal were wider than the viewport.
+      let initialCols = term.cols
+      let initialRows = term.rows
+      try {
+        fit.fit()
+        const proposed = fit.proposeDimensions?.()
+        if (proposed?.cols) initialCols = proposed.cols
+        if (proposed?.rows) initialRows = proposed.rows
+      } catch {
+        // ignore
+      }
+      if (cancelled) return
+
+      const wsUrl = buildWsUrl(resumeId, { cols: initialCols, rows: initialRows })
+      ws = new WebSocket(wsUrl)
+      ws.binaryType = 'arraybuffer'
+      wsRef.current = ws
+
+      ro = new ResizeObserver(() => scheduleResize())
+      ro.observe(container)
+      window.addEventListener('resize', scheduleResize)
+
+      onDataDisposable = term.onData((data) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(encoder.encode(data))
+        }
+      })
+
+      ws.onopen = () => {
+        onConnectionChange?.(true)
+        // initial fit + resize
+        setTimeout(sendResize, 10)
+      }
+
+      ws.onclose = () => {
+        onConnectionChange?.(false)
+      }
+
+      ws.onerror = () => {
+        onConnectionChange?.(false)
+      }
+
+      ws.onmessage = (ev) => {
+        if (ev.data instanceof ArrayBuffer) {
+          const u8 = new Uint8Array(ev.data)
+          term.write(u8)
+          try {
+            maybeDetectSessionId(decoder.decode(u8, { stream: true }))
+          } catch {
+            // ignore
+          }
+          return
+        }
+        if (typeof ev.data === 'string') {
+          term.write(ev.data)
+          maybeDetectSessionId(ev.data)
+        }
       }
     }
+
+    start()
 
     return () => {
+      cancelled = true
       try {
-        ro.disconnect()
+        ro?.disconnect()
       } catch {
         // ignore
       }
@@ -1513,15 +1541,17 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
         // ignore
       }
       try {
-        onDataDisposable.dispose()
+        onDataDisposable?.dispose()
       } catch {
         // ignore
       }
       try {
-        ws.close()
+        ws?.close()
       } catch {
         // ignore
       }
+
+      wsRef.current = null
     }
   }, [resumeId, spawnNonce, onConnectionChange])
 
