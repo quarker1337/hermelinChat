@@ -518,6 +518,116 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "model": _read_default_model() or model,
         }
 
+    def _read_dotenv_vars() -> dict[str, str]:
+        env_path = config.hermes_home / ".env"
+        out: dict[str, str] = {}
+        try:
+            if not env_path.exists():
+                return out
+            for raw in env_path.read_text(encoding="utf-8").splitlines():
+                line = (raw or "").strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k = k.strip()
+                v = v.strip().strip('"\'')
+                if k:
+                    out[k] = v
+        except Exception:
+            return out
+        return out
+
+    _SUPPORTED_API_KEYS = {
+        # Model provider
+        "OPENROUTER_API_KEY",
+        # Tools
+        "FIRECRAWL_API_KEY",
+        "BROWSERBASE_API_KEY",
+        "BROWSERBASE_PROJECT_ID",
+        "GITHUB_TOKEN",
+    }
+
+    def _hermes_config_set_env_key(key: str, value: str) -> tuple[bool, str]:
+        k = (key or "").strip().upper()
+        v = (value or "").strip()
+        if not k:
+            return False, "key is required"
+        if k not in _SUPPORTED_API_KEYS:
+            return False, "unsupported key"
+        if not v:
+            return False, "value is required"
+        if len(v) > 2000:
+            return False, "value too long"
+
+        env = os.environ.copy()
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env["HERMES_HOME"] = str(config.hermes_home)
+
+        cmd = [_hermes_bin(), "config", "set", k, v]
+        try:
+            r = subprocess.run(
+                cmd,
+                cwd=str(config.spawn_cwd),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except FileNotFoundError:
+            return False, f"executable not found: {cmd[0]}"
+        except subprocess.TimeoutExpired:
+            return False, "timed out"
+        except Exception as e:
+            return False, str(e)
+
+        if r.returncode != 0:
+            msg = (r.stdout or "").strip()
+            err = (r.stderr or "").strip()
+            out = "\n".join([x for x in [msg, err] if x])
+            if not out:
+                out = f"hermes config set failed (code {r.returncode})"
+            if len(out) > 800:
+                out = out[:800] + "…"
+            return False, out
+
+        return True, ""
+
+    @app.get("/api/settings/keys")
+    async def api_settings_keys():
+        env_vars = _read_dotenv_vars()
+
+        def _is_set(name: str) -> bool:
+            v = env_vars.get(name)
+            return bool(v and str(v).strip())
+
+        keys = {k: {"set": _is_set(k)} for k in sorted(_SUPPORTED_API_KEYS)}
+        return {"keys": keys}
+
+    @app.post("/api/settings/keys")
+    async def api_settings_keys_set(payload: dict = Body(...)):
+        key = str(payload.get("key") or "").strip().upper()
+        value = str(payload.get("value") or "").strip()
+        if not key:
+            return JSONResponse({"detail": "key required"}, status_code=400)
+        if key not in _SUPPORTED_API_KEYS:
+            return JSONResponse({"detail": "unsupported key"}, status_code=400)
+        if not value:
+            return JSONResponse({"detail": "value required"}, status_code=400)
+
+        ok, err = await asyncio.to_thread(_hermes_config_set_env_key, key, value)
+        if not ok:
+            return JSONResponse(
+                {
+                    "detail": "failed to set key",
+                    "error": err,
+                },
+                status_code=500,
+            )
+
+        return {"ok": True, "key": key}
+
     @app.get("/api/whisper")
     async def api_whisper():
         # Return a very short UI "whisper" string (randomly sampled).
@@ -708,7 +818,17 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         # Avoid surprising overrides: hermes' runtime CLI prioritizes env vars
         # (and loads ~/.hermes/.env via dotenv). We want config.yaml/.env to be
         # the source of truth, not the environment hermilinChat was launched with.
-        for k in ("LLM_MODEL", "OPENAI_MODEL", "HERMES_MODEL", "HERMES_INFERENCE_PROVIDER"):
+        for k in (
+            "LLM_MODEL",
+            "OPENAI_MODEL",
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "OPENROUTER_API_KEY",
+            "FIRECRAWL_API_KEY",
+            "BROWSERBASE_API_KEY",
+            "BROWSERBASE_PROJECT_ID",
+            "GITHUB_TOKEN",
+        ):
             env.pop(k, None)
 
         p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=cols, rows=rows)
