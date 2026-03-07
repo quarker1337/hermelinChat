@@ -1125,8 +1125,20 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
       }
     }
 
-    const ro = new ResizeObserver(() => sendResize())
+    // Debounce resize events so dragging the window edge doesn't spam fit() and
+    // trigger ResizeObserver loop warnings.
+    let resizeTimer = null
+    const scheduleResize = () => {
+      if (resizeTimer) clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null
+        sendResize()
+      }, 60)
+    }
+
+    const ro = new ResizeObserver(() => scheduleResize())
     ro.observe(container)
+    window.addEventListener('resize', scheduleResize)
 
     const onDataDisposable = term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -1168,6 +1180,16 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
     return () => {
       try {
         ro.disconnect()
+      } catch {
+        // ignore
+      }
+      try {
+        window.removeEventListener('resize', scheduleResize)
+      } catch {
+        // ignore
+      }
+      try {
+        if (resizeTimer) clearTimeout(resizeTimer)
       } catch {
         // ignore
       }
