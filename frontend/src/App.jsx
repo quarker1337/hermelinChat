@@ -431,12 +431,12 @@ const SearchHitRow = ({ hit, active, onClick }) => {
   )
 }
 
-const AlignmentEasterEgg = () => {
+const AlignmentEasterEgg = ({ toastText }) => {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [whisper, setWhisper] = useState('aligned to you…')
 
-  const opacity = open ? 0.75 : hovered ? 0.25 : 0.08
+  const opacity = open ? 0.75 : toastText ? 0.75 : hovered ? 0.25 : 0.08
 
   const fetchWhisper = useCallback(async () => {
     try {
@@ -480,18 +480,40 @@ const AlignmentEasterEgg = () => {
         zIndex: 12,
         opacity,
         transition: 'all 0.35s ease',
-        transform: open ? 'scale(1.15)' : 'scale(1)',
-        filter: open ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
+        transform: open ? 'scale(1.15)' : toastText ? 'scale(1.1)' : 'scale(1)',
+        filter: open || toastText ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
         userSelect: 'none',
       }}
       title="the stout knows…"
     >
       <StoutMascot size={18} />
-      {open && (
+
+      {toastText && (
         <div
           style={{
             position: 'absolute',
             bottom: 24,
+            right: 0,
+            whiteSpace: 'nowrap',
+            fontSize: 9,
+            color: AMBER[400],
+            textShadow: `0 0 8px ${AMBER[400]}40`,
+            padding: '3px 7px',
+            borderRadius: 999,
+            background: `${SLATE.surface}dd`,
+            border: `1px solid ${AMBER[900]}55`,
+            pointerEvents: 'none',
+          }}
+        >
+          {toastText}
+        </div>
+      )}
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: toastText ? 42 : 24,
             right: 0,
             whiteSpace: 'nowrap',
             fontSize: 9,
@@ -683,7 +705,6 @@ const SettingsPanel = ({
   defaultModel,
   activeModel,
   onModelSaved,
-  onStartNewSession,
 }) => {
   const initial = (defaultModel || '').trim()
   const [savedModel, setSavedModel] = useState(initial)
@@ -740,6 +761,7 @@ const SettingsPanel = ({
       setDraftModel(newModel)
       setStatus({ kind: 'ok', text: 'saved' })
       onModelSaved?.(newModel)
+      onClose?.()
     } catch {
       setStatus({ kind: 'error', text: 'save failed' })
     } finally {
@@ -870,29 +892,6 @@ const SettingsPanel = ({
               })}
             </div>
 
-            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-              <div
-                onClick={() => {
-                  if (locked) return
-                  onStartNewSession?.()
-                }}
-                title={locked ? 'Login required' : 'Start a new session (to apply changes)'}
-                style={{
-                  padding: '9px 12px',
-                  border: `1px solid ${AMBER[700]}`,
-                  background: `${AMBER[900]}55`,
-                  color: AMBER[400],
-                  cursor: locked ? 'default' : 'pointer',
-                  fontSize: 12,
-                  userSelect: 'none',
-                  borderRadius: 8,
-                  opacity: locked ? 0.4 : 1,
-                }}
-              >
-                new session
-              </div>
-              <div style={{ flex: 1 }} />
-            </div>
           </CollapsiblePanel>
         </div>
 
@@ -1189,6 +1188,30 @@ export default function App() {
         // ignore
       }
     }, 0)
+  }, [])
+
+  const [eggToast, setEggToast] = useState('')
+  const eggToastTimerRef = useRef(null)
+
+  const showEggToast = useCallback((text, ms = 2600) => {
+    const t = (text || '').toString().trim()
+    if (!t) return
+
+    setEggToast(t)
+    if (eggToastTimerRef.current) {
+      clearTimeout(eggToastTimerRef.current)
+      eggToastTimerRef.current = null
+    }
+    eggToastTimerRef.current = setTimeout(() => {
+      setEggToast('')
+      eggToastTimerRef.current = null
+    }, ms)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (eggToastTimerRef.current) clearTimeout(eggToastTimerRef.current)
+    }
   }, [])
 
   const [auth, setAuth] = useState({ loading: true, enabled: false, authenticated: false })
@@ -2177,7 +2200,7 @@ export default function App() {
                   onConnectionChange={handleConnectionChange}
                   onSessionId={handleDetectedSessionId}
                 />
-                <AlignmentEasterEgg />
+                <AlignmentEasterEgg toastText={eggToast} />
               </>
             ) : (
               <div
@@ -2317,16 +2340,13 @@ export default function App() {
           locked={locked}
           defaultModel={runtimeInfo.default_model}
           activeModel={activeSession?.model || null}
-          onModelSaved={(m) =>
+          onModelSaved={(m) => {
             setRuntimeInfo((prev) => ({
               ...prev,
               loading: false,
               default_model: m || null,
             }))
-          }
-          onStartNewSession={() => {
-            startNewSession()
-            closeSettings()
+            showEggToast('settings saved')
           }}
         />
       )}
