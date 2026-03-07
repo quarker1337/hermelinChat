@@ -36,6 +36,9 @@ const UI_PREFS_STORAGE_KEY = 'hermilinChat.uiPrefs'
 
 const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
 
+// First tagged release of the hermilinChat UI.
+const HERMILINCHAT_VERSION = '0.10'
+
 const DEFAULT_UI_PREFS = {
   particles: {
     enabled: true,
@@ -750,11 +753,27 @@ const PeekDrawer = ({ loading, error, context, hit, onClose, onOpenSession }) =>
   )
 }
 
-const CollapsiblePanel = ({ title, defaultOpen = false, dense = false, children }) => {
-  const [open, setOpen] = useState(defaultOpen)
+const CollapsiblePanel = ({
+  title,
+  open: openProp,
+  onToggle,
+  defaultOpen = false,
+  dense = false,
+  children,
+}) => {
+  const [openState, setOpenState] = useState(defaultOpen)
+  const controlled = typeof openProp === 'boolean'
+  const open = controlled ? openProp : openState
+
   const headerPad = dense ? '8px 10px' : '10px 12px'
   const bodyPad = dense ? '8px 10px 10px 22px' : '10px 12px 12px 22px'
   const fs = dense ? 11 : 12
+
+  const toggle = () => {
+    const next = !open
+    if (!controlled) setOpenState(next)
+    onToggle?.(next)
+  }
 
   return (
     <div
@@ -766,7 +785,7 @@ const CollapsiblePanel = ({ title, defaultOpen = false, dense = false, children 
       }}
     >
       <div
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         style={{
           padding: headerPad,
           display: 'flex',
@@ -813,6 +832,11 @@ const SettingsPanel = ({
   onUiPrefsChange,
 }) => {
   const ui = normalizeUiPrefs(uiPrefs)
+
+  const [openPanel, setOpenPanel] = useState(null)
+  const togglePanel = (id) => {
+    setOpenPanel((cur) => (cur === id ? null : id))
+  }
 
   const initial = (defaultModel || '').trim()
   const [savedModel, setSavedModel] = useState(initial)
@@ -1162,7 +1186,11 @@ const SettingsPanel = ({
         </div>
 
         <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <CollapsiblePanel title="Model" defaultOpen>
+          <CollapsiblePanel
+            title="Model"
+            open={openPanel === 'model'}
+            onToggle={() => togglePanel('model')}
+          >
             <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
               This writes Hermes’ default model via <span style={{ color: AMBER[500] }}>hermes config set</span>. Only
               affects <span style={{ color: AMBER[400] }}>new sessions</span>.
@@ -1245,7 +1273,11 @@ const SettingsPanel = ({
 
           </CollapsiblePanel>
 
-          <CollapsiblePanel title="API-Keys">
+          <CollapsiblePanel
+            title="API-Keys"
+            open={openPanel === 'keys'}
+            onToggle={() => togglePanel('keys')}
+          >
             <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
               Keys are written to <span style={{ color: AMBER[500] }}>~/.hermes/.env</span> via{' '}
               <span style={{ color: AMBER[500] }}>hermes config set</span>. Leave fields blank to keep existing values.
@@ -1456,7 +1488,11 @@ const SettingsPanel = ({
             </div>
           </CollapsiblePanel>
 
-          <CollapsiblePanel title="Hermes-Agent">
+          <CollapsiblePanel
+            title="Hermes-Agent"
+            open={openPanel === 'agent'}
+            onToggle={() => togglePanel('agent')}
+          >
             <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
               These settings write to <span style={{ color: AMBER[500] }}>~/.hermes/config.yaml</span> via{' '}
               <span style={{ color: AMBER[500] }}>hermes config set</span>. They usually affect{' '}
@@ -1859,7 +1895,11 @@ const SettingsPanel = ({
             )}
           </CollapsiblePanel>
 
-          <CollapsiblePanel title="UI">
+          <CollapsiblePanel
+            title="UI"
+            open={openPanel === 'ui'}
+            onToggle={() => togglePanel('ui')}
+          >
             <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
               UI preferences are stored in this browser (localStorage) and apply instantly.
             </div>
@@ -2006,27 +2046,37 @@ const SettingsPanel = ({
           </CollapsiblePanel>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ fontSize: 11, color: statusColor }}>
-            {locked ? 'login required' : saving ? 'saving…' : status.text || (dirty ? 'unsaved changes' : 'saved')}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 11, color: statusColor }}>
+              {locked
+                ? 'login required'
+                : saving
+                  ? 'saving…'
+                  : status.text || (dirty ? 'unsaved changes' : 'saved')}
+            </div>
+            <div style={{ flex: 1 }} />
+            <div
+              onClick={doSave}
+              style={{
+                padding: '9px 12px',
+                border: `1px solid ${canSave ? AMBER[700] : SLATE.border}`,
+                background: canSave ? `${AMBER[900]}55` : SLATE.elevated,
+                color: canSave ? AMBER[400] : SLATE.muted,
+                cursor: canSave ? 'pointer' : 'default',
+                fontSize: 12,
+                userSelect: 'none',
+                borderRadius: 8,
+                opacity: canSave ? 1 : 0.5,
+              }}
+              title={dirty ? 'Save settings' : 'No changes'}
+            >
+              save{dirtyCount ? ` (${dirtyCount})` : ''}
+            </div>
           </div>
-          <div style={{ flex: 1 }} />
-          <div
-            onClick={doSave}
-            style={{
-              padding: '9px 12px',
-              border: `1px solid ${canSave ? AMBER[700] : SLATE.border}`,
-              background: canSave ? `${AMBER[900]}55` : SLATE.elevated,
-              color: canSave ? AMBER[400] : SLATE.muted,
-              cursor: canSave ? 'pointer' : 'default',
-              fontSize: 12,
-              userSelect: 'none',
-              borderRadius: 8,
-              opacity: canSave ? 1 : 0.5,
-            }}
-            title={dirty ? 'Save settings' : 'No changes'}
-          >
-            save{dirtyCount ? ` (${dirtyCount})` : ''}
+
+          <div style={{ fontSize: 10, color: SLATE.muted, textAlign: 'right' }}>
+            hermilinChat Version: {HERMILINCHAT_VERSION}
           </div>
         </div>
       </div>
