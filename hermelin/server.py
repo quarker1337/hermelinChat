@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 from pathlib import Path
@@ -311,26 +312,124 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         return out
 
+    _model_list_cache: dict = {"models": None, "source": None}
+
+    def _read_model_list_from_hermes_cli() -> tuple[Optional[list[dict]], str]:
+        """
+        Best-effort: read Hermes Agent's canonical OpenRouter model menu (the one used by `hermes model`).
+
+        We run inside Hermes' own venv (as referenced by the hermes launcher shebang),
+        so hermilinChat doesn't need hermes_cli installed in its own venv.
+        """
+
+        hermes_bin = _hermes_bin()
+        hermes_path = hermes_bin
+        if not os.path.isabs(hermes_path):
+            hermes_path = shutil.which(hermes_bin) or hermes_path
+
+        try:
+            first = Path(hermes_path).read_text(encoding="utf-8").splitlines()[0].strip()
+        except Exception:
+            return None, "no_shebang"
+
+        if not first.startswith("#!"):
+            return None, "no_shebang"
+
+        shebang = first[2:].strip()
+        try:
+            argv = shlex.split(shebang)
+        except Exception:
+            argv = shebang.split()
+
+        if not argv:
+            return None, "no_shebang"
+
+        # Handle: #!/usr/bin/env python3
+        if Path(argv[0]).name == "env" and len(argv) >= 2:
+            py = shutil.which(argv[1]) or argv[1]
+            py_argv = [py] + argv[2:]
+        else:
+            py_argv = argv
+
+        py = py_argv[0]
+        extra = py_argv[1:]
+
+        code = (
+            "import json\n"
+            "from hermes_cli.models import OPENROUTER_MODELS\n"
+            "out=[]\n"
+            "for mid, desc in OPENROUTER_MODELS:\n"
+            "  label = f\"{mid} ({desc})\" if desc else mid\n"
+            "  out.append({'value': mid, 'label': label})\n"
+            "print(json.dumps(out))\n"
+        )
+
+        env = os.environ.copy()
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env["HERMES_HOME"] = str(config.hermes_home)
+
+        cmd = [py] + extra + ["-c", code]
+        try:
+            r = subprocess.run(
+                cmd,
+                cwd=str(config.spawn_cwd),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except Exception:
+            return None, "hermes_cli_error"
+
+        if r.returncode != 0:
+            return None, "hermes_cli_error"
+
+        try:
+            data = json.loads((r.stdout or "").strip())
+        except Exception:
+            return None, "hermes_cli_parse_error"
+
+        if not isinstance(data, list) or not data:
+            return None, "hermes_cli_empty"
+
+        models: list[dict] = []
+        seen: set[str] = set()
+        for m in data:
+            if not isinstance(m, dict):
+                continue
+            value = str(m.get("value") or "").strip()
+            label = str(m.get("label") or value).strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            models.append({"value": value, "label": label})
+
+        if "__custom__" not in seen:
+            models.append({"value": "__custom__", "label": "Custom model"})
+
+        return models, "hermes_cli"
+
     def _read_model_list_options() -> tuple[list[dict], str]:
         env_path = (os.getenv("HERMELIN_MODEL_LIST_PATH") or "").strip()
-
         if env_path:
-            candidates = [Path(env_path).expanduser()]
-        else:
-            candidates = [
-                config.spawn_cwd / "hermes-agent-modellist.txt",
-                Path(__file__).resolve().parent.parent / "hermes-agent-modellist.txt",
-            ]
-
-        for p in candidates:
             try:
+                p = Path(env_path).expanduser()
                 text = p.read_text(encoding="utf-8")
+                models = _parse_model_list_text(text)
+                if models:
+                    return models, str(p)
             except Exception:
-                continue
+                pass
 
-            models = _parse_model_list_text(text)
-            if models:
-                return models, str(p)
+        cached = _model_list_cache.get("models")
+        if cached:
+            return cached, str(_model_list_cache.get("source") or "cache")
+
+        models, source = _read_model_list_from_hermes_cli()
+        if models:
+            _model_list_cache["models"] = models
+            _model_list_cache["source"] = source
+            return models, source
 
         fallback = [
             {"value": "openai/gpt-5.2", "label": "openai/gpt-5.2"},
