@@ -727,6 +727,7 @@ const SettingsPanel = ({
   const [draftModel, setDraftModel] = useState(initial)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState({ kind: '', text: '' })
+  const [forceCustomModel, setForceCustomModel] = useState(false)
 
   const dirty = (draftModel || '').trim() !== (savedModel || '').trim()
 
@@ -821,7 +822,8 @@ const SettingsPanel = ({
   }, [])
 
   const draftTrim = (draftModel || '').trim()
-  const modelSelectValue = modelOptions.items.some((m) => m.value === draftTrim) ? draftTrim : '__custom__'
+  const draftIsKnownModel = modelOptions.items.some((m) => m.value === draftTrim && m.value !== '__custom__')
+  const modelSelectValue = forceCustomModel ? '__custom__' : draftIsKnownModel ? draftTrim : '__custom__'
 
   const statusColor =
     status.kind === 'error' ? SLATE.danger : status.kind === 'ok' ? SLATE.success : SLATE.muted
@@ -888,7 +890,14 @@ const SettingsPanel = ({
               onChange={(e) => {
                 const v = e.target.value
                 if (locked) return
-                if (v && v !== '__custom__') setDraftModel(v)
+
+                if (v === '__custom__') {
+                  setForceCustomModel(true)
+                } else {
+                  setForceCustomModel(false)
+                  if (v) setDraftModel(v)
+                }
+
                 setStatus({ kind: '', text: '' })
               }}
               disabled={locked}
@@ -917,6 +926,7 @@ const SettingsPanel = ({
               <input
                 value={draftModel}
                 onChange={(e) => {
+                  setForceCustomModel(true)
                   setDraftModel(e.target.value)
                   setStatus({ kind: '', text: '' })
                 }}
