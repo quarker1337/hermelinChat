@@ -30,6 +30,56 @@ const SLATE = {
   success: '#38c878',
 }
 
+// ─── UI PREFS (LOCAL) ───────────────────────────────────────────────
+// Stored in localStorage and applied instantly (no backend required).
+const UI_PREFS_STORAGE_KEY = 'hermilinChat.uiPrefs'
+
+const DEFAULT_UI_PREFS = {
+  particles: {
+    enabled: true,
+    // 0..100 (50 matches the current look)
+    intensity: 50,
+  },
+}
+
+function clampNum(n, min, max) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return min
+  return Math.min(max, Math.max(min, x))
+}
+
+function normalizeUiPrefs(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {}
+  const p = r.particles && typeof r.particles === 'object' ? r.particles : {}
+
+  return {
+    particles: {
+      enabled: p.enabled === undefined ? DEFAULT_UI_PREFS.particles.enabled : !!p.enabled,
+      intensity: clampNum(p.intensity ?? DEFAULT_UI_PREFS.particles.intensity, 0, 100),
+    },
+  }
+}
+
+function loadUiPrefs() {
+  if (typeof window === 'undefined') return normalizeUiPrefs(DEFAULT_UI_PREFS)
+  try {
+    const s = window.localStorage?.getItem(UI_PREFS_STORAGE_KEY)
+    if (!s) return normalizeUiPrefs(DEFAULT_UI_PREFS)
+    return normalizeUiPrefs(JSON.parse(s))
+  } catch {
+    return normalizeUiPrefs(DEFAULT_UI_PREFS)
+  }
+}
+
+function saveUiPrefs(prefs) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage?.setItem(UI_PREFS_STORAGE_KEY, JSON.stringify(prefs))
+  } catch {
+    // ignore
+  }
+}
+
 // Small inline version for headers
 // Reuses the app favicon (yellow circle + hermelin face)
 const InvertelinSmall = ({ size = 22 }) => (
@@ -150,25 +200,35 @@ const LogoutIcon = ({ size = 16 }) => (
 )
 
 // ─── PARTICLE FIELD ────────────────────────────────────────────────
-const ParticleField = () => {
+const ParticleField = ({ intensity = 50 }) => {
   const canvasRef = useRef(null)
+
+  const pct = clampNum(intensity, 0, 100)
+  // 50 == current look
+  const factor = pct / 50
+  const canvasOpacity = clampNum(0.5 * factor, 0, 1)
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
     let animId
     let particles = []
 
     const init = () => {
       canvas.width = canvas.parentElement?.offsetWidth || 800
       canvas.height = canvas.parentElement?.offsetHeight || 600
-      particles = Array.from({ length: 60 }, () => ({
+
+      const count = Math.max(0, Math.round(60 * factor))
+      particles = Array.from({ length: count }, () => ({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
         vx: (Math.random() - 0.5) * 0.3,
         vy: (Math.random() - 0.5) * 0.3,
         r: Math.random() * 1.5 + 0.5,
-        o: Math.random() * 0.15 + 0.03,
+        o: Math.min(0.22, (Math.random() * 0.15 + 0.03) * factor),
       }))
     }
 
@@ -186,7 +246,8 @@ const ParticleField = () => {
         ctx.fillStyle = `rgba(245,183,49,${p.o})`
         ctx.fill()
       }
-      // connections
+
+      const connBase = Math.min(0.08, 0.04 * factor)
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
           const dx = particles[i].x - particles[j].x
@@ -196,7 +257,7 @@ const ParticleField = () => {
             ctx.beginPath()
             ctx.moveTo(particles[i].x, particles[i].y)
             ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.strokeStyle = `rgba(245,183,49,${0.04 * (1 - d / 120)})`
+            ctx.strokeStyle = `rgba(245,183,49,${connBase * (1 - d / 120)})`
             ctx.lineWidth = 0.5
             ctx.stroke()
           }
@@ -212,7 +273,7 @@ const ParticleField = () => {
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
     }
-  }, [])
+  }, [factor])
 
   return (
     <canvas
@@ -224,7 +285,7 @@ const ParticleField = () => {
         width: '100%',
         height: '100%',
         pointerEvents: 'none',
-        opacity: 0.5,
+        opacity: canvasOpacity,
         zIndex: 0,
       }}
     />
@@ -722,7 +783,11 @@ const SettingsPanel = ({
   defaultModel,
   onModelSaved,
   onSaved,
+  uiPrefs,
+  onUiPrefsChange,
 }) => {
+  const ui = normalizeUiPrefs(uiPrefs)
+
   const initial = (defaultModel || '').trim()
   const [savedModel, setSavedModel] = useState(initial)
   const [draftModel, setDraftModel] = useState(initial)
@@ -1262,7 +1327,72 @@ const SettingsPanel = ({
           </CollapsiblePanel>
 
           <CollapsiblePanel title="UI">
-            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45 }}>coming soon</div>
+            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
+              UI preferences are stored in this browser (localStorage) and apply instantly.
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Particle background</div>
+              <div style={{ flex: 1 }} />
+              <input
+                type="checkbox"
+                checked={!!ui.particles.enabled}
+                onChange={(e) => {
+                  onUiPrefsChange?.((prev) => ({
+                    ...prev,
+                    particles: { ...prev.particles, enabled: e.target.checked },
+                  }))
+                }}
+                style={{ accentColor: AMBER[400] }}
+              />
+            </div>
+
+            <div
+              style={{
+                marginTop: 10,
+                opacity: ui.particles.enabled ? 1 : 0.4,
+                pointerEvents: ui.particles.enabled ? 'auto' : 'none',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Intensity</div>
+                <div style={{ flex: 1 }} />
+                <div style={{ fontSize: 11, color: AMBER[500] }}>{ui.particles.intensity}%</div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={ui.particles.intensity}
+                onChange={(e) => {
+                  onUiPrefsChange?.((prev) => ({
+                    ...prev,
+                    particles: { ...prev.particles, intensity: Number(e.target.value) },
+                  }))
+                }}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+              <div
+                onClick={() => onUiPrefsChange?.(DEFAULT_UI_PREFS)}
+                style={{
+                  padding: '8px 10px',
+                  border: `1px solid ${SLATE.border}`,
+                  background: SLATE.elevated,
+                  color: SLATE.muted,
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  borderRadius: 8,
+                  userSelect: 'none',
+                }}
+                title="Reset UI settings"
+              >
+                reset UI
+              </div>
+            </div>
           </CollapsiblePanel>
         </div>
 
@@ -1646,6 +1776,20 @@ export default function App() {
   const [sessions, setSessions] = useState([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const [uiPrefs, setUiPrefs] = useState(() => loadUiPrefs())
+
+  const updateUiPrefs = useCallback((updater) => {
+    setUiPrefs((prev) => {
+      const base = normalizeUiPrefs(prev)
+      const next = typeof updater === 'function' ? updater(base) : updater
+      return normalizeUiPrefs(next)
+    })
+  }, [])
+
+  useEffect(() => {
+    saveUiPrefs(uiPrefs)
+  }, [uiPrefs])
 
 
   // Terminal connection mode:
@@ -2650,7 +2794,9 @@ export default function App() {
           minHeight: 0,
         }}
       >
-        <ParticleField />
+        {uiPrefs.particles.enabled && uiPrefs.particles.intensity > 0 && (
+          <ParticleField intensity={uiPrefs.particles.intensity} />
+        )}
         <GrainOverlay />
 
         <div
@@ -2873,6 +3019,8 @@ export default function App() {
               default_model: m || null,
             }))
           }}
+          uiPrefs={uiPrefs}
+          onUiPrefsChange={updateUiPrefs}
           onSaved={() => showEggToast('settings saved')}
         />
       )}
