@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import signal
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -106,9 +107,16 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return None
 
         for line in text.splitlines():
-            s = line.strip()
-            if s.startswith("model:"):
-                return s.split(":", 1)[1].strip() or None
+            # Only accept a top-level key (no indentation) to avoid matching nested
+            # keys like: stt.model / tts.openai.model / etc.
+            if not line:
+                continue
+            if line[:1].isspace():
+                continue
+            if line.startswith("#"):
+                continue
+            if line.startswith("model:"):
+                return line.split(":", 1)[1].strip() or None
         return None
 
     @app.get("/api/health")
@@ -133,6 +141,89 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "spawn_cwd": str(config.spawn_cwd),
             "hermes_cmd": config.hermes_cmd,
             "hermes_home": str(config.hermes_home),
+        }
+
+    def _hermes_bin() -> str:
+        try:
+            argv = shlex.split(config.hermes_cmd)
+            if argv:
+                return argv[0]
+        except Exception:
+            pass
+        return "hermes"
+
+    def _hermes_config_set_model(model: str) -> tuple[bool, str]:
+        m = (model or "").strip()
+        if not m:
+            return False, "model is empty"
+        if len(m) > 200:
+            return False, "model too long"
+
+        env = os.environ.copy()
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env["HERMES_HOME"] = str(config.hermes_home)
+
+        try:
+            config.hermes_home.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        cmd = [_hermes_bin(), "config", "set", "model", m]
+        try:
+            r = subprocess.run(
+                cmd,
+                cwd=str(config.spawn_cwd),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except FileNotFoundError:
+            return False, f"executable not found: {cmd[0]}"
+        except subprocess.TimeoutExpired:
+            return False, "timed out"
+        except Exception as e:
+            return False, str(e)
+
+        if r.returncode != 0:
+            msg = (r.stdout or "").strip()
+            err = (r.stderr or "").strip()
+            out = "\n".join([x for x in [msg, err] if x])
+            if not out:
+                out = f"hermes config set failed (code {r.returncode})"
+            if len(out) > 800:
+                out = out[:800] + "…"
+            return False, out
+
+        return True, ""
+
+    @app.get("/api/settings/model")
+    async def api_settings_model():
+        return {
+            "model": _read_default_model(),
+        }
+
+    @app.post("/api/settings/model")
+    async def api_settings_model_set(payload: dict = Body(...)):
+        model = str(payload.get("model") or "").strip()
+        if not model:
+            return JSONResponse({"detail": "model required"}, status_code=400)
+        if len(model) > 200:
+            return JSONResponse({"detail": "model too long"}, status_code=400)
+
+        ok, err = await asyncio.to_thread(_hermes_config_set_model, model)
+        if not ok:
+            return JSONResponse(
+                {
+                    "detail": "failed to set model",
+                    "error": err,
+                },
+                status_code=500,
+            )
+
+        return {
+            "ok": True,
+            "model": _read_default_model() or model,
         }
 
     @app.get("/api/whisper")
@@ -290,8 +381,6 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         websocket: WebSocket,
         resume: Optional[str] = None,
         cont: bool = Query(False, alias="continue"),
-        model: Optional[str] = None,
-        provider: Optional[str] = None,
         cols: int = 120,
         rows: int = 30,
     ):
@@ -313,62 +402,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 return
 
         argv = shlex.split(config.hermes_cmd)
-
-        # WS query params can override model/provider for NEW sessions.
-        # Hermes only accepts these flags on the `chat` subcommand, so we try to
-        # ensure we end up running: hermes chat ...
-        is_chat = len(argv) >= 2 and argv[1] == "chat"
-
-        try:
-            is_hermes = bool(argv) and Path(argv[0]).name == "hermes"
-        except Exception:
-            is_hermes = False
-
-        if is_hermes and (model or provider) and not is_chat:
-            hermes_subcommands = {
-                "chat",
-                "model",
-                "gateway",
-                "setup",
-                "whatsapp",
-                "login",
-                "logout",
-                "status",
-                "cron",
-                "doctor",
-                "config",
-                "pairing",
-                "skills",
-                "tools",
-                "sessions",
-                "version",
-                "update",
-                "uninstall",
-            }
-
-            if len(argv) == 1:
-                argv.append("chat")
-            elif len(argv) >= 2 and (argv[1].startswith("-") or argv[1] not in hermes_subcommands):
-                argv.insert(1, "chat")
-
-        is_chat = len(argv) >= 2 and argv[1] == "chat"
-
         if resume:
             argv += ["--resume", resume]
         elif cont:
             argv += ["--continue"]
-
-        if is_chat:
-            m = (model or "").strip()
-            p = (provider or "").strip()
-
-            if p and p not in {"auto", "openrouter", "nous", "openai-codex"}:
-                p = ""
-
-            if p:
-                argv += ["--provider", p]
-            if m:
-                argv += ["--model", m]
 
         env = os.environ.copy()
         env.setdefault("TERM", "xterm-256color")
