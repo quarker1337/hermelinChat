@@ -1133,7 +1133,7 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
       resizeTimer = setTimeout(() => {
         resizeTimer = null
         sendResize()
-      }, 60)
+      }, 50)
     }
 
     const ro = new ResizeObserver(() => scheduleResize())
