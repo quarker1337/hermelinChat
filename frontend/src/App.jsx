@@ -2520,10 +2520,6 @@ export default function App() {
     activeSessionIdRef.current = activeSessionId
   }, [activeSessionId])
 
-  useEffect(() => {
-    artifactTabsRef.current = artifactTabs
-  }, [artifactTabs])
-
   const handleConnectionChange = useCallback((isUp) => {
     setConnected(isUp)
     if (isUp && ptyResumeIdRef.current === null) {
@@ -2600,6 +2596,10 @@ export default function App() {
   const [artifactPanelDismissed, setArtifactPanelDismissed] = useState(false)
   const [activeArtifactId, setActiveArtifactId] = useState(null)
   const artifactTabsRef = useRef([])
+
+  useEffect(() => {
+    artifactTabsRef.current = artifactTabs
+  }, [artifactTabs])
 
   const [runtimeInfo, setRuntimeInfo] = useState({ loading: true, default_model: null, spawn_cwd: null })
 
