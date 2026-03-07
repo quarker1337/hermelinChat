@@ -135,7 +135,32 @@ Useful flags:
 
 - `--skip-frontend` if you know the frontend didn’t change (skips npm build)
 - `--skip-python` if you only changed frontend assets
+- `--skip-hermes-patch` if you do not want hermilinChat to patch the active Hermes install
 - `--service NAME` if your systemd service name isn’t `hermelin`
+
+## Hermes artifact tool patch
+
+The artifact panel UI depends on two Hermes tools that are not upstream yet:
+- `render_panel`
+- `close_panel`
+
+This repo keeps that integration as a local patch under `scripts/` instead of pushing it upstream.
+
+To patch the active Hermes installation on a machine:
+
+```bash
+cd hermilinChat
+python3 scripts/install_hermes_artifact_patch.py
+```
+
+What it does:
+- detects the Python interpreter used by your installed `hermes` command
+- installs `render_panel_tool.py` into that live Hermes installation
+- patches `model_tools.py` and `toolsets.py` to register the `ui_panel` toolset
+
+Notes:
+- `./scripts/update.sh` runs this patch step automatically unless you pass `--skip-hermes-patch`
+- if your Hermes config uses restricted toolsets, make sure `ui_panel` or `all` is enabled
 
 ## Auto session titles (optional)
 
