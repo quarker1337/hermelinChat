@@ -830,6 +830,90 @@ const SettingsPanel = ({
     GITHUB_TOKEN: '',
   })
 
+  const [agentLoading, setAgentLoading] = useState(true)
+  const [agentConfigPath, setAgentConfigPath] = useState('')
+  const [agentSaved, setAgentSaved] = useState(null)
+  const [agentDraft, setAgentDraft] = useState(null)
+
+  const normalizeAgentSettings = (raw) => {
+    const r = raw && typeof raw === 'object' ? raw : {}
+    const agent = r.agent && typeof r.agent === 'object' ? r.agent : {}
+    const display = r.display && typeof r.display === 'object' ? r.display : {}
+    const memory = r.memory && typeof r.memory === 'object' ? r.memory : {}
+    const compression = r.compression && typeof r.compression === 'object' ? r.compression : {}
+    const terminal = r.terminal && typeof r.terminal === 'object' ? r.terminal : {}
+
+    return {
+      agent: {
+        max_turns: Math.max(1, Math.min(500, Number(agent.max_turns ?? 60) || 60)),
+        verbose: !!agent.verbose,
+        reasoning_effort: (agent.reasoning_effort || 'xhigh').toString().trim() || 'xhigh',
+      },
+      display: {
+        compact: !!display.compact,
+        tool_progress: (display.tool_progress || 'all').toString().trim() || 'all',
+      },
+      memory: {
+        memory_enabled: memory.memory_enabled === undefined ? true : !!memory.memory_enabled,
+        user_profile_enabled: memory.user_profile_enabled === undefined ? true : !!memory.user_profile_enabled,
+      },
+      compression: {
+        enabled: compression.enabled === undefined ? true : !!compression.enabled,
+        threshold_pct: Math.max(50, Math.min(99, Number(compression.threshold_pct ?? 85) || 85)),
+        summary_model: (compression.summary_model || 'google/gemini-3-flash-preview').toString().trim() ||
+          'google/gemini-3-flash-preview',
+      },
+      terminal: {
+        backend: (terminal.backend || 'local').toString().trim() || 'local',
+        cwd: (terminal.cwd || '.').toString().trim() || '.',
+        timeout: Math.max(1, Math.min(3600, Number(terminal.timeout ?? 60) || 60)),
+      },
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      if (locked) {
+        if (!cancelled) {
+          setAgentLoading(false)
+          setAgentSaved(null)
+          setAgentDraft(null)
+          setAgentConfigPath('')
+        }
+        return
+      }
+
+      setAgentLoading(true)
+      try {
+        const r = await fetch('/api/settings/agent')
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(data?.detail || `http ${r.status}`)
+
+        const normalized = normalizeAgentSettings(data)
+
+        if (!cancelled) {
+          setAgentConfigPath((data?.config_path || '').toString())
+          setAgentSaved(normalized)
+          setAgentDraft(normalized)
+          setAgentLoading(false)
+        }
+      } catch {
+        if (!cancelled) {
+          setAgentSaved(normalizeAgentSettings({}))
+          setAgentDraft(normalizeAgentSettings({}))
+          setAgentLoading(false)
+        }
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [locked])
+
   useEffect(() => {
     let cancelled = false
 
@@ -859,7 +943,10 @@ const SettingsPanel = ({
 
   const modelDirty = (draftModel || '').trim() !== (savedModel || '').trim()
   const keyUpdates = Object.entries(draftKeys).filter(([, v]) => (v || '').toString().trim())
-  const dirtyCount = (modelDirty ? 1 : 0) + keyUpdates.length
+  const agentDirty =
+    !!agentSaved && !!agentDraft && JSON.stringify(agentSaved) !== JSON.stringify(agentDraft)
+
+  const dirtyCount = (modelDirty ? 1 : 0) + keyUpdates.length + (agentDirty ? 1 : 0)
   const dirty = dirtyCount > 0
 
   const attemptClose = useCallback(() => {
@@ -884,7 +971,7 @@ const SettingsPanel = ({
     const m = (draftModel || '').trim()
     const updates = keyUpdates.map(([k, v]) => [k, (v || '').toString().trim()])
 
-    if (!modelDirty && updates.length === 0) return
+    if (!modelDirty && updates.length === 0 && !agentDirty) return
 
     if (modelDirty && !m) {
       setStatus({ kind: 'error', text: 'model is required' })
@@ -914,6 +1001,27 @@ const SettingsPanel = ({
         setDraftModel(newModel)
         setStatus({ kind: 'ok', text: 'saved' })
         onModelSaved?.(newModel)
+      }
+
+      if (agentDirty && agentDraft) {
+        const r = await fetch('/api/settings/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(agentDraft),
+        })
+
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) {
+          const msg = data?.error || data?.detail || 'save failed'
+          setStatus({ kind: 'error', text: String(msg) })
+          return
+        }
+
+        const normalized = normalizeAgentSettings(data)
+        setAgentConfigPath((data?.config_path || '').toString())
+        setAgentSaved(normalized)
+        setAgentDraft(normalized)
+        setStatus({ kind: 'ok', text: 'saved' })
       }
 
       for (const [k, v] of updates) {
@@ -1349,7 +1457,406 @@ const SettingsPanel = ({
           </CollapsiblePanel>
 
           <CollapsiblePanel title="Hermes-Agent">
-            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45 }}>coming soon</div>
+            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
+              These settings write to <span style={{ color: AMBER[500] }}>~/.hermes/config.yaml</span> via{' '}
+              <span style={{ color: AMBER[500] }}>hermes config set</span>. They usually affect{' '}
+              <span style={{ color: AMBER[400] }}>new sessions</span>.
+            </div>
+
+            {agentConfigPath && (
+              <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 10, wordBreak: 'break-all' }}>
+                config: {agentConfigPath}
+              </div>
+            )}
+
+            {agentLoading && <div style={{ fontSize: 10, color: SLATE.muted }}>loading agent settings…</div>}
+
+            {!agentLoading && !agentDraft && (
+              <div style={{ fontSize: 10, color: SLATE.muted }}>agent settings unavailable</div>
+            )}
+
+            {!agentLoading && agentDraft && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Max turns</div>
+                  <div style={{ flex: 1 }} />
+                  <input
+                    type="number"
+                    value={agentDraft.agent.max_turns}
+                    min={1}
+                    max={500}
+                    disabled={locked || saving}
+                    onChange={(e) => {
+                      if (locked) return
+                      const v = Math.max(1, Math.min(500, Number(e.target.value) || 1))
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, agent: { ...prev.agent, max_turns: v } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    style={{
+                      width: 90,
+                      background: SLATE.elevated,
+                      border: `1px solid ${SLATE.border}`,
+                      color: SLATE.textBright,
+                      padding: '6px 8px',
+                      fontFamily: "'JetBrains Mono',monospace",
+                      fontSize: 11,
+                      outline: 'none',
+                      borderRadius: 8,
+                      opacity: locked ? 0.5 : 1,
+                      textAlign: 'right',
+                    }}
+                    title="Maximum tool-calling iterations"
+                  />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                  <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Reasoning effort</div>
+                  <div style={{ flex: 1 }} />
+                  <select
+                    value={(agentDraft.agent.reasoning_effort || 'xhigh').toString().toLowerCase()}
+                    disabled={locked || saving}
+                    onChange={(e) => {
+                      if (locked) return
+                      const v = (e.target.value || 'xhigh').toString().toLowerCase()
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, agent: { ...prev.agent, reasoning_effort: v } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    style={{
+                      background: SLATE.elevated,
+                      border: `1px solid ${SLATE.border}`,
+                      color: SLATE.textBright,
+                      padding: '6px 8px',
+                      fontFamily: "'JetBrains Mono',monospace",
+                      fontSize: 11,
+                      outline: 'none',
+                      borderRadius: 8,
+                      opacity: locked ? 0.5 : 1,
+                    }}
+                    title="OpenRouter reasoning effort"
+                  >
+                    <option value="xhigh">xhigh</option>
+                    <option value="high">high</option>
+                    <option value="medium">medium</option>
+                    <option value="low">low</option>
+                    <option value="minimal">minimal</option>
+                    <option value="none">none</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                  <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Verbose</div>
+                  <div style={{ flex: 1 }} />
+                  <input
+                    type="checkbox"
+                    checked={!!agentDraft.agent.verbose}
+                    disabled={locked || saving}
+                    onChange={(e) => {
+                      if (locked) return
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, agent: { ...prev.agent, verbose: e.target.checked } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    style={{ accentColor: AMBER[400], opacity: locked ? 0.5 : 1 }}
+                  />
+                </div>
+
+                <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Compact output</div>
+                  <div style={{ flex: 1 }} />
+                  <input
+                    type="checkbox"
+                    checked={!!agentDraft.display.compact}
+                    disabled={locked || saving}
+                    onChange={(e) => {
+                      if (locked) return
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, display: { ...prev.display, compact: e.target.checked } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    style={{ accentColor: AMBER[400], opacity: locked ? 0.5 : 1 }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                  <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Tool progress</div>
+                  <div style={{ flex: 1 }} />
+                  <select
+                    value={(agentDraft.display.tool_progress || 'all').toString().toLowerCase()}
+                    disabled={locked || saving}
+                    onChange={(e) => {
+                      if (locked) return
+                      const v = (e.target.value || 'all').toString().toLowerCase()
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, display: { ...prev.display, tool_progress: v } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    style={{
+                      background: SLATE.elevated,
+                      border: `1px solid ${SLATE.border}`,
+                      color: SLATE.textBright,
+                      padding: '6px 8px',
+                      fontFamily: "'JetBrains Mono',monospace",
+                      fontSize: 11,
+                      outline: 'none',
+                      borderRadius: 8,
+                      opacity: locked ? 0.5 : 1,
+                    }}
+                    title="Rich tool progress output"
+                  >
+                    <option value="off">off</option>
+                    <option value="new">new</option>
+                    <option value="all">all</option>
+                    <option value="verbose">verbose</option>
+                  </select>
+                </div>
+
+                <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
+
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: SLATE.muted,
+                    letterSpacing: 0.9,
+                    textTransform: 'uppercase',
+                    marginBottom: 8,
+                  }}
+                >
+                  Memory
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Enable memory</div>
+                  <div style={{ flex: 1 }} />
+                  <input
+                    type="checkbox"
+                    checked={!!agentDraft.memory.memory_enabled}
+                    disabled={locked || saving}
+                    onChange={(e) => {
+                      if (locked) return
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, memory: { ...prev.memory, memory_enabled: e.target.checked } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    style={{ accentColor: AMBER[400], opacity: locked ? 0.5 : 1 }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                  <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Enable user profile</div>
+                  <div style={{ flex: 1 }} />
+                  <input
+                    type="checkbox"
+                    checked={!!agentDraft.memory.user_profile_enabled}
+                    disabled={locked || saving}
+                    onChange={(e) => {
+                      if (locked) return
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, memory: { ...prev.memory, user_profile_enabled: e.target.checked } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    style={{ accentColor: AMBER[400], opacity: locked ? 0.5 : 1 }}
+                  />
+                </div>
+
+                <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
+
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: SLATE.muted,
+                    letterSpacing: 0.9,
+                    textTransform: 'uppercase',
+                    marginBottom: 8,
+                  }}
+                >
+                  Context compression
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Enabled</div>
+                  <div style={{ flex: 1 }} />
+                  <input
+                    type="checkbox"
+                    checked={!!agentDraft.compression.enabled}
+                    disabled={locked || saving}
+                    onChange={(e) => {
+                      if (locked) return
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, compression: { ...prev.compression, enabled: e.target.checked } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    style={{ accentColor: AMBER[400], opacity: locked ? 0.5 : 1 }}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 10,
+                    opacity: agentDraft.compression.enabled ? 1 : 0.4,
+                    pointerEvents: agentDraft.compression.enabled ? 'auto' : 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Threshold</div>
+                    <div style={{ flex: 1 }} />
+                    <div style={{ fontSize: 11, color: AMBER[500] }}>{agentDraft.compression.threshold_pct}%</div>
+                  </div>
+                  <input
+                    type="range"
+                    min={50}
+                    max={99}
+                    step={1}
+                    value={agentDraft.compression.threshold_pct}
+                    onChange={(e) => {
+                      if (locked) return
+                      const v = Math.max(50, Math.min(99, Number(e.target.value) || 85))
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, compression: { ...prev.compression, threshold_pct: v } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    style={{ width: '100%' }}
+                  />
+
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600, marginBottom: 6 }}>
+                      Summary model
+                    </div>
+                    <input
+                      value={agentDraft.compression.summary_model}
+                      onChange={(e) => {
+                        if (locked) return
+                        const v = e.target.value
+                        setAgentDraft((prev) => {
+                          if (!prev) return prev
+                          return { ...prev, compression: { ...prev.compression, summary_model: v } }
+                        })
+                        setStatus({ kind: '', text: '' })
+                      }}
+                      placeholder="google/gemini-3-flash-preview"
+                      disabled={locked || saving}
+                      style={{
+                        width: '100%',
+                        background: SLATE.elevated,
+                        border: `1px solid ${SLATE.border}`,
+                        color: SLATE.textBright,
+                        padding: '10px 10px',
+                        fontFamily: "'JetBrains Mono',monospace",
+                        fontSize: 12,
+                        outline: 'none',
+                        borderRadius: 8,
+                        opacity: locked ? 0.5 : 1,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
+
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: SLATE.muted,
+                    letterSpacing: 0.9,
+                    textTransform: 'uppercase',
+                    marginBottom: 8,
+                  }}
+                >
+                  Terminal tool
+                </div>
+
+                <div>
+                  <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600, marginBottom: 6 }}>
+                    Working dir
+                  </div>
+                  <input
+                    value={agentDraft.terminal.cwd}
+                    onChange={(e) => {
+                      if (locked) return
+                      const v = e.target.value
+                      setAgentDraft((prev) => {
+                        if (!prev) return prev
+                        return { ...prev, terminal: { ...prev.terminal, cwd: v } }
+                      })
+                      setStatus({ kind: '', text: '' })
+                    }}
+                    placeholder="."
+                    disabled={locked || saving}
+                    style={{
+                      width: '100%',
+                      background: SLATE.elevated,
+                      border: `1px solid ${SLATE.border}`,
+                      color: SLATE.textBright,
+                      padding: '10px 10px',
+                      fontFamily: "'JetBrains Mono',monospace",
+                      fontSize: 12,
+                      outline: 'none',
+                      borderRadius: 8,
+                      opacity: locked ? 0.5 : 1,
+                    }}
+                  />
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                    <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Timeout (s)</div>
+                    <div style={{ flex: 1 }} />
+                    <input
+                      type="number"
+                      value={agentDraft.terminal.timeout}
+                      min={1}
+                      max={3600}
+                      disabled={locked || saving}
+                      onChange={(e) => {
+                        if (locked) return
+                        const v = Math.max(1, Math.min(3600, Number(e.target.value) || 1))
+                        setAgentDraft((prev) => {
+                          if (!prev) return prev
+                          return { ...prev, terminal: { ...prev.terminal, timeout: v } }
+                        })
+                        setStatus({ kind: '', text: '' })
+                      }}
+                      style={{
+                        width: 110,
+                        background: SLATE.elevated,
+                        border: `1px solid ${SLATE.border}`,
+                        color: SLATE.textBright,
+                        padding: '6px 8px',
+                        fontFamily: "'JetBrains Mono',monospace",
+                        fontSize: 11,
+                        outline: 'none',
+                        borderRadius: 8,
+                        opacity: locked ? 0.5 : 1,
+                        textAlign: 'right',
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ marginTop: 8, fontSize: 10, color: SLATE.muted }}>
+                    backend: <span style={{ color: AMBER[500] }}>{agentDraft.terminal.backend}</span>
+                  </div>
+                </div>
+              </>
+            )}
           </CollapsiblePanel>
 
           <CollapsiblePanel title="UI">

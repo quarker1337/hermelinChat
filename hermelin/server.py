@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+import yaml
+
 from fastapi import Body, FastAPI, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -627,6 +629,257 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             )
 
         return {"ok": True, "key": key}
+
+    # -----------------------------------------------------------------
+    # Hermes-Agent settings (config.yaml)
+    # -----------------------------------------------------------------
+
+    _SUPPORTED_AGENT_CONFIG_KEYS = {
+        # Agent loop
+        "agent.max_turns",
+        "agent.verbose",
+        "agent.reasoning_effort",
+        # Root-level legacy (kept in sync so `hermes config show` isn't misleading)
+        "max_turns",
+        # Display
+        "display.compact",
+        "display.tool_progress",
+        # Memory
+        "memory.memory_enabled",
+        "memory.user_profile_enabled",
+        # Context compression
+        "compression.enabled",
+        "compression.threshold",
+        "compression.summary_model",
+        # Terminal tool
+        "terminal.cwd",
+        "terminal.timeout",
+    }
+
+    def _read_config_yaml() -> dict:
+        cfg_path = config.hermes_home / "config.yaml"
+        try:
+            if not cfg_path.exists():
+                return {}
+            data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _as_bool(v, default: bool = False) -> bool:
+        if v is None:
+            return default
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        s = str(v).strip().lower()
+        if s in {"1", "true", "yes", "y", "on"}:
+            return True
+        if s in {"0", "false", "no", "n", "off"}:
+            return False
+        return default
+
+    def _as_int(v, default: int) -> int:
+        try:
+            return int(v)
+        except Exception:
+            return default
+
+    def _as_float(v, default: float) -> float:
+        try:
+            return float(v)
+        except Exception:
+            return default
+
+    def _get_cfg() -> dict:
+        raw = _read_config_yaml()
+
+        # Defaults (best-effort; these mirror cli.py defaults, not necessarily hermes_cli/config.py)
+        agent = raw.get("agent") if isinstance(raw.get("agent"), dict) else {}
+        terminal = raw.get("terminal") if isinstance(raw.get("terminal"), dict) else {}
+        compression = raw.get("compression") if isinstance(raw.get("compression"), dict) else {}
+        display = raw.get("display") if isinstance(raw.get("display"), dict) else {}
+        memory = raw.get("memory") if isinstance(raw.get("memory"), dict) else {}
+
+        max_turns = agent.get("max_turns")
+        if max_turns is None:
+            max_turns = raw.get("max_turns")
+
+        threshold = _as_float(compression.get("threshold"), 0.85)
+        threshold_pct = int(round(threshold * 100))
+        threshold_pct = max(50, min(99, threshold_pct))
+
+        return {
+            "agent": {
+                "max_turns": max(1, min(500, _as_int(max_turns, 60))),
+                "verbose": _as_bool(agent.get("verbose"), False),
+                "reasoning_effort": str(agent.get("reasoning_effort") or "xhigh").strip() or "xhigh",
+            },
+            "display": {
+                "compact": _as_bool(display.get("compact"), False),
+                "tool_progress": str(display.get("tool_progress") or "all").strip() or "all",
+            },
+            "memory": {
+                "memory_enabled": _as_bool(memory.get("memory_enabled"), True),
+                "user_profile_enabled": _as_bool(memory.get("user_profile_enabled"), True),
+            },
+            "compression": {
+                "enabled": _as_bool(compression.get("enabled"), True),
+                "threshold_pct": threshold_pct,
+                "summary_model": str(compression.get("summary_model") or "google/gemini-3-flash-preview").strip()
+                or "google/gemini-3-flash-preview",
+            },
+            "terminal": {
+                "backend": str(terminal.get("backend") or terminal.get("env_type") or "local").strip() or "local",
+                "cwd": str(terminal.get("cwd") or ".").strip() or ".",
+                "timeout": max(1, min(3600, _as_int(terminal.get("timeout"), 60))),
+            },
+            "config_path": str(config.hermes_home / "config.yaml"),
+        }
+
+    def _hermes_config_set_value(key: str, value: str) -> tuple[bool, str]:
+        k = (key or "").strip()
+        v = (value or "").strip()
+
+        if not k:
+            return False, "key is required"
+        if k not in _SUPPORTED_AGENT_CONFIG_KEYS:
+            return False, "unsupported key"
+        if not v:
+            return False, "value is required"
+        if len(v) > 8000:
+            return False, "value too long"
+
+        env = os.environ.copy()
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env["HERMES_HOME"] = str(config.hermes_home)
+
+        cmd = [_hermes_bin(), "config", "set", k, v]
+        try:
+            r = subprocess.run(
+                cmd,
+                cwd=str(config.spawn_cwd),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
+        except FileNotFoundError:
+            return False, f"executable not found: {cmd[0]}"
+        except subprocess.TimeoutExpired:
+            return False, "timed out"
+        except Exception as e:
+            return False, str(e)
+
+        if r.returncode != 0:
+            msg = (r.stdout or "").strip()
+            err = (r.stderr or "").strip()
+            out = "\n".join([x for x in [msg, err] if x])
+            if not out:
+                out = f"hermes config set failed (code {r.returncode})"
+            if len(out) > 800:
+                out = out[:800] + "…"
+            return False, out
+
+        return True, ""
+
+    @app.get("/api/settings/agent")
+    async def api_settings_agent():
+        return _get_cfg()
+
+    @app.post("/api/settings/agent")
+    async def api_settings_agent_set(payload: dict = Body(...)):
+        if not isinstance(payload, dict):
+            return JSONResponse({"detail": "invalid payload"}, status_code=400)
+
+        cur = _get_cfg()
+
+        agent_in = payload.get("agent") if isinstance(payload.get("agent"), dict) else {}
+        display_in = payload.get("display") if isinstance(payload.get("display"), dict) else {}
+        memory_in = payload.get("memory") if isinstance(payload.get("memory"), dict) else {}
+        compression_in = payload.get("compression") if isinstance(payload.get("compression"), dict) else {}
+        terminal_in = payload.get("terminal") if isinstance(payload.get("terminal"), dict) else {}
+
+        # Build normalized draft
+        draft = {
+            "agent": {
+                "max_turns": max(1, min(500, _as_int(agent_in.get("max_turns"), cur["agent"]["max_turns"]))),
+                "verbose": _as_bool(agent_in.get("verbose"), cur["agent"]["verbose"]),
+                "reasoning_effort": str(agent_in.get("reasoning_effort") or cur["agent"]["reasoning_effort"]).strip()
+                or cur["agent"]["reasoning_effort"],
+            },
+            "display": {
+                "compact": _as_bool(display_in.get("compact"), cur["display"]["compact"]),
+                "tool_progress": str(display_in.get("tool_progress") or cur["display"]["tool_progress"]).strip()
+                or cur["display"]["tool_progress"],
+            },
+            "memory": {
+                "memory_enabled": _as_bool(memory_in.get("memory_enabled"), cur["memory"]["memory_enabled"]),
+                "user_profile_enabled": _as_bool(
+                    memory_in.get("user_profile_enabled"),
+                    cur["memory"]["user_profile_enabled"],
+                ),
+            },
+            "compression": {
+                "enabled": _as_bool(compression_in.get("enabled"), cur["compression"]["enabled"]),
+                "threshold_pct": max(50, min(99, _as_int(compression_in.get("threshold_pct"), cur["compression"]["threshold_pct"]))),
+                "summary_model": str(compression_in.get("summary_model") or cur["compression"]["summary_model"]).strip()
+                or cur["compression"]["summary_model"],
+            },
+            "terminal": {
+                "cwd": str(terminal_in.get("cwd") or cur["terminal"]["cwd"]).strip() or cur["terminal"]["cwd"],
+                "timeout": max(1, min(3600, _as_int(terminal_in.get("timeout"), cur["terminal"]["timeout"]))),
+            },
+        }
+
+        # Validate enums
+        reff = draft["agent"]["reasoning_effort"].lower()
+        if reff not in {"xhigh", "high", "medium", "low", "minimal", "none"}:
+            return JSONResponse({"detail": "invalid reasoning_effort"}, status_code=400)
+
+        tp = draft["display"]["tool_progress"].lower()
+        if tp not in {"off", "new", "all", "verbose"}:
+            return JSONResponse({"detail": "invalid tool_progress"}, status_code=400)
+
+        if len(draft["compression"]["summary_model"]) > 200:
+            return JSONResponse({"detail": "summary_model too long"}, status_code=400)
+
+        if len(draft["terminal"]["cwd"]) > 500:
+            return JSONResponse({"detail": "cwd too long"}, status_code=400)
+
+        # Apply via hermes config set
+        threshold = draft["compression"]["threshold_pct"] / 100.0
+
+        pairs = [
+            ("agent.max_turns", str(draft["agent"]["max_turns"])),
+            ("max_turns", str(draft["agent"]["max_turns"])),
+            ("agent.verbose", "true" if draft["agent"]["verbose"] else "false"),
+            ("agent.reasoning_effort", reff),
+            ("display.compact", "true" if draft["display"]["compact"] else "false"),
+            ("display.tool_progress", tp),
+            ("memory.memory_enabled", "true" if draft["memory"]["memory_enabled"] else "false"),
+            ("memory.user_profile_enabled", "true" if draft["memory"]["user_profile_enabled"] else "false"),
+            ("compression.enabled", "true" if draft["compression"]["enabled"] else "false"),
+            ("compression.threshold", f"{threshold:.4f}"),
+            ("compression.summary_model", draft["compression"]["summary_model"]),
+            ("terminal.cwd", draft["terminal"]["cwd"]),
+            ("terminal.timeout", str(draft["terminal"]["timeout"])),
+        ]
+
+        def _apply_all() -> tuple[bool, str]:
+            for k, v in pairs:
+                ok, err = _hermes_config_set_value(k, v)
+                if not ok:
+                    return False, f"{k}: {err}"
+            return True, ""
+
+        ok, err = await asyncio.to_thread(_apply_all)
+        if not ok:
+            return JSONResponse({"detail": "failed to save", "error": err}, status_code=500)
+
+        # Return fresh values
+        return {"ok": True, **_get_cfg()}
 
     @app.get("/api/whisper")
     async def api_whisper():
