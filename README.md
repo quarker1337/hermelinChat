@@ -161,6 +161,7 @@ What it does:
 Notes:
 - `./scripts/update.sh` runs this patch step automatically unless you pass `--skip-hermes-patch`
 - if your Hermes config uses restricted toolsets, make sure `ui_panel` or `all` is enabled
+- docs / reference material lives in `docs/artifacts/` (tool schema guide + UI mockup)
 
 ## Auto session titles (optional)
 
