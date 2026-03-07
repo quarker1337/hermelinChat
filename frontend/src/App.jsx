@@ -2570,7 +2570,20 @@ export default function App() {
       </div>
 
       {/* Main */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          position: 'relative',
+          // Critical for xterm sizing inside flex layouts:
+          // allow the main pane to shrink instead of overflowing (which makes
+          // FitAddon calculate cols for a wider-than-visible element).
+          minWidth: 0,
+          minHeight: 0,
+        }}
+      >
         <ParticleField />
         <GrainOverlay />
 
@@ -2638,8 +2651,8 @@ export default function App() {
           <span style={{ fontSize: 11, color: SLATE.muted }}>PTY</span>
         </div>
 
-        <div style={{ flex: 1, display: 'flex', position: 'relative' }}>
-          <div style={{ flex: 1, position: 'relative' }}>
+        <div style={{ flex: 1, display: 'flex', position: 'relative', minWidth: 0, minHeight: 0 }}>
+          <div style={{ flex: 1, position: 'relative', minWidth: 0, minHeight: 0 }}>
             {auth.authenticated ? (
               <>
                 <TerminalPane
