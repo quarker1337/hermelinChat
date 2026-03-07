@@ -828,6 +828,14 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "BROWSERBASE_API_KEY",
             "BROWSERBASE_PROJECT_ID",
             "GITHUB_TOKEN",
+            # IMPORTANT: Rich will prefer these env vars over the actual PTY
+            # TIOCGWINSZ width/height. If hermilinChat was started from a wide
+            # local terminal (e.g. 160 cols) and the shell exported COLUMNS,
+            # Hermes/Rich will render as if it had that width regardless of the
+            # real xterm.js viewport. We must drop them so Rich reads from the
+            # PTY.
+            "COLUMNS",
+            "LINES",
         ):
             env.pop(k, None)
 
