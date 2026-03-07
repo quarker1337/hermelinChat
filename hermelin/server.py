@@ -255,6 +255,100 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         return True, ""
 
+    def _strip_leading_index(s: str) -> str:
+        # Remove leading numbering like "1) ..." or "1. ...".
+        i = 0
+        while i < len(s) and s[i].isdigit():
+            i += 1
+        if i and i < len(s) and s[i] in {".", ")", ":"}:
+            j = i + 1
+            while j < len(s) and s[j].isspace():
+                j += 1
+            return s[j:]
+        return s
+
+    def _parse_model_list_text(text: str) -> list[dict]:
+        out: list[dict] = []
+        seen: set[str] = set()
+
+        for line in (text or "").splitlines():
+            s = (line or "").strip()
+            if not s:
+                continue
+
+            low = s.lower()
+            if low.startswith("select default model"):
+                continue
+
+            # separators
+            if s and set(s) <= {"-"}:
+                continue
+
+            # bullets
+            while s and s[0] in {"-", "*", "•"}:
+                s = s[1:].strip()
+
+            s = _strip_leading_index(s)
+            if not s:
+                continue
+
+            low = s.lower()
+            if low in {"custom model", "custom"}:
+                value = "__custom__"
+                label = "Custom model"
+            else:
+                value = s.split()[0].strip()
+                label = s
+
+            if not value or value in seen:
+                continue
+
+            seen.add(value)
+            out.append({"value": value, "label": label})
+
+        if "__custom__" not in seen:
+            out.append({"value": "__custom__", "label": "Custom model"})
+
+        return out
+
+    def _read_model_list_options() -> tuple[list[dict], str]:
+        env_path = (os.getenv("HERMELIN_MODEL_LIST_PATH") or "").strip()
+
+        if env_path:
+            candidates = [Path(env_path).expanduser()]
+        else:
+            candidates = [
+                config.spawn_cwd / "hermes-agent-modellist.txt",
+                Path(__file__).resolve().parent.parent / "hermes-agent-modellist.txt",
+            ]
+
+        for p in candidates:
+            try:
+                text = p.read_text(encoding="utf-8")
+            except Exception:
+                continue
+
+            models = _parse_model_list_text(text)
+            if models:
+                return models, str(p)
+
+        fallback = [
+            {"value": "openai/gpt-5.2", "label": "openai/gpt-5.2"},
+            {"value": "anthropic/claude-sonnet-4", "label": "anthropic/claude-sonnet-4"},
+            {"value": "google/gemini-2.5-pro", "label": "google/gemini-2.5-pro"},
+            {"value": "google/gemini-3-flash-preview", "label": "google/gemini-3-flash-preview"},
+            {"value": "__custom__", "label": "Custom model"},
+        ]
+        return fallback, "fallback"
+
+    @app.get("/api/settings/models")
+    async def api_settings_models():
+        models, source = _read_model_list_options()
+        return {
+            "models": models,
+            "source": source,
+        }
+
     @app.get("/api/settings/model")
     async def api_settings_model():
         return {

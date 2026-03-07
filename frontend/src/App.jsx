@@ -708,11 +708,18 @@ const CollapsiblePanel = ({ title, defaultOpen = false, dense = false, children 
   )
 }
 
+const FALLBACK_MODEL_OPTIONS = [
+  { value: 'openai/gpt-5.2', label: 'openai/gpt-5.2' },
+  { value: 'anthropic/claude-sonnet-4', label: 'anthropic/claude-sonnet-4' },
+  { value: 'google/gemini-2.5-pro', label: 'google/gemini-2.5-pro' },
+  { value: 'google/gemini-3-flash-preview', label: 'google/gemini-3-flash-preview' },
+  { value: '__custom__', label: 'Custom model' },
+]
+
 const SettingsPanel = ({
   onClose,
   locked = false,
   defaultModel,
-  activeModel,
   onModelSaved,
 }) => {
   const initial = (defaultModel || '').trim()
@@ -778,12 +785,43 @@ const SettingsPanel = ({
     }
   }
 
-  const presets = [
-    'openai/gpt-5.2',
-    'anthropic/claude-sonnet-4',
-    'google/gemini-2.5-pro',
-    'google/gemini-3-flash-preview',
-  ]
+  const [modelOptions, setModelOptions] = useState({ loading: true, items: FALLBACK_MODEL_OPTIONS })
+
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      try {
+        const r = await fetch('/api/settings/models')
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(data?.detail || `http ${r.status}`)
+
+        const items = Array.isArray(data?.models) ? data.models : []
+        const normalized = items
+          .map((m) => ({
+            value: String(m?.value || '').trim(),
+            label: String(m?.label || m?.value || '').trim(),
+          }))
+          .filter((m) => m.value && m.label)
+
+        if (!normalized.some((m) => m.value === '__custom__')) {
+          normalized.push({ value: '__custom__', label: 'Custom model' })
+        }
+
+        if (!cancelled) setModelOptions({ loading: false, items: normalized })
+      } catch {
+        if (!cancelled) setModelOptions({ loading: false, items: FALLBACK_MODEL_OPTIONS })
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const draftTrim = (draftModel || '').trim()
+  const modelSelectValue = modelOptions.items.some((m) => m.value === draftTrim) ? draftTrim : '__custom__'
 
   const statusColor =
     status.kind === 'error' ? SLATE.danger : status.kind === 'ok' ? SLATE.success : SLATE.muted
@@ -843,19 +881,16 @@ const SettingsPanel = ({
                 <div style={{ color: SLATE.muted }}>saved:</div>
                 <div style={{ color: AMBER[500] }}>{savedModel || '—'}</div>
               </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                <div style={{ color: SLATE.muted }}>active session:</div>
-                <div style={{ color: AMBER[500] }}>{activeModel || '—'}</div>
-              </div>
             </div>
 
-            <input
-              value={draftModel}
+            <select
+              value={modelSelectValue}
               onChange={(e) => {
-                setDraftModel(e.target.value)
+                const v = e.target.value
+                if (locked) return
+                if (v && v !== '__custom__') setDraftModel(v)
                 setStatus({ kind: '', text: '' })
               }}
-              placeholder={savedModel || 'openai/gpt-5.2'}
               disabled={locked}
               style={{
                 width: '100%',
@@ -869,38 +904,57 @@ const SettingsPanel = ({
                 borderRadius: 8,
                 opacity: locked ? 0.5 : 1,
               }}
-            />
+              title="Default model (new sessions)"
+            >
+              {modelOptions.items.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
 
-            <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {presets.map((m) => {
-                const active = (draftModel || '').trim() === m
-                return (
-                  <div
-                    key={m}
-                    onClick={() => {
-                      if (locked) return
-                      setDraftModel(m)
-                      setStatus({ kind: '', text: '' })
-                    }}
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: 999,
-                      border: `1px solid ${active ? AMBER[700] : SLATE.border}`,
-                      background: active ? `${AMBER[900]}55` : SLATE.elevated,
-                      color: active ? AMBER[400] : SLATE.textBright,
-                      cursor: locked ? 'default' : 'pointer',
-                      userSelect: 'none',
-                      fontSize: 11,
-                      opacity: locked ? 0.5 : 1,
-                    }}
-                    title={m}
-                  >
-                    {m}
-                  </div>
-                )
-              })}
-            </div>
+            {modelSelectValue === '__custom__' && (
+              <input
+                value={draftModel}
+                onChange={(e) => {
+                  setDraftModel(e.target.value)
+                  setStatus({ kind: '', text: '' })
+                }}
+                placeholder={savedModel || 'provider/model'}
+                disabled={locked}
+                style={{
+                  width: '100%',
+                  background: SLATE.elevated,
+                  border: `1px solid ${SLATE.border}`,
+                  color: SLATE.textBright,
+                  padding: '10px 10px',
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: 12,
+                  outline: 'none',
+                  borderRadius: 8,
+                  marginTop: 10,
+                  opacity: locked ? 0.5 : 1,
+                }}
+                title="Custom model"
+              />
+            )}
 
+            {modelOptions.loading && (
+              <div style={{ marginTop: 10, fontSize: 10, color: SLATE.muted }}>loading model list…</div>
+            )}
+
+          </CollapsiblePanel>
+
+          <CollapsiblePanel title="API-Keys">
+            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45 }}>coming soon</div>
+          </CollapsiblePanel>
+
+          <CollapsiblePanel title="Hermes-Agent">
+            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45 }}>coming soon</div>
+          </CollapsiblePanel>
+
+          <CollapsiblePanel title="UI">
+            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45 }}>coming soon</div>
           </CollapsiblePanel>
         </div>
 
@@ -2352,7 +2406,6 @@ export default function App() {
           onClose={closeSettings}
           locked={locked}
           defaultModel={runtimeInfo.default_model}
-          activeModel={activeSession?.model || null}
           onModelSaved={(m) => {
             setRuntimeInfo((prev) => ({
               ...prev,
