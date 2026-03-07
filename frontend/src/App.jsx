@@ -39,8 +39,8 @@ const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
 const DEFAULT_UI_PREFS = {
   particles: {
     enabled: true,
-    // 0..100 (50 matches the current look)
-    intensity: 50,
+    // 50..100 (50 matches the old look)
+    intensity: 75,
   },
   timestamps: {
     enabled: true,
@@ -72,7 +72,7 @@ function normalizeUiPrefs(raw) {
   return {
     particles: {
       enabled: p.enabled === undefined ? DEFAULT_UI_PREFS.particles.enabled : !!p.enabled,
-      intensity: clampNum(p.intensity ?? DEFAULT_UI_PREFS.particles.intensity, 0, 100),
+      intensity: clampNum(p.intensity ?? DEFAULT_UI_PREFS.particles.intensity, 50, 100),
     },
     timestamps: {
       enabled: ts.enabled === undefined ? DEFAULT_UI_PREFS.timestamps.enabled : !!ts.enabled,
@@ -1387,7 +1387,7 @@ const SettingsPanel = ({
               </div>
               <input
                 type="range"
-                min={0}
+                min={50}
                 max={100}
                 step={1}
                 value={ui.particles.intensity}
