@@ -831,7 +831,127 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         ):
             env.pop(k, None)
 
-        p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=cols, rows=rows)
+        # -------------------------------------------------------------
+        # PTY sizing
+        # -------------------------------------------------------------
+        # In theory FastAPI should inject ?cols= / ?rows= into the handler
+        # parameters. In practice, different WS stacks / proxies can behave
+        # unexpectedly, and the first banner render is extremely sensitive to
+        # the *initial* PTY size (Rich reads it once and formats accordingly).
+        #
+        # We therefore:
+        #   1) Re-parse query params directly from the websocket URL.
+        #   2) Wait briefly for the first "resize" control frame from the UI
+        #      before spawning the subprocess, so the banner uses the correct
+        #      width from the very first byte.
+
+        try:
+            qp = websocket.query_params
+            cq = qp.get("cols")
+            rq = qp.get("rows")
+            if cq:
+                cols = int(cq)
+            if rq:
+                rows = int(rq)
+        except Exception:
+            pass
+
+        cols = int(cols or 0) or 120
+        rows = int(rows or 0) or 30
+        if cols < 10:
+            cols = 10
+        if rows < 5:
+            rows = 5
+
+        init_cols = cols
+        init_rows = rows
+
+        prefetched: list[dict] = []
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 0.6
+            while loop.time() < deadline:
+                msg = await asyncio.wait_for(websocket.receive(), timeout=deadline - loop.time())
+                if msg.get("type") == "websocket.disconnect":
+                    return
+
+                t = msg.get("text")
+                if t:
+                    try:
+                        payload = json.loads(t)
+                    except json.JSONDecodeError:
+                        prefetched.append(msg)
+                        continue
+
+                    if payload.get("type") == "resize":
+                        c = int(payload.get("cols") or 0)
+                        r = int(payload.get("rows") or 0)
+                        if c > 0 and r > 0:
+                            init_cols = c
+                            init_rows = r
+                            break
+
+                prefetched.append(msg)
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            # Non-fatal; fall back to query/default cols/rows.
+            prefetched = []
+
+        print(f"[hermelin] spawning PTY cols={init_cols} rows={init_rows} (query cols={cols} rows={rows})")
+        p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=init_cols, rows=init_rows)
+
+        def _handle_ws_message(msg: dict) -> bool:
+            """Return False to stop reading (disconnect)."""
+            if msg.get("type") == "websocket.disconnect":
+                return False
+
+            b = msg.get("bytes")
+            if b is not None:
+                if b:
+                    p.write(b)
+                return True
+
+            t = msg.get("text")
+            if t is None:
+                return True
+
+            # Control frames are JSON over text.
+            # Terminal keystrokes are sent as bytes frames.
+            try:
+                payload = json.loads(t)
+            except json.JSONDecodeError:
+                p.write(t.encode("utf-8", errors="ignore"))
+                return True
+
+            if payload.get("type") == "resize":
+                c = int(payload.get("cols") or 0)
+                r = int(payload.get("rows") or 0)
+                if c > 0 and r > 0:
+                    p.resize(cols=c, rows=r)
+                return True
+
+            if payload.get("type") == "signal":
+                sig = str(payload.get("sig") or "").upper()
+                if sig in {"INT", "TERM", "HUP", "QUIT"}:
+                    try:
+                        os.killpg(p.proc.pid, getattr(signal, f"SIG{sig}"))
+                    except Exception:
+                        pass
+                elif sig == "KILL":
+                    p.kill()
+                return True
+
+            # Unknown JSON payload: ignore.
+            return True
+
+        # Replay any messages we received while waiting for the first resize.
+        for msg in prefetched:
+            try:
+                if not _handle_ws_message(msg):
+                    break
+            except Exception:
+                pass
 
         async def pump_pty_to_ws() -> None:
             try:
@@ -848,44 +968,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             try:
                 while True:
                     msg = await websocket.receive()
-                    if msg.get("type") == "websocket.disconnect":
+                    if not _handle_ws_message(msg):
                         break
-
-                    b = msg.get("bytes")
-                    if b is not None:
-                        if b:
-                            p.write(b)
-                        continue
-
-                    t = msg.get("text")
-                    if t is None:
-                        continue
-
-                    # Control frames are JSON over text.
-                    # Terminal keystrokes are sent as bytes frames.
-                    try:
-                        payload = json.loads(t)
-                    except json.JSONDecodeError:
-                        p.write(t.encode("utf-8", errors="ignore"))
-                        continue
-
-                    if payload.get("type") == "resize":
-                        c = int(payload.get("cols") or 0)
-                        r = int(payload.get("rows") or 0)
-                        if c > 0 and r > 0:
-                            p.resize(cols=c, rows=r)
-                        continue
-
-                    if payload.get("type") == "signal":
-                        sig = str(payload.get("sig") or "").upper()
-                        if sig in {"INT", "TERM", "HUP", "QUIT"}:
-                            try:
-                                os.killpg(p.proc.pid, getattr(signal, f"SIG{sig}"))
-                            except Exception:
-                                pass
-                        elif sig == "KILL":
-                            p.kill()
-                        continue
             except Exception:
                 pass
 
