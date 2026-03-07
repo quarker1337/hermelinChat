@@ -34,11 +34,20 @@ const SLATE = {
 // Stored in localStorage and applied instantly (no backend required).
 const UI_PREFS_STORAGE_KEY = 'hermilinChat.uiPrefs'
 
+const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
+
 const DEFAULT_UI_PREFS = {
   particles: {
     enabled: true,
     // 0..100 (50 matches the current look)
     intensity: 50,
+  },
+  timestamps: {
+    enabled: true,
+  },
+  terminal: {
+    cursorStyle: 'bar',
+    cursorBlink: true,
   },
 }
 
@@ -51,11 +60,26 @@ function clampNum(n, min, max) {
 function normalizeUiPrefs(raw) {
   const r = raw && typeof raw === 'object' ? raw : {}
   const p = r.particles && typeof r.particles === 'object' ? r.particles : {}
+  const ts = r.timestamps && typeof r.timestamps === 'object' ? r.timestamps : {}
+  const term = r.terminal && typeof r.terminal === 'object' ? r.terminal : {}
+
+  const cursorStyleRaw = term.cursorStyle ?? DEFAULT_UI_PREFS.terminal.cursorStyle
+  const cursorStyleStr = String(cursorStyleRaw || '').toLowerCase()
+  const cursorStyle = CURSOR_STYLE_VALUES.includes(cursorStyleStr)
+    ? cursorStyleStr
+    : DEFAULT_UI_PREFS.terminal.cursorStyle
 
   return {
     particles: {
       enabled: p.enabled === undefined ? DEFAULT_UI_PREFS.particles.enabled : !!p.enabled,
       intensity: clampNum(p.intensity ?? DEFAULT_UI_PREFS.particles.intensity, 0, 100),
+    },
+    timestamps: {
+      enabled: ts.enabled === undefined ? DEFAULT_UI_PREFS.timestamps.enabled : !!ts.enabled,
+    },
+    terminal: {
+      cursorStyle,
+      cursorBlink: term.cursorBlink === undefined ? DEFAULT_UI_PREFS.terminal.cursorBlink : !!term.cursorBlink,
     },
   }
 }
@@ -450,7 +474,7 @@ const SessionRow = ({ title, preview, right, active, onClick }) => {
   )
 }
 
-const SearchHitRow = ({ hit, active, onClick }) => {
+const SearchHitRow = ({ hit, active, onClick, showTimestamp = true }) => {
   const [hovered, setHovered] = useState(false)
 
   const role = (hit?.role || '').toLowerCase()
@@ -472,7 +496,9 @@ const SearchHitRow = ({ hit, active, onClick }) => {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <div style={{ width: 44, fontSize: 10, color: SLATE.muted, flexShrink: 0 }}>{isoToTimeLabel(hit?.timestamp_iso)}</div>
+        {showTimestamp && (
+          <div style={{ width: 44, fontSize: 10, color: SLATE.muted, flexShrink: 0 }}>{isoToTimeLabel(hit?.timestamp_iso)}</div>
+        )}
         <div style={{ width: 14, color: badgeColor, flexShrink: 0 }}>{badge}</div>
         <div
           style={{
@@ -1375,6 +1401,83 @@ const SettingsPanel = ({
               />
             </div>
 
+            <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Show timestamps</div>
+              <div style={{ flex: 1 }} />
+              <input
+                type="checkbox"
+                checked={!!ui.timestamps.enabled}
+                onChange={(e) => {
+                  onUiPrefsChange?.((prev) => ({
+                    ...prev,
+                    timestamps: { ...prev.timestamps, enabled: e.target.checked },
+                  }))
+                }}
+                style={{ accentColor: AMBER[400] }}
+              />
+            </div>
+
+            <div
+              style={{
+                marginTop: 12,
+                fontSize: 10,
+                color: SLATE.muted,
+                letterSpacing: 0.9,
+                textTransform: 'uppercase',
+              }}
+            >
+              Terminal
+            </div>
+
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Cursor style</div>
+                <div style={{ flex: 1 }} />
+                <select
+                  value={ui.terminal.cursorStyle}
+                  onChange={(e) => {
+                    onUiPrefsChange?.((prev) => ({
+                      ...prev,
+                      terminal: { ...prev.terminal, cursorStyle: e.target.value },
+                    }))
+                  }}
+                  style={{
+                    background: SLATE.elevated,
+                    border: `1px solid ${SLATE.border}`,
+                    color: SLATE.textBright,
+                    padding: '6px 8px',
+                    fontFamily: "'JetBrains Mono',monospace",
+                    fontSize: 11,
+                    outline: 'none',
+                    borderRadius: 8,
+                  }}
+                  title="xterm cursor style"
+                >
+                  <option value="bar">bar</option>
+                  <option value="block">block</option>
+                  <option value="underline">underline</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Cursor blink</div>
+                <div style={{ flex: 1 }} />
+                <input
+                  type="checkbox"
+                  checked={!!ui.terminal.cursorBlink}
+                  onChange={(e) => {
+                    onUiPrefsChange?.((prev) => ({
+                      ...prev,
+                      terminal: { ...prev.terminal, cursorBlink: e.target.checked },
+                    }))
+                  }}
+                  style={{ accentColor: AMBER[400] }}
+                />
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
               <div
                 onClick={() => onUiPrefsChange?.(DEFAULT_UI_PREFS)}
@@ -1451,7 +1554,14 @@ function stripAnsi(s) {
   return (s || '').replace(ANSI_CSI_RE, '').replace(ANSI_OSC_RE, '')
 }
 
-function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId }) {
+function TerminalPane({
+  resumeId,
+  spawnNonce,
+  onConnectionChange,
+  onSessionId,
+  cursorStyle = DEFAULT_UI_PREFS.terminal.cursorStyle,
+  cursorBlink = DEFAULT_UI_PREFS.terminal.cursorBlink,
+}) {
   const containerRef = useRef(null)
   const termRef = useRef(null)
   const fitRef = useRef(null)
@@ -1569,6 +1679,26 @@ function TerminalPane({ resumeId, spawnNonce, onConnectionChange, onSessionId })
       }
     }
   }, [])
+
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+
+    const cs = (cursorStyle || '').toString().toLowerCase()
+    const style = CURSOR_STYLE_VALUES.includes(cs) ? cs : DEFAULT_UI_PREFS.terminal.cursorStyle
+
+    try {
+      term.options.cursorStyle = style
+    } catch {
+      // ignore
+    }
+
+    try {
+      term.options.cursorBlink = !!cursorBlink
+    } catch {
+      // ignore
+    }
+  }, [cursorStyle, cursorBlink])
 
   useEffect(() => {
     const term = termRef.current
@@ -2627,7 +2757,7 @@ export default function App() {
                             )}
                           </span>
                         }
-                        right={isoToTimeLabel(top?.timestamp_iso)}
+                        right={uiPrefs.timestamps.enabled ? isoToTimeLabel(top?.timestamp_iso) : null}
                         active={activeSessionId === g.session_id || peekHit?.session_id === g.session_id}
                         onClick={() =>
                           setExpandedSearchSessions((prev) => ({
@@ -2644,6 +2774,7 @@ export default function App() {
                               key={hit.id}
                               hit={hit}
                               active={peekHit?.id === hit.id}
+                              showTimestamp={uiPrefs.timestamps.enabled}
                               onClick={() => openPeek(hit)}
                             />
                           ))}
@@ -2675,7 +2806,7 @@ export default function App() {
                       <SessionRow
                         key={s.id}
                         title={s.title || s.id}
-                        right={isoToTimeLabel(s.started_at_iso)}
+                        right={uiPrefs.timestamps.enabled ? isoToTimeLabel(s.started_at_iso) : null}
                         active={activeSessionId === s.id}
                         onClick={() => {
                           setSearchQuery('')
@@ -2870,6 +3001,8 @@ export default function App() {
                 <TerminalPane
                   resumeId={ptyResumeId}
                   spawnNonce={ptySpawnNonce}
+                  cursorStyle={uiPrefs.terminal.cursorStyle}
+                  cursorBlink={uiPrefs.terminal.cursorBlink}
                   onConnectionChange={handleConnectionChange}
                   onSessionId={handleDetectedSessionId}
                 />
