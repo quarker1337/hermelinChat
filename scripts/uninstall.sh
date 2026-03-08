@@ -154,32 +154,49 @@ fi
 
 stop_service() {
   local mode="$1"  # user|system
+  local prefix="system"
+
+  # For systemd system services, we avoid sudo until we know the unit exists.
   local sc=(systemctl)
-  local prefix=""
+  local sc_root=(sudo systemctl)
 
   if [[ "$mode" == "user" ]]; then
-    sc=(systemctl --user)
     prefix="user"
-  else
-    sc=(sudo systemctl)
-    prefix="system"
+    sc=(systemctl --user)
+    sc_root=(systemctl --user)
   fi
 
   if ! command -v systemctl >/dev/null 2>&1; then
     return 0
   fi
 
-  # Check if the service unit exists in this mode.
+  # Check if the service unit exists in this mode (no sudo needed).
   if ! "${sc[@]}" list-unit-files 2>/dev/null | grep -q "^${SERVICE}\\.service"; then
     return 0
   fi
 
   echo "==> stopping ${prefix} service: ${SERVICE}"
-  "${sc[@]}" stop "${SERVICE}" >/dev/null 2>&1 || true
+  if [[ "$mode" == "user" ]]; then
+    "${sc_root[@]}" stop "${SERVICE}" >/dev/null 2>&1 || true
+  else
+    if command -v sudo >/dev/null 2>&1; then
+      "${sc_root[@]}" stop "${SERVICE}" >/dev/null 2>&1 || true
+    else
+      echo "WARNING: sudo not found; cannot stop system service '${SERVICE}'." >&2
+    fi
+  fi
 
   if [[ "$REMOVE_SERVICE" -eq 1 ]]; then
     echo "==> disabling ${prefix} service: ${SERVICE}"
-    "${sc[@]}" disable "${SERVICE}" >/dev/null 2>&1 || true
+    if [[ "$mode" == "user" ]]; then
+      "${sc_root[@]}" disable "${SERVICE}" >/dev/null 2>&1 || true
+    else
+      if command -v sudo >/dev/null 2>&1; then
+        "${sc_root[@]}" disable "${SERVICE}" >/dev/null 2>&1 || true
+      else
+        echo "WARNING: sudo not found; cannot disable system service '${SERVICE}'." >&2
+      fi
+    fi
 
     local frag
     frag="$("${sc[@]}" show -p FragmentPath "${SERVICE}" 2>/dev/null | cut -d= -f2)"
@@ -188,13 +205,26 @@ stop_service() {
       if [[ "$mode" == "user" ]]; then
         rm -f "$frag" || true
       else
-        sudo rm -f "$frag" || true
+        if command -v sudo >/dev/null 2>&1; then
+          sudo rm -f "$frag" || true
+        else
+          echo "WARNING: sudo not found; cannot remove system unit file: $frag" >&2
+        fi
       fi
     fi
 
     echo "==> daemon-reload (${prefix})"
-    "${sc[@]}" daemon-reload >/dev/null 2>&1 || true
-    "${sc[@]}" reset-failed "${SERVICE}" >/dev/null 2>&1 || true
+    if [[ "$mode" == "user" ]]; then
+      "${sc_root[@]}" daemon-reload >/dev/null 2>&1 || true
+      "${sc_root[@]}" reset-failed "${SERVICE}" >/dev/null 2>&1 || true
+    else
+      if command -v sudo >/dev/null 2>&1; then
+        "${sc_root[@]}" daemon-reload >/dev/null 2>&1 || true
+        "${sc_root[@]}" reset-failed "${SERVICE}" >/dev/null 2>&1 || true
+      else
+        echo "WARNING: sudo not found; cannot daemon-reload systemd." >&2
+      fi
+    fi
   fi
 }
 
