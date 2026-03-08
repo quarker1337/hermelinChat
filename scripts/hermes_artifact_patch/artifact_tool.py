@@ -100,11 +100,13 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _list_artifact_paths() -> list[Path]:
-    root = _ensure_artifacts_root_dir()
-    return sorted(
-        [p for p in root.glob("*.json") if not p.name.startswith("_")],
-        key=lambda p: p.name,
-    )
+    paths: list[Path] = []
+    for dir_path in (ARTIFACT_SESSION_DIR, ARTIFACT_PERSISTENT_DIR):
+        root = _ensure_dir(dir_path)
+        paths.extend([p for p in root.glob("*.json") if p.is_file() and not p.name.startswith("_")])
+
+    # Sort for deterministic output: by directory scope (session/persistent) then filename.
+    return sorted(paths, key=lambda p: (p.parent.name, p.name))
 
 
 def _iter_artifacts() -> list[dict[str, Any]]:
@@ -244,6 +246,12 @@ def remove_artifact(tab_id: str, task_id: str | None = None) -> str:
         except OSError as exc:
             return json.dumps({"error": f"Failed to remove artifact '{artifact_id}': {exc}"}, ensure_ascii=False)
 
+    if removed_paths:
+        try:
+            _recompute_latest()
+        except Exception:
+            pass
+
     # Stop any live runner, even if the artifact file wasn't found.
     runner_result: dict[str, Any] | None = None
     try:
@@ -266,8 +274,12 @@ def remove_artifact(tab_id: str, task_id: str | None = None) -> str:
 def clear_artifacts(scope: str = "session", task_id: str | None = None) -> str:
     """Clear artifacts by scope.
 
-    NOTE: Step 1 still uses a single artifacts directory, so scope is accepted
-    but currently behaves the same for all values.
+    Step 5 behavior:
+    - scope="session": delete all files in ARTIFACT_SESSION_DIR
+    - scope="persistent": delete all files in ARTIFACT_PERSISTENT_DIR
+    - scope="all": delete all files in both
+
+    Always emits a close_all signal so hermelinChat can hide the panel.
     """
 
     scope_value = (scope or "session").strip().lower()
@@ -276,27 +288,67 @@ def clear_artifacts(scope: str = "session", task_id: str | None = None) -> str:
 
     now = time.time()
 
+    dirs_to_clear: list[str] = []
+    if scope_value in {"session", "all"}:
+        dirs_to_clear.append(ARTIFACT_SESSION_DIR)
+    if scope_value in {"persistent", "all"}:
+        dirs_to_clear.append(ARTIFACT_PERSISTENT_DIR)
+
+    removed_paths: list[str] = []
     removed_ids: list[str] = []
-    for path in _list_artifact_paths():
-        payload = _read_json(path)
-        if not isinstance(payload, dict):
-            continue
 
+    # Stop runners first (best-effort), then delete artifacts.
+    # This avoids races where a live runner recreates the artifact file.
+    ids_to_stop: set[str] = set()
+    for dir_path in dirs_to_clear:
+        root = _ensure_dir(dir_path)
+        for path in root.glob("*.json"):
+            if not path.is_file() or path.name.startswith("_"):
+                continue
+            ids_to_stop.add(path.stem)
+
+    # scope=all should stop any remaining runners too (even if their artifact files are missing)
+    if scope_value == "all":
         try:
-            path.unlink(missing_ok=True)
-            artifact_id = payload.get("id")
-            if artifact_id:
-                removed_ids.append(str(artifact_id))
-        except OSError:
-            continue
+            pid_root = _ensure_dir(PIDS_DIR)
+            for pid_path in pid_root.glob("*.pid"):
+                if pid_path.is_file():
+                    ids_to_stop.add(pid_path.stem)
+        except Exception:
+            pass
 
-    _recompute_latest()
+    for artifact_id in sorted(ids_to_stop):
+        try:
+            stop_runner(artifact_id)
+        except Exception:
+            pass
+
+    for dir_path in dirs_to_clear:
+        root = _ensure_dir(dir_path)
+        for path in sorted(root.glob("*.json"), key=lambda p: p.name):
+            if not path.is_file() or path.name.startswith("_"):
+                continue
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                return json.dumps({"error": f"Failed to remove artifact '{path.name}': {exc}"}, ensure_ascii=False)
+
+            removed_paths.append(str(path))
+            removed_ids.append(path.stem)
+
+    try:
+        _recompute_latest()
+    except Exception:
+        pass
 
     # Always emit close_all even if no artifacts existed (lets UI close the empty-state panel).
     _write_close_signal({
         "action": "close_all",
         "task_id": task_id,
-        "artifact_ids": removed_ids,
+        "scope": scope_value,
+        "artifact_ids": sorted(set(removed_ids)),
         "timestamp": now,
     })
 
@@ -304,8 +356,8 @@ def clear_artifacts(scope: str = "session", task_id: str | None = None) -> str:
         {
             "status": "cleared",
             "scope": scope_value,
-            "count": len(removed_ids),
-            "artifact_ids": removed_ids,
+            "count": len(removed_paths),
+            "artifact_ids": sorted(set(removed_ids)),
         },
         ensure_ascii=False,
     )
