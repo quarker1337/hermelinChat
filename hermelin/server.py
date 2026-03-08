@@ -17,7 +17,13 @@ from fastapi import Body, FastAPI, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-from .artifacts import delete_artifact, is_valid_artifact_id, latest_artifact, list_artifacts
+from .artifacts import (
+    cleanup_session_artifacts,
+    delete_artifact,
+    is_valid_artifact_id,
+    latest_artifact,
+    list_artifacts,
+)
 from .auth import (
     create_session_token,
     extract_cookie_value,
@@ -1115,6 +1121,41 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "LINES",
         ):
             env.pop(k, None)
+
+        # -------------------------------------------------------------
+        # New session: cleanup session-scoped artifacts
+        # -------------------------------------------------------------
+        if not resume and not cont:
+            try:
+                info = cleanup_session_artifacts(config.artifact_dir)
+                did_remove = bool(
+                    (info or {}).get("removed_artifacts")
+                    or (info or {}).get("pid_files_removed")
+                    or (info or {}).get("runner_scripts_removed")
+                )
+
+                # If we wiped out all artifacts, explicitly tell the UI to hide the
+                # panel (otherwise it can remain open in an empty-state).
+                if did_remove:
+                    try:
+                        if not list_artifacts(config.artifact_dir):
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "artifact_close",
+                                        "payload": {
+                                            "action": "close_all",
+                                            "scope": "session",
+                                        },
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            )
+                    except Exception:
+                        pass
+            except Exception:
+                # Best-effort cleanup only.
+                pass
 
         # -------------------------------------------------------------
         # PTY sizing

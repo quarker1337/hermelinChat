@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable
@@ -12,6 +13,8 @@ ARTIFACT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 SESSION_SUBDIR = "session"
 PERSISTENT_SUBDIR = "persistent"
+RUNNERS_SUBDIR = "runners"
+PIDS_SUBDIR = "pids"
 
 
 def ensure_artifact_dir(path: Path) -> Path:
@@ -29,6 +32,14 @@ def artifact_session_dir(root: Path) -> Path:
 
 def artifact_persistent_dir(root: Path) -> Path:
     return ensure_artifact_dir(artifact_root_dir(root) / PERSISTENT_SUBDIR)
+
+
+def artifact_runners_dir(root: Path) -> Path:
+    return ensure_artifact_dir(artifact_root_dir(root) / RUNNERS_SUBDIR)
+
+
+def artifact_pids_dir(root: Path) -> Path:
+    return ensure_artifact_dir(artifact_root_dir(root) / PIDS_SUBDIR)
 
 
 def is_valid_artifact_id(value: str) -> bool:
@@ -193,3 +204,111 @@ def delete_artifact(root: Path, artifact_id: str) -> bool:
 
     recompute_latest(root)
     return removed_any
+
+
+def cleanup_session_artifacts(root: Path) -> dict[str, Any]:
+    """Best-effort cleanup for session-scoped artifacts.
+
+    When hermilinChat starts a *new* Hermes session, we want to remove old
+    session-only artifacts so they don't persist forever.
+
+    Behavior:
+    - Delete artifact JSON files under: {root}/session/
+    - Kill + remove runner PID files ONLY for session artifacts (not persistent)
+      by cross-referencing artifact IDs in session/ vs persistent/.
+    - Remove matching runner scripts under: {root}/runners/
+    - Remove {root}/_latest.json so the UI doesn't quick-poll stale artifacts.
+    """
+
+    root_dir = artifact_root_dir(root)
+    session_dir = artifact_session_dir(root)
+    persistent_dir = artifact_persistent_dir(root)
+    runners_dir = artifact_runners_dir(root)
+    pids_dir = artifact_pids_dir(root)
+
+    persistent_ids: set[str] = set()
+    for path in persistent_dir.glob("*.json"):
+        if not path.is_file() or path.name.startswith("_"):
+            continue
+        persistent_ids.add(path.stem)
+
+    session_paths: list[Path] = []
+    session_ids: set[str] = set()
+    for path in session_dir.glob("*.json"):
+        if not path.is_file() or path.name.startswith("_"):
+            continue
+        session_paths.append(path)
+        session_ids.add(path.stem)
+
+    pid_files_removed = 0
+    runner_scripts_removed = 0
+    kill_attempts = 0
+
+    # Only stop runners that correspond to session artifacts and do NOT also
+    # exist as persistent artifacts.
+    for artifact_id in sorted(session_ids):
+        if artifact_id in persistent_ids:
+            continue
+
+        pid_path = pids_dir / f"{artifact_id}.pid"
+        if pid_path.exists() and pid_path.is_file():
+            pid: int | None = None
+            try:
+                pid = int(pid_path.read_text(encoding="utf-8").strip())
+            except Exception:
+                pid = None
+
+            if pid is not None and pid > 0:
+                kill_attempts += 1
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    pass
+                except Exception:
+                    pass
+
+            try:
+                pid_path.unlink()
+                pid_files_removed += 1
+            except Exception:
+                pass
+
+        runner_path = runners_dir / f"{artifact_id}_runner.py"
+        if runner_path.exists() and runner_path.is_file():
+            try:
+                runner_path.unlink()
+                runner_scripts_removed += 1
+            except Exception:
+                pass
+
+    removed_artifacts = 0
+    removed_ids: list[str] = []
+    for path in sorted(session_paths, key=lambda p: p.name):
+        try:
+            path.unlink()
+            removed_artifacts += 1
+            removed_ids.append(path.stem)
+        except Exception:
+            pass
+
+    latest_removed = False
+    latest_path = root_dir / "_latest.json"
+    try:
+        if latest_path.exists():
+            latest_path.unlink()
+            latest_removed = True
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "removed_artifacts": removed_artifacts,
+        "removed_artifact_ids": removed_ids,
+        "pid_files_removed": pid_files_removed,
+        "runner_scripts_removed": runner_scripts_removed,
+        "kill_attempts": kill_attempts,
+        "latest_removed": latest_removed,
+    }
+
