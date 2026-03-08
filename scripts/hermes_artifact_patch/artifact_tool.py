@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import re
 import tempfile
 import time
@@ -366,14 +367,80 @@ def clear_artifacts(scope: str = "session", task_id: str | None = None) -> str:
 def stop_runner(tab_id: str) -> str:
     """Stop a background runner process for a live artifact.
 
-    Step 1 stub: runner processes are implemented in later steps.
+    Step 6 behavior:
+    - Read PID from ~/.hermes/pids/{tab_id}.pid
+    - If found, send SIGTERM to that PID
+    - Delete the PID file
+    - Delete the runner script ~/.hermes/runners/{tab_id}_runner.py if it exists
+
+    Best-effort: processes may already be dead; cleanup should still succeed.
     """
 
     artifact_id = _sanitize_artifact_id(tab_id)
     if not artifact_id:
         return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
 
-    return json.dumps({"status": "not_implemented", "tab_id": artifact_id}, ensure_ascii=False)
+    pid_root = _ensure_dir(PIDS_DIR)
+    runner_root = _ensure_dir(RUNNERS_DIR)
+
+    pid_path = pid_root / f"{artifact_id}.pid"
+    runner_path = runner_root / f"{artifact_id}_runner.py"
+
+    had_pid_file = pid_path.exists()
+
+    pid: int | None = None
+    if had_pid_file:
+        try:
+            pid_text = pid_path.read_text(encoding="utf-8").strip()
+            pid = int(pid_text)
+        except Exception:
+            pid = None
+
+    killed = False
+    kill_error: str | None = None
+
+    if pid is not None:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed = True
+        except ProcessLookupError:
+            kill_error = "process_not_found"
+        except PermissionError:
+            kill_error = "permission_denied"
+        except Exception as exc:
+            kill_error = str(exc)
+
+    pid_file_removed = False
+    runner_script_removed = False
+
+    try:
+        if pid_path.exists():
+            pid_path.unlink()
+            pid_file_removed = True
+    except Exception:
+        pass
+
+    try:
+        if runner_path.exists():
+            runner_path.unlink()
+            runner_script_removed = True
+    except Exception:
+        pass
+
+    status = "stopped" if had_pid_file else "not_running"
+
+    return json.dumps(
+        {
+            "status": status,
+            "tab_id": artifact_id,
+            "pid": pid,
+            "killed": killed,
+            "kill_error": kill_error,
+            "pid_file_removed": pid_file_removed,
+            "runner_script_removed": runner_script_removed,
+        },
+        ensure_ascii=False,
+    )
 
 
 CREATE_ARTIFACT_SCHEMA = {
