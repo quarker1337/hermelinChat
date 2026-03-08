@@ -2862,8 +2862,10 @@ export default function App() {
       })
 
       if (!next.length) {
-        setArtifactPanelDismissed(false)
-        if (!artifactPanelPinned) setArtifactPanelOpen(false)
+        // Keep panel state as-is when there are no artifacts.
+        //
+        // Otherwise, opening the panel manually will immediately collapse again
+        // on the next refresh tick (because the artifacts list is still empty).
         return
       }
 
