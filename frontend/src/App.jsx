@@ -3767,11 +3767,12 @@ export default function App() {
               </div>
             )}
 
-            {!artifactPanelOpen && artifactTabs.length > 0 && (
+            {!artifactPanelOpen && auth.authenticated && (artifactTabs.length > 0 || artifactEverSeenRef.current) && (
               <div
                 onClick={() => {
                   setArtifactPanelDismissed(false)
                   setArtifactPanelOpen(true)
+                  closePeek()
                 }}
                 title="Open artifact panel"
                 style={{
@@ -3802,7 +3803,7 @@ export default function App() {
             )}
           </div>
 
-          {artifactPanelOpen && artifactTabs.length > 0 ? (
+          {artifactPanelOpen ? (
             <ArtifactPanel
               artifacts={artifactTabs}
               activeArtifactId={activeArtifactId}
