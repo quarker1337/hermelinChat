@@ -6,6 +6,7 @@ This module is installed into Hermes as: tools/artifact_tool.py
 See docs/artifacts/artifact-tool-refactor.md for rationale.
 
 Provides tools:
+- list_artifacts
 - create_artifact
 - remove_artifact
 - clear_artifacts
@@ -425,6 +426,113 @@ def clear_artifacts(scope: str = "session", task_id: str | None = None) -> str:
     )
 
 
+def _is_pid_running(pid: int) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+
+    try:
+        # Signal 0 does not kill the process; it just performs error checking.
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # The process exists, but we don't have permission to signal it.
+        return True
+    except Exception:
+        return False
+
+
+def list_artifacts(scope: str = "all") -> str:
+    """List artifacts for the model so it can discover existing panel tabs.
+
+    scope="all": list from both session/ and persistent/
+    scope="session": list only session/
+    scope="persistent": list only persistent/
+
+    For each artifact file we return a summary:
+    {id, type, title, persistent, live, timestamp, runner_active}
+
+    runner_active is determined by checking for a matching PID file under
+    ~/.hermes/artifacts/pids/ and then verifying the PID still exists.
+    """
+
+    scope_value = (scope or "all").strip().lower()
+    if scope_value not in {"session", "persistent", "all"}:
+        return json.dumps({"error": "scope must be one of: session, persistent, all"}, ensure_ascii=False)
+
+    dirs_to_list: list[str] = []
+    if scope_value in {"session", "all"}:
+        dirs_to_list.append(ARTIFACT_SESSION_DIR)
+    if scope_value in {"persistent", "all"}:
+        dirs_to_list.append(ARTIFACT_PERSISTENT_DIR)
+
+    pid_root = _ensure_dir(PIDS_DIR)
+
+    summaries: list[dict[str, Any]] = []
+    for dir_path in dirs_to_list:
+        root = _ensure_dir(dir_path)
+        for path in sorted(root.glob("*.json"), key=lambda p: p.name):
+            if not path.is_file() or path.name.startswith("_"):
+                continue
+
+            payload = _read_json(path)
+            if not isinstance(payload, dict):
+                payload = {}
+
+            artifact_id_raw = payload.get("id") or path.stem
+            artifact_id = _sanitize_artifact_id(str(artifact_id_raw)) or path.stem
+
+            kind = str(payload.get("type") or "")
+            title = str(payload.get("title") or "")
+            persistent_flag = path.parent.name == "persistent"
+            live_flag = bool(payload.get("live"))
+
+            timestamp_value: float
+            if "timestamp" in payload:
+                try:
+                    timestamp_value = float(payload.get("timestamp") or 0.0)
+                except Exception:
+                    timestamp_value = 0.0
+            else:
+                try:
+                    timestamp_value = float(path.stat().st_mtime)
+                except Exception:
+                    timestamp_value = 0.0
+
+            runner_active = False
+            pid_path = pid_root / f"{artifact_id}.pid"
+            if pid_path.exists() and pid_path.is_file():
+                try:
+                    pid_value = int(pid_path.read_text(encoding="utf-8").strip())
+                except Exception:
+                    pid_value = -1
+
+                runner_active = _is_pid_running(pid_value)
+
+            summaries.append(
+                {
+                    "id": artifact_id,
+                    "type": kind,
+                    "title": title,
+                    "persistent": persistent_flag,
+                    "live": live_flag,
+                    "timestamp": timestamp_value,
+                    "runner_active": runner_active,
+                }
+            )
+
+    def _sort_key(item: dict[str, Any]) -> tuple[float, str]:
+        try:
+            ts = float(item.get("timestamp") or 0.0)
+        except Exception:
+            ts = 0.0
+        return (-ts, str(item.get("id") or ""))
+
+    summaries.sort(key=_sort_key)
+    return json.dumps(summaries, ensure_ascii=False)
+
+
 def stop_runner(tab_id: str) -> str:
     """Stop a background runner process for a live artifact.
 
@@ -502,6 +610,27 @@ def stop_runner(tab_id: str) -> str:
         },
         ensure_ascii=False,
     )
+
+
+LIST_ARTIFACTS_SCHEMA = {
+    "name": "list_artifacts",
+    "description": (
+        "List existing artifacts so the model can discover what tabs already exist. "
+        "Returns a JSON array of summaries with runner status."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "scope": {
+                "type": "string",
+                "enum": ["all", "session", "persistent"],
+                "description": "Which artifact scope to list.",
+                "default": "all",
+            }
+        },
+        "required": [],
+    },
+}
 
 
 CREATE_ARTIFACT_SCHEMA = {
@@ -629,6 +758,10 @@ def _check_requirements() -> bool:
     return True
 
 
+def _handle_list_artifacts(args, **kw):
+    return list_artifacts(scope=args.get("scope", "all"))
+
+
 def _handle_create_artifact(args, **kw):
     return create_artifact(
         artifact_type=args.get("artifact_type", ""),
@@ -653,6 +786,14 @@ def _handle_clear_artifacts(args, **kw):
 def _handle_stop_runner(args, **kw):
     return stop_runner(tab_id=args.get("tab_id", ""))
 
+
+registry.register(
+    name="list_artifacts",
+    toolset="artifacts",
+    schema=LIST_ARTIFACTS_SCHEMA,
+    handler=_handle_list_artifacts,
+    check_fn=_check_requirements,
+)
 
 registry.register(
     name="create_artifact",

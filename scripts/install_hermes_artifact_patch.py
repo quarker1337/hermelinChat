@@ -20,7 +20,7 @@ ARTIFACT_TOOLSETS_BLOCK = '''
     # hermilinChat artifact panel toolsets (installed by hermilinChat patch)
     "artifacts": {
         "description": "Create and manage artifacts in hermilinChat's right-side artifact panel",
-        "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],
+        "tools": ["list_artifacts", "create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],
         "includes": []
     },
 '''
