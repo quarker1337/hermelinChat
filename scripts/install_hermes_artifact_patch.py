@@ -57,8 +57,24 @@ def _resolve_hermes_exe(path_or_name: str) -> Path:
 
 
 def _detect_hermes_python(hermes_exe: Path, explicit: str) -> Path:
+    """Resolve the Python interpreter used by the Hermes installation.
+
+    IMPORTANT: do NOT call .resolve() on the interpreter path.
+
+    In many venvs `venv/bin/python3` is a symlink to a base interpreter.
+    Python detects the venv via pyvenv.cfg relative to argv[0]; resolving
+    the symlink can bypass the venv and make installed Hermes modules
+    disappear (e.g. model_tools not importable).
+    """
+
+    def _abs_no_resolve(path: Path) -> Path:
+        p = path.expanduser()
+        if p.is_absolute():
+            return p
+        return (Path.cwd() / p).absolute()
+
     if explicit:
-        python_path = Path(explicit).expanduser().resolve()
+        python_path = _abs_no_resolve(Path(explicit))
         if not python_path.is_file():
             raise FileNotFoundError(f"Hermes Python not found: {python_path}")
         return python_path
@@ -81,9 +97,17 @@ def _detect_hermes_python(hermes_exe: Path, explicit: str) -> Path:
         resolved = shutil.which(shebang[1])
         if not resolved:
             raise RuntimeError(f"Could not resolve interpreter from shebang: {shebang[1]}")
-        return Path(resolved).resolve()
+        python_path = _abs_no_resolve(Path(resolved))
+        if not python_path.is_file():
+            raise FileNotFoundError(f"Hermes Python not found: {python_path}")
+        return python_path
 
-    return Path(shebang[0]).expanduser().resolve()
+    python_path = Path(shebang[0]).expanduser()
+    if not python_path.is_absolute():
+        python_path = (hermes_exe.parent / python_path).absolute()
+    if not python_path.is_file():
+        raise FileNotFoundError(f"Hermes Python not found: {python_path}")
+    return python_path
 
 
 def _discover_live_paths(hermes_exe: Path, hermes_python: Path) -> dict[str, Path]:
