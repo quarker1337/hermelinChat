@@ -158,6 +158,8 @@ function ArtifactTabIcon({ type }) {
 }
 
 export default function ArtifactPanel({
+  width = 480,
+  onResizeWidth,
   artifacts,
   activeArtifactId,
   pinned,
@@ -197,10 +199,77 @@ export default function ArtifactPanel({
     }
   }, [tabMenuOpen])
 
+  const resizeCleanupRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      try {
+        resizeCleanupRef.current?.()
+      } catch {
+        // ignore
+      }
+    }
+  }, [])
+
+  const handleResizePointerDown = (event) => {
+    if (!onResizeWidth) return
+    if (typeof window === 'undefined') return
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    try {
+      resizeCleanupRef.current?.()
+    } catch {
+      // ignore
+    }
+
+    const startX = event.clientX
+    const startWidth = Number(width) || 480
+
+    const prevCursor = document.body.style.cursor
+    const prevUserSelect = document.body.style.userSelect
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    let raf = null
+
+    const handleMove = (moveEvent) => {
+      const dx = startX - moveEvent.clientX
+      const next = startWidth + dx
+
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        raf = null
+        onResizeWidth(next)
+      })
+    }
+
+    const cleanup = () => {
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', cleanup)
+      window.removeEventListener('pointercancel', cleanup)
+
+      if (raf) cancelAnimationFrame(raf)
+
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevUserSelect
+
+      resizeCleanupRef.current = null
+    }
+
+    resizeCleanupRef.current = cleanup
+
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', cleanup)
+    window.addEventListener('pointercancel', cleanup)
+  }
+
   return (
     <div
       style={{
-        width: 480,
+        width: Number(width) || 480,
         flexShrink: 0,
         borderLeft: `1px solid ${SLATE.border}`,
         background: `${SLATE.surface}f2`,
@@ -239,7 +308,33 @@ export default function ArtifactPanel({
         .artifactTabDropdown__close:hover {
           color: ${SLATE.danger};
         }
+
+        .artifactPanelResizeHandle:hover {
+          background: ${SLATE.border}55;
+        }
+
+        .artifactPanelResizeHandle:active {
+          background: ${AMBER[900]}35;
+        }
       `}</style>
+
+      {onResizeWidth ? (
+        <div
+          onPointerDown={handleResizePointerDown}
+          title="Drag to resize"
+          className="artifactPanelResizeHandle"
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 6,
+            cursor: 'col-resize',
+            zIndex: 60,
+            touchAction: 'none',
+          }}
+        />
+      ) : null}
 
       <div
         style={{

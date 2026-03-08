@@ -35,6 +35,9 @@ const SLATE = {
 // Stored in localStorage and applied instantly (no backend required).
 const UI_PREFS_STORAGE_KEY = 'hermilinChat.uiPrefs'
 
+const ARTIFACT_PANEL_WIDTH_STORAGE_KEY = 'hermilinChat.artifactPanelWidth'
+const DEFAULT_ARTIFACT_PANEL_WIDTH = 480
+
 const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
 
 // First tagged release of the hermilinChat UI.
@@ -103,6 +106,46 @@ function saveUiPrefs(prefs) {
   if (typeof window === 'undefined') return
   try {
     window.localStorage?.setItem(UI_PREFS_STORAGE_KEY, JSON.stringify(prefs))
+  } catch {
+    // ignore
+  }
+}
+
+function clampArtifactPanelWidth(value) {
+  const hardMin = 320
+  const hardMax = 960
+
+  const w = Number(value)
+  const base = Number.isFinite(w) ? w : DEFAULT_ARTIFACT_PANEL_WIDTH
+
+  if (typeof window === 'undefined') {
+    return Math.max(hardMin, Math.min(hardMax, base))
+  }
+
+  const terminalMin = 340
+  const viewport = Number(window.innerWidth)
+  const viewportMax = Number.isFinite(viewport) ? viewport - terminalMin : hardMax
+  const max = Math.max(hardMin, Math.min(hardMax, viewportMax))
+
+  return Math.max(hardMin, Math.min(max, base))
+}
+
+function loadArtifactPanelWidth() {
+  if (typeof window === 'undefined') return clampArtifactPanelWidth(DEFAULT_ARTIFACT_PANEL_WIDTH)
+  try {
+    const raw = window.localStorage?.getItem(ARTIFACT_PANEL_WIDTH_STORAGE_KEY)
+    if (!raw) return clampArtifactPanelWidth(DEFAULT_ARTIFACT_PANEL_WIDTH)
+    return clampArtifactPanelWidth(Number(raw))
+  } catch {
+    return clampArtifactPanelWidth(DEFAULT_ARTIFACT_PANEL_WIDTH)
+  }
+}
+
+function saveArtifactPanelWidth(width) {
+  if (typeof window === 'undefined') return
+  try {
+    const w = Math.round(clampArtifactPanelWidth(width))
+    window.localStorage?.setItem(ARTIFACT_PANEL_WIDTH_STORAGE_KEY, String(w))
   } catch {
     // ignore
   }
@@ -2594,12 +2637,31 @@ export default function App() {
   const [artifactPanelOpen, setArtifactPanelOpen] = useState(false)
   const [artifactPanelPinned, setArtifactPanelPinned] = useState(false)
   const [artifactPanelDismissed, setArtifactPanelDismissed] = useState(false)
+  const [artifactPanelWidth, setArtifactPanelWidth] = useState(() => loadArtifactPanelWidth())
   const [activeArtifactId, setActiveArtifactId] = useState(null)
   const artifactTabsRef = useRef([])
 
   useEffect(() => {
     artifactTabsRef.current = artifactTabs
   }, [artifactTabs])
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      saveArtifactPanelWidth(artifactPanelWidth)
+    }, 150)
+    return () => clearTimeout(t)
+  }, [artifactPanelWidth])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleResize = () => {
+      setArtifactPanelWidth((prev) => clampArtifactPanelWidth(prev))
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   const [runtimeInfo, setRuntimeInfo] = useState({ loading: true, default_model: null, spawn_cwd: null })
 
@@ -3805,6 +3867,8 @@ export default function App() {
 
           {artifactPanelOpen ? (
             <ArtifactPanel
+              width={artifactPanelWidth}
+              onResizeWidth={(nextWidth) => setArtifactPanelWidth(clampArtifactPanelWidth(nextWidth))}
               artifacts={artifactTabs}
               activeArtifactId={activeArtifactId}
               pinned={artifactPanelPinned}
