@@ -2596,9 +2596,11 @@ export default function App() {
   const [artifactPanelDismissed, setArtifactPanelDismissed] = useState(false)
   const [activeArtifactId, setActiveArtifactId] = useState(null)
   const artifactTabsRef = useRef([])
+  const artifactEverSeenRef = useRef(false)
 
   useEffect(() => {
     artifactTabsRef.current = artifactTabs
+    if (artifactTabs.length > 0) artifactEverSeenRef.current = true
   }, [artifactTabs])
 
   const [runtimeInfo, setRuntimeInfo] = useState({ loading: true, default_model: null, spawn_cwd: null })
