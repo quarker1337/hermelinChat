@@ -215,11 +215,23 @@ export default function ArtifactPanel({
     if (!onResizeWidth) return
     if (typeof window === 'undefined') return
 
+    // Only left-click drags (but keep touch/pens working).
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+
     event.preventDefault()
     event.stopPropagation()
 
     try {
       resizeCleanupRef.current?.()
+    } catch {
+      // ignore
+    }
+
+    const handleEl = event.currentTarget
+    const pointerId = event.pointerId
+
+    try {
+      handleEl?.setPointerCapture?.(pointerId)
     } catch {
       // ignore
     }
@@ -233,9 +245,49 @@ export default function ArtifactPanel({
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
 
+    // Prevent iframe interactions from eating pointerup.
+    try {
+      document.body.classList.add('artifactPanel--resizing')
+    } catch {
+      // ignore
+    }
+
     let raf = null
 
+    const cleanup = () => {
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', cleanup)
+      window.removeEventListener('pointercancel', cleanup)
+      window.removeEventListener('blur', cleanup)
+
+      if (raf) cancelAnimationFrame(raf)
+
+      try {
+        handleEl?.releasePointerCapture?.(pointerId)
+      } catch {
+        // ignore
+      }
+
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevUserSelect
+
+      try {
+        document.body.classList.remove('artifactPanel--resizing')
+      } catch {
+        // ignore
+      }
+
+      resizeCleanupRef.current = null
+    }
+
     const handleMove = (moveEvent) => {
+      // If we somehow miss pointerup (e.g. released outside window / iframe weirdness),
+      // stop resizing as soon as the pointer is no longer pressed.
+      if (typeof moveEvent.buttons === 'number' && moveEvent.buttons === 0) {
+        cleanup()
+        return
+      }
+
       const dx = startX - moveEvent.clientX
       const next = startWidth + dx
 
@@ -246,24 +298,12 @@ export default function ArtifactPanel({
       })
     }
 
-    const cleanup = () => {
-      window.removeEventListener('pointermove', handleMove)
-      window.removeEventListener('pointerup', cleanup)
-      window.removeEventListener('pointercancel', cleanup)
-
-      if (raf) cancelAnimationFrame(raf)
-
-      document.body.style.cursor = prevCursor
-      document.body.style.userSelect = prevUserSelect
-
-      resizeCleanupRef.current = null
-    }
-
     resizeCleanupRef.current = cleanup
 
     window.addEventListener('pointermove', handleMove)
     window.addEventListener('pointerup', cleanup)
     window.addEventListener('pointercancel', cleanup)
+    window.addEventListener('blur', cleanup)
   }
 
   return (
@@ -316,24 +356,47 @@ export default function ArtifactPanel({
         .artifactPanelResizeHandle:active {
           background: ${AMBER[900]}35;
         }
+
+        body.artifactPanel--resizing iframe {
+          pointer-events: none;
+        }
       `}</style>
 
       {onResizeWidth ? (
-        <div
+        <button
+          type="button"
           onPointerDown={handleResizePointerDown}
           title="Drag to resize"
+          aria-label="Resize artifact panel"
           className="artifactPanelResizeHandle"
           style={{
             position: 'absolute',
             left: 0,
             top: 0,
             bottom: 0,
-            width: 6,
+            width: 12,
             cursor: 'col-resize',
             zIndex: 60,
             touchAction: 'none',
+            border: 0,
+            padding: 0,
+            background: 'transparent',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            outline: 'none',
           }}
-        />
+        >
+          <div
+            style={{
+              width: 3,
+              height: 42,
+              borderRadius: 999,
+              background: `${SLATE.border}aa`,
+              boxShadow: `0 0 0 1px ${SLATE.surface}ff`,
+            }}
+          />
+        </button>
       ) : null}
 
       <div
