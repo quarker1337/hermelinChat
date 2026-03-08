@@ -53,10 +53,10 @@ Step 5 changes:
 
 Step 6 changes:
 - Implemented `stop_runner(tab_id)`:
-  - reads PID from `~/.hermes/pids/{tab_id}.pid`
+  - reads PID from `~/.hermes/artifacts/pids/{tab_id}.pid`
   - sends SIGTERM (best-effort)
   - deletes the PID file
-  - deletes the runner script `~/.hermes/runners/{tab_id}_runner.py`
+  - deletes the runner script `~/.hermes/artifacts/runners/{tab_id}_runner.py`
 
 Step 7 changes:
 - `CREATE_ARTIFACT_SCHEMA` description now documents the live-runner pattern (runners/ + pids/ + overwrite artifact JSON loop + stop via `stop_runner`).

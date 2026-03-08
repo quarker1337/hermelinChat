@@ -27,11 +27,11 @@ All runtime files live under `~/.hermes/` — never inside any git repo.
 
 ```
 ~/.hermes/
-├── artifacts/
-│   ├── session/          # artifacts that get cleaned up when the session ends
-│   └── persistent/       # artifacts that survive across sessions
-├── runners/              # background python scripts the model writes for live artifacts
-└── pids/                 # PID files to track running background processes
+└── artifacts/
+    ├── session/          # artifacts that get cleaned up when the session ends
+    ├── persistent/       # artifacts that survive across sessions
+    ├── runners/          # background python scripts the model writes for live artifacts
+    └── pids/             # PID files to track running background processes
 ```
 
 In `artifact_tool.py`, define these paths at the top:
@@ -40,10 +40,11 @@ In `artifact_tool.py`, define these paths at the top:
 import os
 
 HERMES_HOME = os.path.expanduser("~/.hermes")
-ARTIFACT_SESSION_DIR = os.path.join(HERMES_HOME, "artifacts", "session")
-ARTIFACT_PERSISTENT_DIR = os.path.join(HERMES_HOME, "artifacts", "persistent")
-RUNNERS_DIR = os.path.join(HERMES_HOME, "runners")
-PIDS_DIR = os.path.join(HERMES_HOME, "pids")
+ARTIFACTS_HOME = os.path.join(HERMES_HOME, "artifacts")
+ARTIFACT_SESSION_DIR = os.path.join(ARTIFACTS_HOME, "session")
+ARTIFACT_PERSISTENT_DIR = os.path.join(ARTIFACTS_HOME, "persistent")
+RUNNERS_DIR = os.path.join(ARTIFACTS_HOME, "runners")
+PIDS_DIR = os.path.join(ARTIFACTS_HOME, "pids")
 ```
 
 Each method should call `os.makedirs(..., exist_ok=True)` for whatever directory it writes to.
@@ -133,10 +134,10 @@ The `create_artifact` schema description must include the live artifact pattern 
     "\n\n"
     "For live-updating artifacts:\n"
     "1. Call create_artifact with live=true, refresh_seconds=N, tab_id='my_id'\n"
-    "2. Write an updater script to ~/.hermes/runners/{tab_id}_runner.py\n"
-    "3. The script must write its PID to ~/.hermes/pids/{tab_id}.pid on startup\n"
+    "2. Write an updater script to ~/.hermes/artifacts/runners/{tab_id}_runner.py\n"
+    "3. The script must write its PID to ~/.hermes/artifacts/pids/{tab_id}.pid on startup\n"
     "4. The script loops, gathers data, and overwrites the artifact JSON\n"
-    "5. Launch with: nohup python3 ~/.hermes/runners/{tab_id}_runner.py &\n"
+    "5. Launch with: nohup python3 ~/.hermes/artifacts/runners/{tab_id}_runner.py &\n"
     "6. NEVER place scripts inside any git repository\n"
     "7. Handle SIGTERM gracefully for clean shutdown"
 ),

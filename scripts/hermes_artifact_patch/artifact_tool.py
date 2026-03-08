@@ -18,9 +18,9 @@ Artifacts are written under:
 $HERMES_HOME/artifacts/_latest.json is updated for quick polling.
 
 For live artifacts, a background runner can be written to:
-- $HERMES_HOME/runners/{tab_id}_runner.py
+- $HERMES_HOME/artifacts/runners/{tab_id}_runner.py
 and its PID must be written to:
-- $HERMES_HOME/pids/{tab_id}.pid
+- $HERMES_HOME/artifacts/pids/{tab_id}.pid
 
 stop_runner() sends SIGTERM and cleans up the PID + runner script.
 """
@@ -51,15 +51,21 @@ ALLOWED_ARTIFACT_TYPES = {"chart", "table", "map", "logs", "html", "markdown", "
 
 HERMES_HOME = os.path.expanduser(os.getenv("HERMES_HOME", "~/.hermes"))
 
-ARTIFACT_SESSION_DIR = os.path.join(HERMES_HOME, "artifacts", "session")
-ARTIFACT_PERSISTENT_DIR = os.path.join(HERMES_HOME, "artifacts", "persistent")
+ARTIFACTS_HOME = os.path.join(HERMES_HOME, "artifacts")
+
+ARTIFACT_SESSION_DIR = os.path.join(ARTIFACTS_HOME, "session")
+ARTIFACT_PERSISTENT_DIR = os.path.join(ARTIFACTS_HOME, "persistent")
 
 # Root artifacts dir holds metadata helper files like _latest.json and
 # _close_signal.json.
-ARTIFACTS_ROOT_DIR = os.path.join(HERMES_HOME, "artifacts")
+ARTIFACTS_ROOT_DIR = ARTIFACTS_HOME
 
-RUNNERS_DIR = os.path.join(HERMES_HOME, "runners")
-PIDS_DIR = os.path.join(HERMES_HOME, "pids")
+RUNNERS_DIR = os.path.join(ARTIFACTS_HOME, "runners")
+PIDS_DIR = os.path.join(ARTIFACTS_HOME, "pids")
+
+# Legacy (pre-move) locations
+LEGACY_RUNNERS_DIR = os.path.join(HERMES_HOME, "runners")
+LEGACY_PIDS_DIR = os.path.join(HERMES_HOME, "pids")
 
 
 def _ensure_dir(path: str) -> Path:
@@ -69,6 +75,57 @@ def _ensure_dir(path: str) -> Path:
 
 def _ensure_artifacts_root_dir() -> Path:
     return _ensure_dir(ARTIFACTS_ROOT_DIR)
+
+
+def _migrate_legacy_runner_layout() -> None:
+    """Move legacy runner/PID files into artifacts/ (best-effort)."""
+
+    def _migrate_dir(src_dir: str, dest_dir: str, pattern: str) -> None:
+        src_root = Path(src_dir)
+        if not src_root.exists() or not src_root.is_dir():
+            return
+
+        candidates = [p for p in src_root.glob(pattern) if p.is_file()]
+        if not candidates:
+            return
+
+        dest_root = _ensure_dir(dest_dir)
+        for src_path in candidates:
+            dest_path = dest_root / src_path.name
+            try:
+                if dest_path.exists():
+                    # Already migrated: remove the legacy copy.
+                    try:
+                        src_path.unlink()
+                    except Exception:
+                        pass
+                    continue
+                os.replace(src_path, dest_path)
+            except Exception:
+                # Best-effort fallback: try copy+delete.
+                try:
+                    dest_path.write_bytes(src_path.read_bytes())
+                    src_path.unlink()
+                except Exception:
+                    pass
+
+        # If the legacy directory is now empty, try to remove it.
+        try:
+            if not any(src_root.iterdir()):
+                src_root.rmdir()
+        except Exception:
+            pass
+
+    # Only migrate files that match our expected naming patterns.
+    _migrate_dir(LEGACY_RUNNERS_DIR, RUNNERS_DIR, "*_runner.py")
+    _migrate_dir(LEGACY_PIDS_DIR, PIDS_DIR, "*.pid")
+
+
+# Run migration once on import (safe/no-op if nothing to move).
+try:
+    _migrate_legacy_runner_layout()
+except Exception:
+    pass
 
 
 def _sanitize_artifact_id(value: str) -> str:
@@ -372,10 +429,10 @@ def stop_runner(tab_id: str) -> str:
     """Stop a background runner process for a live artifact.
 
     Step 6 behavior:
-    - Read PID from ~/.hermes/pids/{tab_id}.pid
+    - Read PID from ~/.hermes/artifacts/pids/{tab_id}.pid
     - If found, send SIGTERM to that PID
     - Delete the PID file
-    - Delete the runner script ~/.hermes/runners/{tab_id}_runner.py if it exists
+    - Delete the runner script ~/.hermes/artifacts/runners/{tab_id}_runner.py if it exists
 
     Best-effort: processes may already be dead; cleanup should still succeed.
     """
@@ -456,11 +513,11 @@ CREATE_ARTIFACT_SCHEMA = {
         "\n\n"
         "For live-updating artifacts:\n"
         "1) Call create_artifact with live=true, refresh_seconds=N, tab_id='my_id'\n"
-        "2) Write an updater script to $HERMES_HOME/runners/{tab_id}_runner.py\n"
-        "3) The script MUST write its PID to $HERMES_HOME/pids/{tab_id}.pid on startup\n"
+        "2) Write an updater script to ~/.hermes/artifacts/runners/{tab_id}_runner.py\n"
+        "3) The script must write its PID to ~/.hermes/artifacts/pids/{tab_id}.pid on startup\n"
         "4) The script loops, gathers data, and overwrites the artifact JSON file\n"
-        "   in $HERMES_HOME/artifacts/session/{tab_id}.json (or persistent/ if persistent=true)\n"
-        "5) Launch with: nohup python3 $HERMES_HOME/runners/{tab_id}_runner.py &\n"
+        "   in ~/.hermes/artifacts/session/{tab_id}.json (or persistent/ if persistent=true)\n"
+        "5) Launch with: nohup python3 ~/.hermes/artifacts/runners/{tab_id}_runner.py &\n"
         "6) NEVER place runner scripts inside any git repository\n"
         "7) Handle SIGTERM gracefully for clean shutdown (stop_runner sends SIGTERM)\n"
         "\n"
