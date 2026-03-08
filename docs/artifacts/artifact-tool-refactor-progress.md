@@ -2,13 +2,13 @@
 
 This file tracks execution of: `docs/artifacts/artifact-tool-refactor.md`.
 
-Last updated: 2026-03-08 (Step 2 complete)
+Last updated: 2026-03-08 (Step 3 complete)
 
 ## Checklist
 
 - [x] Step 1: Rename and restructure the tool file
 - [x] Step 2: Set up the runtime directory structure
-- [ ] Step 3: Implement create_artifact
+- [x] Step 3: Implement create_artifact
 - [ ] Step 4: Implement remove_artifact
 - [ ] Step 5: Implement clear_artifacts
 - [ ] Step 6: Implement stop_runner
@@ -31,7 +31,13 @@ Step 2 changes:
 - Defined the runtime directory constants in `artifact_tool.py`:
   - `ARTIFACT_SESSION_DIR`, `ARTIFACT_PERSISTENT_DIR`, `RUNNERS_DIR`, `PIDS_DIR`
 - Added `_ensure_dir()` helper using `os.makedirs(..., exist_ok=True)`
-- Kept legacy behavior for now (still writes to the artifacts root dir); Step 3 will switch to session/persistent.
+- Kept legacy behavior for non-create methods; Step 3 switches create_artifact to session/persistent.
+
+Step 3 changes:
+- `create_artifact` now writes `{tab_id}.json` into:
+  - `~/.hermes/artifacts/session/` (default)
+  - `~/.hermes/artifacts/persistent/` (`persistent=true`)
+- `create_artifact` always updates `~/.hermes/artifacts/_latest.json`
 
 - (pending) Toolset name migration plan: currently `ui_panel`; later rename to `artifacts` per Step 8.
 - (pending) Backward compatibility: whether to keep a shim for `render_panel`/`close_panel`.

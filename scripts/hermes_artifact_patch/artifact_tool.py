@@ -147,8 +147,10 @@ def create_artifact(
 ) -> str:
     """Create or update an artifact for hermilinChat's side panel.
 
-    NOTE: Step 1 keeps the existing single-directory storage model.
-    Step 2+ will split this into session/ vs persistent/ directories.
+    Step 3 behavior:
+    - Writes artifacts to ~/.hermes/artifacts/session/ by default
+    - Writes artifacts to ~/.hermes/artifacts/persistent/ when persistent=True
+    - Always updates ~/.hermes/artifacts/_latest.json for quick polling
     """
 
     kind = (artifact_type or "").strip().lower()
@@ -176,7 +178,11 @@ def create_artifact(
         return json.dumps({"error": "refresh_seconds must be an integer"}, ensure_ascii=False)
 
     artifact_id = _sanitize_artifact_id(tab_id) or f"artifact_{int(time.time() * 1000)}"
-    path = _artifact_path(artifact_id)
+
+    target_dir = ARTIFACT_PERSISTENT_DIR if persistent else ARTIFACT_SESSION_DIR
+    target_root = _ensure_dir(target_dir)
+    path = target_root / f"{artifact_id}.json"
+
     existing = _read_json(path) if path.exists() else None
     now = time.time()
 
