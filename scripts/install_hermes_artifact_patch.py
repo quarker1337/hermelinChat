@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -14,13 +13,23 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = SCRIPT_DIR / "hermes_artifact_patch"
 ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
-# NOTE: Step 1 keeps the toolset name as "ui_panel" for compatibility with
-# existing Hermes configs. Later steps rename this toolset to "artifacts".
-UI_PANEL_BLOCK = '''
-    "ui_panel": {
-        "description": "Render structured artifacts in hermilinChat's right-side artifact panel",
+# hermilinChat toolset injection
+#
+# We install a canonical "artifacts" toolset, plus a backward-compatible
+# "ui_panel" alias so older configs keep working.
+ARTIFACT_TOOLSETS_BLOCK = '''
+    # hermilinChat artifact panel toolsets (installed by hermilinChat patch)
+    "artifacts": {
+        "description": "Create and manage artifacts in hermilinChat's right-side artifact panel",
         "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],
         "includes": []
+    },
+
+    # Backward-compat alias (older configs used 'ui_panel')
+    "ui_panel": {
+        "description": "Backward-compatible alias for the artifacts toolset (hermilinChat panel)",
+        "tools": [],
+        "includes": ["artifacts"]
     },
 '''
 
@@ -223,49 +232,18 @@ def _patch_model_tools(path: Path) -> tuple[bool, str]:
 def _patch_toolsets(path: Path) -> tuple[bool, str]:
     text, newline = _read_text_with_newline(path)
 
-    # If ui_panel already exists, try to upgrade it in-place (only if it's
-    # clearly our hermilinChat-inserted block).
-    if '"ui_panel": {' in text:
-        desc = "hermilinChat's right-side artifact panel"
-        if desc not in text:
-            return False, "toolsets.py already defines ui_panel (not hermilinChat); leaving in place"
-
-        # Already updated?
-        if '"create_artifact"' in text and '"stop_runner"' in text:
-            return False, "toolsets.py already defines updated ui_panel"
-
-        old_tools_line = '        "tools": ["render_panel", "close_panel"],'
-        new_tools_line = '        "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],'
-        if old_tools_line in text:
-            patched = text.replace(old_tools_line, new_tools_line, 1)
-            _write_text_with_newline(path, patched, newline)
-            return True, "Updated ui_panel toolset tool list"
-
-        # Fallback: attempt a more flexible replacement of the tools array.
-        pattern = re.compile(
-            r'(\"ui_panel\"\s*:\s*\{.*?\n\s*\"tools\"\s*:\s*)\[[^\]]*\]',
-            re.DOTALL,
-        )
-        m = pattern.search(text)
-        if not m:
-            return False, "Could not locate ui_panel tools list to update"
-
-        replacement = (
-            m.group(1)
-            + '["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"]'
-        )
-        patched = pattern.sub(replacement, text, count=1)
-        _write_text_with_newline(path, patched, newline)
-        return True, "Updated ui_panel toolset tool list (pattern match)"
+    marker = "hermelinChat artifact panel toolsets (installed by hermilinChat patch)"
+    if marker in text:
+        return False, "toolsets.py already patched with hermilinChat artifact toolsets"
 
     anchor = newline + newline + '    # Scenario-specific toolsets' + newline
     if anchor not in text:
         raise RuntimeError(f"Could not find insertion anchor in {path}")
 
-    block = UI_PANEL_BLOCK.replace("\n", newline)
+    block = ARTIFACT_TOOLSETS_BLOCK.replace("\n", newline)
     patched = text.replace(anchor, newline + block + anchor, 1)
     _write_text_with_newline(path, patched, newline)
-    return True, f"Patched {path.name}"
+    return True, f"Patched {path.name}: added artifacts toolset + ui_panel alias"
 
 
 def _install_artifact_tool(tools_dir: Path) -> tuple[bool, str]:
@@ -346,7 +324,7 @@ def main() -> int:
     print()
     print("Next steps")
     print("  1) restart hermilinChat / Hermes services if they are already running")
-    print("  2) if your Hermes config uses restricted toolsets, make sure 'ui_panel' or 'all' is enabled")
+    print("  2) if your Hermes config uses restricted toolsets, make sure 'artifacts' (preferred) or 'ui_panel' (compat) is enabled")
     return 0
 
 

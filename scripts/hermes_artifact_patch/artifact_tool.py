@@ -3,16 +3,26 @@
 
 This module is installed into Hermes as: tools/artifact_tool.py
 
-Step 1 refactor (see docs/artifacts/artifact-tool-refactor.md):
-- Renamed from tools/render_panel_tool.py -> tools/artifact_tool.py
-- New tool surface area:
-  - create_artifact
-  - remove_artifact
-  - clear_artifacts
-  - stop_runner
+See docs/artifacts/artifact-tool-refactor.md for rationale.
 
-NOTE: Steps 2+ will further evolve runtime directories (session/persistent)
-and add background runner processes for live artifacts.
+Provides tools:
+- create_artifact
+- remove_artifact
+- clear_artifacts
+- stop_runner
+
+Artifacts are written under:
+- $HERMES_HOME/artifacts/session/
+- $HERMES_HOME/artifacts/persistent/
+
+$HERMES_HOME/artifacts/_latest.json is updated for quick polling.
+
+For live artifacts, a background runner can be written to:
+- $HERMES_HOME/runners/{tab_id}_runner.py
+and its PID must be written to:
+- $HERMES_HOME/pids/{tab_id}.pid
+
+stop_runner() sends SIGTERM and cleans up the PID + runner script.
 """
 
 from __future__ import annotations
@@ -68,12 +78,6 @@ def _sanitize_artifact_id(value: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", raw)
     safe = safe.strip("._-")
     return safe[:120]
-
-
-def _artifact_path(artifact_id: str) -> Path:
-    # Step 2 keeps the legacy single-directory storage model.
-    # Step 3 will choose ARTIFACT_SESSION_DIR vs ARTIFACT_PERSISTENT_DIR.
-    return _ensure_artifacts_root_dir() / f"{artifact_id}.json"
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -446,9 +450,21 @@ def stop_runner(tab_id: str) -> str:
 CREATE_ARTIFACT_SCHEMA = {
     "name": "create_artifact",
     "description": (
-        "Create or update a structured artifact in hermilinChat's right-side panel. "
-        "Use this for dashboards, tables, maps, logs, markdown reports, HTML mini-apps, "
-        "or iframe views that should appear alongside the terminal conversation."
+        "Create or update an artifact in hermilinChat's side panel. "
+        "Supports types: chart, table, map, logs, html, markdown, iframe. "
+        "Set persistent=true for artifacts that should survive across sessions."
+        "\n\n"
+        "For live-updating artifacts:\n"
+        "1) Call create_artifact with live=true, refresh_seconds=N, tab_id='my_id'\n"
+        "2) Write an updater script to $HERMES_HOME/runners/{tab_id}_runner.py\n"
+        "3) The script MUST write its PID to $HERMES_HOME/pids/{tab_id}.pid on startup\n"
+        "4) The script loops, gathers data, and overwrites the artifact JSON file\n"
+        "   in $HERMES_HOME/artifacts/session/{tab_id}.json (or persistent/ if persistent=true)\n"
+        "5) Launch with: nohup python3 $HERMES_HOME/runners/{tab_id}_runner.py &\n"
+        "6) NEVER place runner scripts inside any git repository\n"
+        "7) Handle SIGTERM gracefully for clean shutdown (stop_runner sends SIGTERM)\n"
+        "\n"
+        "Use stop_runner(tab_id) to terminate the updater and clean up PID + runner script."
     ),
     "parameters": {
         "type": "object",
@@ -583,7 +599,7 @@ def _handle_stop_runner(args, **kw):
 
 registry.register(
     name="create_artifact",
-    toolset="ui_panel",
+    toolset="artifacts",
     schema=CREATE_ARTIFACT_SCHEMA,
     handler=_handle_create_artifact,
     check_fn=_check_requirements,
@@ -591,7 +607,7 @@ registry.register(
 
 registry.register(
     name="remove_artifact",
-    toolset="ui_panel",
+    toolset="artifacts",
     schema=REMOVE_ARTIFACT_SCHEMA,
     handler=_handle_remove_artifact,
     check_fn=_check_requirements,
@@ -599,7 +615,7 @@ registry.register(
 
 registry.register(
     name="clear_artifacts",
-    toolset="ui_panel",
+    toolset="artifacts",
     schema=CLEAR_ARTIFACTS_SCHEMA,
     handler=_handle_clear_artifacts,
     check_fn=_check_requirements,
@@ -607,7 +623,7 @@ registry.register(
 
 registry.register(
     name="stop_runner",
-    toolset="ui_panel",
+    toolset="artifacts",
     schema=STOP_RUNNER_SCHEMA,
     handler=_handle_stop_runner,
     check_fn=_check_requirements,
