@@ -6,8 +6,8 @@ HermilinChat renders artifacts from `~/.hermes/artifacts/*.json`.
 
 Two ways to create artifacts:
 
-1) Preferred: ask Hermes to call the `render_panel` tool (toolset: `ui_panel`).
-   - `render_panel` writes the JSON artifact files for you.
+1) Preferred: ask Hermes to call the `create_artifact` tool (toolset: `ui_panel`).
+   - `create_artifact` writes the JSON artifact files for you.
    - Reuse the same `tab_id` to update an existing artifact in-place.
 
 2) Manual (debug): write an artifact JSON file directly into `~/.hermes/artifacts/`.

@@ -12,12 +12,14 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = SCRIPT_DIR / "hermes_artifact_patch"
-RENDER_PANEL_TOOL_SRC = ASSET_DIR / "render_panel_tool.py"
+ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
+# NOTE: Step 1 keeps the toolset name as "ui_panel" for compatibility with
+# existing Hermes configs. Later steps rename this toolset to "artifacts".
 UI_PANEL_BLOCK = '''
     "ui_panel": {
         "description": "Render structured artifacts in hermilinChat's right-side artifact panel",
-        "tools": ["render_panel", "close_panel"],
+        "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],
         "includes": []
     },
 '''
@@ -119,7 +121,7 @@ def _discover_live_paths(hermes_exe: Path, hermes_python: Path) -> dict[str, Pat
 
     - model_tools (for tool discovery imports)
     - toolsets (for toolset definitions)
-    - tools package directory (to install render_panel_tool.py)
+    - tools package directory (to install artifact_tool.py)
 
     This works for both normal installs and editable (PEP 660) installs.
     """
@@ -199,22 +201,62 @@ def _write_text_with_newline(path: Path, text: str, newline: str) -> None:
 
 def _patch_model_tools(path: Path) -> tuple[bool, str]:
     text, newline = _read_text_with_newline(path)
+
+    if '"tools.artifact_tool"' in text:
+        return False, "model_tools.py already references tools.artifact_tool"
+
+    # Upgrade path: previous versions imported tools.render_panel_tool.
     if '"tools.render_panel_tool"' in text:
-        return False, "model_tools.py already references tools.render_panel_tool"
+        patched = text.replace('"tools.render_panel_tool"', '"tools.artifact_tool"')
+        _write_text_with_newline(path, patched, newline)
+        return True, "Updated model_tools.py: tools.render_panel_tool -> tools.artifact_tool"
 
     anchor = '        "tools.homeassistant_tool",'
     if anchor not in text:
         raise RuntimeError(f"Could not find insertion anchor in {path}")
 
-    patched = text.replace(anchor, anchor + newline + '        "tools.render_panel_tool",', 1)
+    patched = text.replace(anchor, anchor + newline + '        "tools.artifact_tool",', 1)
     _write_text_with_newline(path, patched, newline)
     return True, f"Patched {path.name}"
 
 
 def _patch_toolsets(path: Path) -> tuple[bool, str]:
     text, newline = _read_text_with_newline(path)
+
+    # If ui_panel already exists, try to upgrade it in-place (only if it's
+    # clearly our hermilinChat-inserted block).
     if '"ui_panel": {' in text:
-        return False, "toolsets.py already defines ui_panel"
+        desc = "hermilinChat's right-side artifact panel"
+        if desc not in text:
+            return False, "toolsets.py already defines ui_panel (not hermilinChat); leaving in place"
+
+        # Already updated?
+        if '"create_artifact"' in text and '"stop_runner"' in text:
+            return False, "toolsets.py already defines updated ui_panel"
+
+        old_tools_line = '        "tools": ["render_panel", "close_panel"],'
+        new_tools_line = '        "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],'
+        if old_tools_line in text:
+            patched = text.replace(old_tools_line, new_tools_line, 1)
+            _write_text_with_newline(path, patched, newline)
+            return True, "Updated ui_panel toolset tool list"
+
+        # Fallback: attempt a more flexible replacement of the tools array.
+        pattern = re.compile(
+            r'(\"ui_panel\"\s*:\s*\{.*?\n\s*\"tools\"\s*:\s*)\[[^\]]*\]',
+            re.DOTALL,
+        )
+        m = pattern.search(text)
+        if not m:
+            return False, "Could not locate ui_panel tools list to update"
+
+        replacement = (
+            m.group(1)
+            + '["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"]'
+        )
+        patched = pattern.sub(replacement, text, count=1)
+        _write_text_with_newline(path, patched, newline)
+        return True, "Updated ui_panel toolset tool list (pattern match)"
 
     anchor = newline + newline + '    # Scenario-specific toolsets' + newline
     if anchor not in text:
@@ -226,20 +268,43 @@ def _patch_toolsets(path: Path) -> tuple[bool, str]:
     return True, f"Patched {path.name}"
 
 
-def _install_render_panel_tool(tools_dir: Path) -> tuple[bool, str]:
-    target = tools_dir / "render_panel_tool.py"
-    source_text = RENDER_PANEL_TOOL_SRC.read_text(encoding="utf-8")
+def _install_artifact_tool(tools_dir: Path) -> tuple[bool, str]:
+    target = tools_dir / "artifact_tool.py"
+    source_text = ARTIFACT_TOOL_SRC.read_text(encoding="utf-8")
+
+    changed = False
+    messages: list[str] = []
+
+    # Cleanup legacy file name from earlier patch versions.
+    legacy = tools_dir / "render_panel_tool.py"
+    if legacy.exists():
+        try:
+            legacy_text = legacy.read_text(encoding="utf-8")
+        except Exception:
+            legacy_text = ""
+
+        if "Artifact side-panel tools for hermilinChat" in legacy_text:
+            legacy.unlink()
+            changed = True
+            messages.append("removed legacy render_panel_tool.py")
+        else:
+            messages.append("legacy render_panel_tool.py present (not ours; left in place)")
+
     if target.exists() and target.read_text(encoding="utf-8") == source_text:
+        if changed:
+            return True, f"{target.name} already up to date; " + "; ".join(messages)
         return False, f"{target.name} already up to date"
+
     target.write_text(source_text, encoding="utf-8")
-    return True, f"Installed {target.name}"
+    messages.insert(0, f"installed {target.name}")
+    return True, "; ".join(messages)
 
 
 def main() -> int:
     args = parse_args()
 
-    if not RENDER_PANEL_TOOL_SRC.exists():
-        print(f"ERROR: patch asset missing: {RENDER_PANEL_TOOL_SRC}", file=sys.stderr)
+    if not ARTIFACT_TOOL_SRC.exists():
+        print(f"ERROR: patch asset missing: {ARTIFACT_TOOL_SRC}", file=sys.stderr)
         return 1
 
     try:
@@ -263,7 +328,7 @@ def main() -> int:
 
     changes = []
     try:
-        changed, message = _install_render_panel_tool(live_paths["tools_dir"])
+        changed, message = _install_artifact_tool(live_paths["tools_dir"])
         changes.append((changed, message))
         changed, message = _patch_model_tools(live_paths["model_tools"])
         changes.append((changed, message))

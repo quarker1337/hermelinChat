@@ -192,9 +192,11 @@ Notes:
 
 ## Hermes artifact tool patch
 
-The artifact panel UI depends on two Hermes tools that are not upstream yet:
-- `render_panel`
-- `close_panel`
+The artifact panel UI depends on Hermes tools that are not upstream yet:
+- `create_artifact`
+- `remove_artifact`
+- `clear_artifacts`
+- `stop_runner`
 
 This repo keeps that integration as a local patch under `scripts/` instead of pushing it upstream.
 
@@ -207,7 +209,7 @@ python3 scripts/install_hermes_artifact_patch.py
 
 What it does:
 - detects the Python interpreter used by your installed `hermes` command
-- installs `render_panel_tool.py` into that live Hermes installation
+- installs `artifact_tool.py` into that live Hermes installation
 - patches `model_tools.py` and `toolsets.py` to register the `ui_panel` toolset
 
 Notes:

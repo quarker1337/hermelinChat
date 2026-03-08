@@ -12,12 +12,14 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = SCRIPT_DIR / "hermes_artifact_patch"
-RENDER_PANEL_TOOL_SRC = ASSET_DIR / "render_panel_tool.py"
+ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
+# NOTE: Step 1 keeps the toolset name as "ui_panel" for compatibility with
+# existing Hermes configs. Later steps rename this toolset to "artifacts".
 UI_PANEL_BLOCK = '''
     "ui_panel": {
         "description": "Render structured artifacts in hermilinChat's right-side artifact panel",
-        "tools": ["render_panel", "close_panel"],
+        "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],
         "includes": []
     },
 '''
@@ -176,41 +178,65 @@ def _write_text_with_newline(path: Path, text: str, newline: str) -> None:
         handle.write(text)
 
 
-def _uninstall_render_panel_tool(tools_dir: Path) -> tuple[bool, str]:
-    target = tools_dir / "render_panel_tool.py"
+def _uninstall_artifact_tool(tools_dir: Path) -> tuple[bool, str]:
+    changed = False
+    messages: list[str] = []
+
+    # Remove the current tool file (artifact_tool.py) only if it matches our
+    # patch asset exactly.
+    target = tools_dir / "artifact_tool.py"
     if not target.exists():
-        return False, f"{target.name} not present"
+        messages.append(f"{target.name} not present")
+    else:
+        src_text = ARTIFACT_TOOL_SRC.read_text(encoding="utf-8")
+        live_text = target.read_text(encoding="utf-8")
+        if live_text != src_text:
+            messages.append(f"{target.name} differs from patch asset; leaving in place")
+        else:
+            target.unlink()
+            changed = True
+            messages.append(f"Removed {target.name}")
 
-    src_text = RENDER_PANEL_TOOL_SRC.read_text(encoding="utf-8")
-    live_text = target.read_text(encoding="utf-8")
+    # Cleanup legacy file name from earlier patch versions.
+    legacy = tools_dir / "render_panel_tool.py"
+    if legacy.exists():
+        try:
+            legacy_text = legacy.read_text(encoding="utf-8")
+        except Exception:
+            legacy_text = ""
 
-    if live_text != src_text:
-        return False, f"{target.name} differs from patch asset; leaving in place"
+        if "Artifact side-panel tools for hermilinChat" in legacy_text:
+            legacy.unlink()
+            changed = True
+            messages.append("Removed legacy render_panel_tool.py")
+        else:
+            messages.append("Legacy render_panel_tool.py differs; leaving in place")
 
-    target.unlink()
-    return True, f"Removed {target.name}"
+    return changed, "; ".join(messages)
 
 
 def _unpatch_model_tools(path: Path) -> tuple[bool, str]:
     text, newline = _read_text_with_newline(path)
-    if "tools.render_panel_tool" not in text:
-        return False, "model_tools.py has no tools.render_panel_tool entry"
+
+    needles = ("tools.artifact_tool", "tools.render_panel_tool")
+    if not any(needle in text for needle in needles):
+        return False, "model_tools.py has no artifact tool import entry"
 
     lines = text.splitlines(True)
     kept: list[str] = []
     removed = 0
     for line in lines:
-        if "tools.render_panel_tool" in line:
+        if any(needle in line for needle in needles):
             removed += 1
             continue
         kept.append(line)
 
     if not removed:
-        return False, "model_tools.py has no tools.render_panel_tool entry"
+        return False, "model_tools.py has no artifact tool import entry"
 
     patched = "".join(kept)
     _write_text_with_newline(path, patched, newline)
-    return True, f"Removed {removed} line(s) referencing tools.render_panel_tool"
+    return True, f"Removed {removed} line(s) referencing artifact tool import(s)"
 
 
 def _unpatch_toolsets(path: Path) -> tuple[bool, str]:
@@ -249,8 +275,8 @@ def _unpatch_toolsets(path: Path) -> tuple[bool, str]:
 def main() -> int:
     args = parse_args()
 
-    if not RENDER_PANEL_TOOL_SRC.exists():
-        print(f"ERROR: patch asset missing: {RENDER_PANEL_TOOL_SRC}", file=sys.stderr)
+    if not ARTIFACT_TOOL_SRC.exists():
+        print(f"ERROR: patch asset missing: {ARTIFACT_TOOL_SRC}", file=sys.stderr)
         return 1
 
     try:
@@ -274,7 +300,7 @@ def main() -> int:
 
     changes = []
     try:
-        changed, message = _uninstall_render_panel_tool(live_paths["tools_dir"])
+        changed, message = _uninstall_artifact_tool(live_paths["tools_dir"])
         changes.append((changed, message))
         changed, message = _unpatch_model_tools(live_paths["model_tools"])
         changes.append((changed, message))

@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """Artifact side-panel tools for hermilinChat.
 
-These tools let Hermes write structured UI artifacts to a shared filesystem
-location that hermilinChat can read and render in its right-side artifact
-panel.
+This module is installed into Hermes as: tools/artifact_tool.py
+
+Step 1 refactor (see docs/artifacts/artifact-tool-refactor.md):
+- Renamed from tools/render_panel_tool.py -> tools/artifact_tool.py
+- New tool surface area:
+  - create_artifact
+  - remove_artifact
+  - clear_artifacts
+  - stop_runner
+
+NOTE: Steps 2+ will further evolve runtime directories (session/persistent)
+and add background runner processes for live artifacts.
 """
 
 from __future__ import annotations
@@ -106,21 +115,28 @@ def _write_close_signal(payload: dict[str, Any]) -> None:
     _write_json_atomic(signal_path, payload)
 
 
-def render_panel(
+def create_artifact(
     artifact_type: str,
     title: str,
     data: str,
     tab_id: str = "",
+    persistent: bool = False,
     live: bool = False,
     refresh_seconds: int = 0,
     task_id: str | None = None,
 ) -> str:
-    """Render or update an artifact for hermilinChat's side panel."""
+    """Create or update an artifact for hermilinChat's side panel.
+
+    NOTE: Step 1 keeps the existing single-directory storage model.
+    Step 2+ will split this into session/ vs persistent/ directories.
+    """
+
     kind = (artifact_type or "").strip().lower()
     if kind not in ALLOWED_ARTIFACT_TYPES:
-        return json.dumps({
-            "error": f"Unsupported artifact_type: {artifact_type}. Allowed: {sorted(ALLOWED_ARTIFACT_TYPES)}"
-        }, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"Unsupported artifact_type: {artifact_type}. Allowed: {sorted(ALLOWED_ARTIFACT_TYPES)}"},
+            ensure_ascii=False,
+        )
 
     title = (title or "").strip()
     if not title:
@@ -151,10 +167,11 @@ def render_panel(
         "data": parsed_data,
         "live": bool(live),
         "refresh_seconds": refresh_value,
+        "persistent": bool(persistent),
         "timestamp": now,
         "created_at": existing.get("created_at", now) if isinstance(existing, dict) else now,
         "updated_at": now,
-        "source": "render_panel",
+        "source": "create_artifact",
         "task_id": task_id,
         "session_id": os.getenv("HERMES_SESSION_ID") or None,
         "version": 1,
@@ -166,56 +183,61 @@ def render_panel(
     return json.dumps(
         {
             "artifact_id": artifact_id,
-            "status": "rendered",
+            "status": "created",
             "path": str(path),
             "type": kind,
             "title": title,
             "updated_at": now,
+            "persistent": bool(persistent),
         },
         ensure_ascii=False,
     )
 
 
-def close_panel(tab_id: str = "", task_id: str | None = None) -> str:
-    """Close one artifact tab, or close the whole panel.
+def remove_artifact(tab_id: str, task_id: str | None = None) -> str:
+    """Delete a single artifact tab by its tab_id."""
 
-    Notes:
-    - If tab_id is provided: remove that artifact file.
-    - If tab_id is omitted/empty: remove *all* artifacts (panel reset) and emit a close signal.
-
-    We intentionally do NOT scope this to Hermes "task_id" because task IDs can change between
-    consecutive user turns, which makes "close_panel()" appear to do nothing.
-    """
+    artifact_id = _sanitize_artifact_id(tab_id)
+    if not artifact_id:
+        return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
 
     root = _ensure_artifact_dir()
-    requested_id = _sanitize_artifact_id(tab_id)
+    target = root / f"{artifact_id}.json"
     now = time.time()
 
-    if requested_id:
-        target = root / f"{requested_id}.json"
+    if not target.exists():
+        return json.dumps({"status": "not_found", "tab_id": artifact_id, "removed": False}, ensure_ascii=False)
 
-        if not target.exists():
-            return json.dumps(
-                {"status": "not_found", "tab_id": requested_id, "removed": False},
-                ensure_ascii=False,
-            )
+    try:
+        target.unlink()
+    except OSError as exc:
+        return json.dumps({"error": f"Failed to remove artifact '{artifact_id}': {exc}"}, ensure_ascii=False)
 
-        try:
-            target.unlink()
-        except OSError as exc:
-            return json.dumps({"error": f"Failed to remove artifact '{requested_id}': {exc}"}, ensure_ascii=False)
+    _recompute_latest()
 
-        _recompute_latest()
+    # Optional: allow UI to react immediately (server may choose to forward this).
+    _write_close_signal({
+        "action": "close",
+        "id": artifact_id,
+        "task_id": task_id,
+        "timestamp": now,
+    })
 
-        # Optional: allow UI to react immediately (server may choose to forward this).
-        _write_close_signal({
-            "action": "close",
-            "id": requested_id,
-            "task_id": task_id,
-            "timestamp": now,
-        })
+    return json.dumps({"status": "removed", "tab_id": artifact_id, "removed": True}, ensure_ascii=False)
 
-        return json.dumps({"status": "closed", "tab_id": requested_id, "removed": True}, ensure_ascii=False)
+
+def clear_artifacts(scope: str = "session", task_id: str | None = None) -> str:
+    """Clear artifacts by scope.
+
+    NOTE: Step 1 still uses a single artifacts directory, so scope is accepted
+    but currently behaves the same for all values.
+    """
+
+    scope_value = (scope or "session").strip().lower()
+    if scope_value not in {"session", "persistent", "all"}:
+        return json.dumps({"error": "scope must be one of: session, persistent, all"}, ensure_ascii=False)
+
+    now = time.time()
 
     removed_ids: list[str] = []
     for path in _list_artifact_paths():
@@ -241,13 +263,34 @@ def close_panel(tab_id: str = "", task_id: str | None = None) -> str:
         "timestamp": now,
     })
 
-    return json.dumps({"status": "panel_closed", "artifact_ids": removed_ids}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "status": "cleared",
+            "scope": scope_value,
+            "count": len(removed_ids),
+            "artifact_ids": removed_ids,
+        },
+        ensure_ascii=False,
+    )
 
 
-RENDER_PANEL_SCHEMA = {
-    "name": "render_panel",
+def stop_runner(tab_id: str) -> str:
+    """Stop a background runner process for a live artifact.
+
+    Step 1 stub: runner processes are implemented in later steps.
+    """
+
+    artifact_id = _sanitize_artifact_id(tab_id)
+    if not artifact_id:
+        return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
+
+    return json.dumps({"status": "not_implemented", "tab_id": artifact_id}, ensure_ascii=False)
+
+
+CREATE_ARTIFACT_SCHEMA = {
+    "name": "create_artifact",
     "description": (
-        "Render or update a structured artifact in hermilinChat's right-side panel. "
+        "Create or update a structured artifact in hermilinChat's right-side panel. "
         "Use this for dashboards, tables, maps, logs, markdown reports, HTML mini-apps, "
         "or iframe views that should appear alongside the terminal conversation."
     ),
@@ -281,6 +324,11 @@ RENDER_PANEL_SCHEMA = {
                 "description": "Optional stable tab identifier. Reuse it to update an existing artifact in place.",
                 "default": "",
             },
+            "persistent": {
+                "type": "boolean",
+                "description": "Whether this artifact should survive across Hermes sessions (Step 2+).",
+                "default": False,
+            },
             "live": {
                 "type": "boolean",
                 "description": "Whether this artifact is expected to receive live updates.",
@@ -298,19 +346,52 @@ RENDER_PANEL_SCHEMA = {
 }
 
 
-CLOSE_PANEL_SCHEMA = {
-    "name": "close_panel",
-    "description": "Close a specific artifact tab, or close all artifact tabs for the current task when tab_id is omitted.",
+REMOVE_ARTIFACT_SCHEMA = {
+    "name": "remove_artifact",
+    "description": "Remove a specific artifact tab by its tab_id.",
     "parameters": {
         "type": "object",
         "properties": {
             "tab_id": {
                 "type": "string",
-                "description": "Artifact tab ID to close. Leave empty to close all artifacts for the current task.",
-                "default": "",
+                "description": "Artifact tab ID to remove.",
+            }
+        },
+        "required": ["tab_id"],
+    },
+}
+
+
+CLEAR_ARTIFACTS_SCHEMA = {
+    "name": "clear_artifacts",
+    "description": "Clear multiple artifacts by scope (session/persistent/all).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "scope": {
+                "type": "string",
+                "enum": ["session", "persistent", "all"],
+                "description": "Which artifact scope to clear.",
+                "default": "session",
             }
         },
         "required": [],
+    },
+}
+
+
+STOP_RUNNER_SCHEMA = {
+    "name": "stop_runner",
+    "description": "Stop a live artifact updater runner process for a given tab_id.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {
+                "type": "string",
+                "description": "Artifact tab ID whose runner should be stopped.",
+            }
+        },
+        "required": ["tab_id"],
     },
 }
 
@@ -319,34 +400,59 @@ def _check_requirements() -> bool:
     return True
 
 
-def _handle_render_panel(args, **kw):
-    return render_panel(
+def _handle_create_artifact(args, **kw):
+    return create_artifact(
         artifact_type=args.get("artifact_type", ""),
         title=args.get("title", ""),
         data=args.get("data", ""),
         tab_id=args.get("tab_id", ""),
+        persistent=args.get("persistent", False),
         live=args.get("live", False),
         refresh_seconds=args.get("refresh_seconds", 0),
         task_id=kw.get("task_id"),
     )
 
 
-def _handle_close_panel(args, **kw):
-    return close_panel(tab_id=args.get("tab_id", ""), task_id=kw.get("task_id"))
+def _handle_remove_artifact(args, **kw):
+    return remove_artifact(tab_id=args.get("tab_id", ""), task_id=kw.get("task_id"))
+
+
+def _handle_clear_artifacts(args, **kw):
+    return clear_artifacts(scope=args.get("scope", "session"), task_id=kw.get("task_id"))
+
+
+def _handle_stop_runner(args, **kw):
+    return stop_runner(tab_id=args.get("tab_id", ""))
 
 
 registry.register(
-    name="render_panel",
+    name="create_artifact",
     toolset="ui_panel",
-    schema=RENDER_PANEL_SCHEMA,
-    handler=_handle_render_panel,
+    schema=CREATE_ARTIFACT_SCHEMA,
+    handler=_handle_create_artifact,
     check_fn=_check_requirements,
 )
 
 registry.register(
-    name="close_panel",
+    name="remove_artifact",
     toolset="ui_panel",
-    schema=CLOSE_PANEL_SCHEMA,
-    handler=_handle_close_panel,
+    schema=REMOVE_ARTIFACT_SCHEMA,
+    handler=_handle_remove_artifact,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="clear_artifacts",
+    toolset="ui_panel",
+    schema=CLEAR_ARTIFACTS_SCHEMA,
+    handler=_handle_clear_artifacts,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="stop_runner",
+    toolset="ui_panel",
+    schema=STOP_RUNNER_SCHEMA,
+    handler=_handle_stop_runner,
     check_fn=_check_requirements,
 )
