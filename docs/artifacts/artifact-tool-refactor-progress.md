@@ -2,14 +2,14 @@
 
 This file tracks execution of: `docs/artifacts/artifact-tool-refactor.md`.
 
-Last updated: 2026-03-08 (Step 3 complete)
+Last updated: 2026-03-08 (Step 4 complete)
 
 ## Checklist
 
 - [x] Step 1: Rename and restructure the tool file
 - [x] Step 2: Set up the runtime directory structure
 - [x] Step 3: Implement create_artifact
-- [ ] Step 4: Implement remove_artifact
+- [x] Step 4: Implement remove_artifact
 - [ ] Step 5: Implement clear_artifacts
 - [ ] Step 6: Implement stop_runner
 - [ ] Step 7: Write the tool schemas
@@ -38,6 +38,10 @@ Step 3 changes:
   - `~/.hermes/artifacts/session/` (default)
   - `~/.hermes/artifacts/persistent/` (`persistent=true`)
 - `create_artifact` always updates `~/.hermes/artifacts/_latest.json`
+
+Step 4 changes:
+- `remove_artifact` now deletes `{tab_id}.json` from BOTH `session/` and `persistent/` dirs
+- `remove_artifact` calls `stop_runner(tab_id)` (runner stop is a no-op until Step 6)
 
 - (pending) Toolset name migration plan: currently `ui_panel`; later rename to `artifacts` per Step 8.
 - (pending) Backward compatibility: whether to keep a shim for `render_panel`/`close_panel`.

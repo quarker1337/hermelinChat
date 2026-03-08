@@ -221,35 +221,46 @@ def create_artifact(
 
 
 def remove_artifact(tab_id: str, task_id: str | None = None) -> str:
-    """Delete a single artifact tab by its tab_id."""
+    """Delete a single artifact tab by its tab_id.
+
+    Step 4 behavior:
+    - Deletes {tab_id}.json from BOTH the session/ and persistent/ directories if present
+    - Calls stop_runner(tab_id) to terminate any live updater
+    """
 
     artifact_id = _sanitize_artifact_id(tab_id)
     if not artifact_id:
         return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
 
-    root = _ensure_artifacts_root_dir()
-    target = root / f"{artifact_id}.json"
-    now = time.time()
+    removed_paths: list[str] = []
 
-    if not target.exists():
-        return json.dumps({"status": "not_found", "tab_id": artifact_id, "removed": False}, ensure_ascii=False)
+    for dir_path in (ARTIFACT_SESSION_DIR, ARTIFACT_PERSISTENT_DIR):
+        target = Path(dir_path) / f"{artifact_id}.json"
+        if not target.exists():
+            continue
+        try:
+            target.unlink()
+            removed_paths.append(str(target))
+        except OSError as exc:
+            return json.dumps({"error": f"Failed to remove artifact '{artifact_id}': {exc}"}, ensure_ascii=False)
 
+    # Stop any live runner, even if the artifact file wasn't found.
+    runner_result: dict[str, Any] | None = None
     try:
-        target.unlink()
-    except OSError as exc:
-        return json.dumps({"error": f"Failed to remove artifact '{artifact_id}': {exc}"}, ensure_ascii=False)
+        runner_result = json.loads(stop_runner(tab_id))
+    except Exception:
+        runner_result = None
 
-    _recompute_latest()
+    if not removed_paths:
+        return json.dumps(
+            {"status": "not_found", "tab_id": artifact_id, "removed": False, "runner": runner_result},
+            ensure_ascii=False,
+        )
 
-    # Optional: allow UI to react immediately (server may choose to forward this).
-    _write_close_signal({
-        "action": "close",
-        "id": artifact_id,
-        "task_id": task_id,
-        "timestamp": now,
-    })
-
-    return json.dumps({"status": "removed", "tab_id": artifact_id, "removed": True}, ensure_ascii=False)
+    return json.dumps(
+        {"status": "removed", "tab_id": artifact_id, "removed": True, "paths": removed_paths, "runner": runner_result},
+        ensure_ascii=False,
+    )
 
 
 def clear_artifacts(scope: str = "session", task_id: str | None = None) -> str:
