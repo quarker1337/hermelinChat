@@ -557,6 +557,18 @@ def stop_runner(tab_id: str) -> str:
 
     had_pid_file = pid_path.exists()
 
+    warning: str | None = None
+    if not had_pid_file and runner_path.exists():
+        warning = (
+            f"WARNING: stop_runner: PID file not found for tab_id='{artifact_id}'. "
+            f"Expected: {pid_path}. "
+            "Background runners MUST write PID files as plain text on startup or they become orphaned."
+        )
+        try:
+            print(f"[artifact_tool] {warning}")
+        except Exception:
+            pass
+
     pid: int | None = None
     if had_pid_file:
         try:
@@ -607,6 +619,7 @@ def stop_runner(tab_id: str) -> str:
             "kill_error": kill_error,
             "pid_file_removed": pid_file_removed,
             "runner_script_removed": runner_script_removed,
+            "warning": warning,
         },
         ensure_ascii=False,
     )
@@ -641,6 +654,14 @@ CREATE_ARTIFACT_SCHEMA = {
         "Set persistent=true for artifacts that should survive across sessions."
         "\n\n"
         "For live-updating artifacts:\n"
+        "IMPORTANT: Background runners MUST write a PID file. Without it, the process "
+        "becomes orphaned and cannot be stopped by future sessions or session cleanup.\n"
+        "The PID file must contain only the process ID as plain text.\n"
+        "Example runner startup:\n"
+        "  import os\n"
+        "  with open(os.path.expanduser('~/.hermes/artifacts/pids/{tab_id}.pid'), 'w') as f:\n"
+        "      f.write(str(os.getpid()))\n"
+        "\n"
         "1) Call create_artifact with live=true, refresh_seconds=N, tab_id='my_id'\n"
         "2) Write an updater script to ~/.hermes/artifacts/runners/{tab_id}_runner.py\n"
         "3) The script must write its PID to ~/.hermes/artifacts/pids/{tab_id}.pid on startup\n"
