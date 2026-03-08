@@ -1,0 +1,58 @@
+{
+  "table": {
+    "columns": ["service", "status", "latency_ms"],
+    "rows": [
+      ["api", "ok", 42],
+      ["ws", "ok", 11],
+      ["db", "warn", 210]
+    ],
+    "highlight_rules": {
+      "status": {
+        "ok": "success",
+        "warn": "warning",
+        "down": "danger"
+      }
+    },
+    "summary": "demo table payload"
+  },
+  "chart": {
+    "title": "Requests / minute",
+    "chart_type": "line",
+    "x_axis": ["10:00", "10:05", "10:10", "10:15", "10:20"],
+    "series": [
+      {
+        "name": "req/min",
+        "values": [120, 132, 118, 141, 150],
+        "color": "#f5b731"
+      },
+      {
+        "name": "errors",
+        "values": [3, 1, 0, 5, 2],
+        "color": "#e84057"
+      }
+    ]
+  },
+  "logs": {
+    "follow": true,
+    "lines": [
+      { "ts": "10:20:01", "level": "info", "source": "demo", "msg": "artifact panel: hello" },
+      { "ts": "10:20:02", "level": "warn", "source": "demo", "msg": "vertical tab dropdown is live" },
+      { "ts": "10:20:03", "level": "error", "source": "demo", "msg": "something exploded (demo)" }
+    ]
+  },
+  "markdown": {
+    "content": "# Demo report\n\n- **status**: ok\n- **note**: edit `payloads.json` to try other payload shapes\n\n```bash\nhermes chat --toolsets \"hermes-cli,ui_panel\"\n```\n"
+  },
+  "html": {
+    "html": "<div style=\"font-family: 'JetBrains Mono', monospace; padding: 16px;\">\n  <h3 style=\"margin: 0 0 10px;\">Demo HTML artifact</h3>\n  <div style=\"color: #55556a; font-size: 12px;\">You can render arbitrary HTML/CSS/JS (sandboxed iframe).</div>\n</div>"
+  },
+  "iframe": {
+    "src": "https://example.com"
+  },
+  "map": {
+    "markers": [
+      { "lat": 52.52, "lng": 13.405, "label": "Berlin", "color": "#38c878" },
+      { "lat": 48.8566, "lng": 2.3522, "label": "Paris", "color": "#f5b731" }
+    ]
+  }
+}
