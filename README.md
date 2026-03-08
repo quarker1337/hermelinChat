@@ -31,6 +31,30 @@ As with any AI-generated output, please review and test thoroughly before deploy
 
 ## Install / run (single-port, “production-style”)
 
+Fast path (recommended):
+
+```bash
+git clone git@github.com:quarker1337/hermilinChat.git
+cd hermilinChat
+
+# Creates .hermelin.env (if missing) and runs the full build (venv + backend deps + frontend build)
+./scripts/install.sh
+
+# Load config into your shell
+set -a
+source .hermelin.env
+set +a
+
+# Run the server
+./.venv/bin/hermelin
+```
+
+Open:
+
+http://127.0.0.1:3000
+
+Manual steps (equivalent to the script):
+
 1. Clone:
 
    ```bash
