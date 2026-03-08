@@ -27,12 +27,12 @@ Create the file `tools/render_panel_tool.py` following our existing tool pattern
 2. `close_panel(tab_id="")`
    - Removes a specific artifact file, or writes `_close_signal.json` to close all
 
-Both need full OpenAI-style function schemas (RENDER_PANEL_SCHEMA and CLOSE_PANEL_SCHEMA) and should be registered with the tool registry under toolset "ui_panel":
+Both need full OpenAI-style function schemas (RENDER_PANEL_SCHEMA and CLOSE_PANEL_SCHEMA) and should be registered with the tool registry under toolset "artifacts":
 
 ```python
 registry.register(
     name="render_panel",
-    toolset="ui_panel",
+    toolset="artifacts",
     schema=RENDER_PANEL_SCHEMA,
     handler=lambda args, **kw: render_panel(**args),
     check_fn=_check_requirements,
@@ -53,16 +53,16 @@ Now register the render_panel tool so Hermes picks it up automatically.
 
 2. In `toolsets.py`, add a new toolset entry:
 ```python
-"ui_panel": {
+"artifacts": {
     "description": "Render dynamic artifacts in hermelinChat's side panel",
     "tools": ["render_panel", "close_panel"],
 },
 ```
 
-3. In the hermelinchat platform preset (or whatever preset hermelinChat sessions use), include `"ui_panel"` in the `includes` list:
+3. In the hermelinchat platform preset (or whatever preset hermelinChat sessions use), include `"artifacts"` in the `includes` list:
 ```python
 "hermelinchat": {
-    "includes": ["default", "ui_panel"],
+    "includes": ["default", "artifacts"],
 },
 ```
 

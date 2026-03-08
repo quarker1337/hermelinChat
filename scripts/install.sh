@@ -232,7 +232,7 @@ HERMELIN_COOKIE_SECRET='$COOKIE_SECRET'
 
 # Hermes integration
 HERMES_HOME=$DEFAULT_HERMES_HOME
-HERMELIN_HERMES_CMD='hermes chat --toolsets "hermes-cli, ui_panel"'
+HERMELIN_HERMES_CMD='hermes chat --toolsets "hermes-cli, artifacts"'
 
 # Optional
 # HERMELIN_META_DB_PATH=$DEFAULT_HERMES_HOME/hermilin_meta.db

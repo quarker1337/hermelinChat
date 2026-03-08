@@ -41,7 +41,7 @@
     ]
   },
   "markdown": {
-    "content": "# Demo report\n\n- **status**: ok\n- **note**: edit `payloads.json` to try other payload shapes\n\n```bash\nhermes chat --toolsets \"hermes-cli,ui_panel\"\n```\n"
+    "content": "# Demo report\n\n- **status**: ok\n- **note**: edit `payloads.json` to try other payload shapes\n\n```bash\nhermes chat --toolsets \"hermes-cli,artifacts\"\n```\n"
   },
   "html": {
     "html": "<div style=\"font-family: 'JetBrains Mono', monospace; padding: 16px;\">\n  <h3 style=\"margin: 0 0 10px;\">Demo HTML artifact</h3>\n  <div style=\"color: #55556a; font-size: 12px;\">You can render arbitrary HTML/CSS/JS (sandboxed iframe).</div>\n</div>"

@@ -15,21 +15,13 @@ ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
 # hermilinChat toolset injection
 #
-# We install a canonical "artifacts" toolset, plus a backward-compatible
-# "ui_panel" alias so older configs keep working.
+# We install a canonical "artifacts" toolset for hermilinChat's side panel.
 ARTIFACT_TOOLSETS_BLOCK = '''
     # hermilinChat artifact panel toolsets (installed by hermilinChat patch)
     "artifacts": {
         "description": "Create and manage artifacts in hermilinChat's right-side artifact panel",
         "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],
         "includes": []
-    },
-
-    # Backward-compat alias (older configs used 'ui_panel')
-    "ui_panel": {
-        "description": "Backward-compatible alias for the artifacts toolset (hermilinChat panel)",
-        "tools": [],
-        "includes": ["artifacts"]
     },
 '''
 
@@ -232,18 +224,40 @@ def _patch_model_tools(path: Path) -> tuple[bool, str]:
 def _patch_toolsets(path: Path) -> tuple[bool, str]:
     text, newline = _read_text_with_newline(path)
 
-    marker = "hermelinChat artifact panel toolsets (installed by hermilinChat patch)"
-    if marker in text:
-        return False, "toolsets.py already patched with hermilinChat artifact toolsets"
-
     anchor = newline + newline + '    # Scenario-specific toolsets' + newline
     if anchor not in text:
         raise RuntimeError(f"Could not find insertion anchor in {path}")
 
+    marker_line = "    # hermilinChat artifact panel toolsets (installed by hermilinChat patch)"
     block = ARTIFACT_TOOLSETS_BLOCK.replace("\n", newline)
-    patched = text.replace(anchor, newline + block + anchor, 1)
+    desired = newline + block + anchor
+
+    # If already in the desired state, do nothing.
+    if desired in text:
+        return False, "toolsets.py already patched with hermilinChat artifacts toolset"
+
+    # Upgrade path: if an older patch block exists, remove it first, then re-insert
+    # the canonical artifacts toolset block.
+    if marker_line in text:
+        start_token = newline + newline + marker_line
+        if start_token in text:
+            start = text.index(start_token)
+        else:
+            alt = newline + marker_line
+            if alt in text:
+                start = text.index(alt)
+            else:
+                start = text.index(marker_line)
+
+        end = text.index(anchor, start)
+        text = text[:start] + text[end:]
+
+    patched = text.replace(anchor, desired, 1)
+    if patched == text:
+        return False, "toolsets.py already contains an artifacts toolset patch"
+
     _write_text_with_newline(path, patched, newline)
-    return True, f"Patched {path.name}: added artifacts toolset + ui_panel alias"
+    return True, f"Patched {path.name}: added artifacts toolset"
 
 
 def _install_artifact_tool(tools_dir: Path) -> tuple[bool, str]:
@@ -324,7 +338,7 @@ def main() -> int:
     print()
     print("Next steps")
     print("  1) restart hermilinChat / Hermes services if they are already running")
-    print("  2) if your Hermes config uses restricted toolsets, make sure 'artifacts' (preferred) or 'ui_panel' (compat) is enabled")
+    print("  2) if your Hermes config uses restricted toolsets, make sure 'artifacts' is enabled")
     return 0
 
 

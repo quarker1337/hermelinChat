@@ -63,7 +63,7 @@ Step 7 changes:
 
 Step 8 changes:
 - Tools now register under toolset: `artifacts`
-- Hermes patch installer injects an `artifacts` toolset and makes `ui_panel` a backward-compatible alias (so older configs still work)
+- Hermes patch installer injects an `artifacts` toolset into the live Hermes installation
 
 Step 9 changes:
 - Updated hermilinChat backend artifact helpers (`hermelin/artifacts.py`) to read/merge artifacts from:

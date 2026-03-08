@@ -170,7 +170,7 @@ Update `toolsets.py`:
 },
 ```
 
-Update the hermelinchat platform preset to include `"artifacts"` instead of `"ui_panel"`.
+Update the hermelinchat platform preset to include `"artifacts"`.
 
 ---
 

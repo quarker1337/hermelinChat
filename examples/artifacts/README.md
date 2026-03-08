@@ -2,11 +2,15 @@
 
 These files are here so you can demo / validate the artifact panel without creating ad-hoc scripts inside `scripts/` (which can block `./scripts/update.sh`).
 
-HermilinChat renders artifacts from `~/.hermes/artifacts/*.json`.
+HermilinChat renders artifacts from:
+- `~/.hermes/artifacts/session/*.json`
+- `~/.hermes/artifacts/persistent/*.json`
+
+(And it still supports legacy root-level `~/.hermes/artifacts/*.json`.)
 
 Two ways to create artifacts:
 
-1) Preferred: ask Hermes to call the `create_artifact` tool (toolset: `ui_panel`).
+1) Preferred: ask Hermes to call the `create_artifact` tool (toolset: `artifacts`).
    - `create_artifact` writes the JSON artifact files for you.
    - Reuse the same `tab_id` to update an existing artifact in-place.
 

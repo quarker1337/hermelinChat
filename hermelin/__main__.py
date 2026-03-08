@@ -22,7 +22,7 @@ def main() -> None:
         "--hermes-cmd",
         default=os.getenv(
             "HERMELIN_HERMES_CMD",
-            'hermes chat --toolsets "hermes-cli, ui_panel"',
+            'hermes chat --toolsets "hermes-cli, artifacts"',
         ),
     )
     p.add_argument("--hermes-home", default=os.getenv("HERMES_HOME", str(Path.home() / ".hermes")))

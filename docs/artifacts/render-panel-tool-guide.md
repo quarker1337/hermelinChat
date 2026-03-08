@@ -202,7 +202,7 @@ def _check_requirements() -> bool:
 
 registry.register(
     name="render_panel",
-    toolset="ui_panel",
+    toolset="artifacts",
     schema=RENDER_PANEL_SCHEMA,
     handler=lambda args, **kw: render_panel(**args),
     check_fn=_check_requirements,
@@ -210,7 +210,7 @@ registry.register(
 
 registry.register(
     name="close_panel",
-    toolset="ui_panel",
+    toolset="artifacts",
     schema=CLOSE_PANEL_SCHEMA,
     handler=lambda args, **kw: close_panel(**args),
     check_fn=_check_requirements,
@@ -231,7 +231,7 @@ _modules = [
 
 3. Add the toolset to `toolsets.py`:
 ```python
-"ui_panel": {
+"artifacts": {
     "description": "Render dynamic artifacts in hermelinChat's side panel",
     "tools": ["render_panel", "close_panel"],
 },
@@ -240,7 +240,7 @@ _modules = [
 4. Include it in the `hermelinchat` platform preset (or whatever preset hermelinChat uses):
 ```python
 "hermelinchat": {
-    "includes": ["default", "ui_panel"],
+    "includes": ["default", "artifacts"],
     # ...
 },
 ```

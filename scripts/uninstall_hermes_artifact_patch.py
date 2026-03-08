@@ -15,31 +15,8 @@ ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
 # hermilinChat toolset injection
 #
-# We remove the exact block inserted by install_hermes_artifact_patch.py.
-ARTIFACT_TOOLSETS_BLOCK = '''
-    # hermilinChat artifact panel toolsets (installed by hermilinChat patch)
-    "artifacts": {
-        "description": "Create and manage artifacts in hermilinChat's right-side artifact panel",
-        "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],
-        "includes": []
-    },
-
-    # Backward-compat alias (older configs used 'ui_panel')
-    "ui_panel": {
-        "description": "Backward-compatible alias for the artifacts toolset (hermilinChat panel)",
-        "tools": [],
-        "includes": ["artifacts"]
-    },
-'''
-
-# Legacy block from earlier patch versions (pre "artifacts" toolset)
-LEGACY_UI_PANEL_BLOCK = '''
-    "ui_panel": {
-        "description": "Render structured artifacts in hermilinChat's right-side artifact panel",
-        "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],
-        "includes": []
-    },
-'''
+# We remove the toolset block inserted by install_hermes_artifact_patch.py.
+PATCH_MARKER_LINE = "    # hermilinChat artifact panel toolsets (installed by hermilinChat patch)"
 
 
 def parse_args() -> argparse.Namespace:
@@ -263,29 +240,23 @@ def _unpatch_toolsets(path: Path) -> tuple[bool, str]:
     if anchor not in text:
         return False, "toolsets.py has no Scenario-specific toolsets anchor"
 
-    blocks = [
-        ("hermelinChat artifacts toolsets block", ARTIFACT_TOOLSETS_BLOCK),
-        ("legacy ui_panel toolset block", LEGACY_UI_PANEL_BLOCK),
-    ]
+    if PATCH_MARKER_LINE not in text:
+        return False, "toolsets.py has no hermilinChat artifacts toolset patch"
 
-    for label, src in blocks:
-        block = src.replace("\n", newline)
-        needle = newline + block + anchor
-        if needle in text:
-            patched = text.replace(needle, anchor, 1)
-            _write_text_with_newline(path, patched, newline)
-            return True, f"Removed {label} (exact match)"
+    start_token = newline + newline + PATCH_MARKER_LINE
+    if start_token in text:
+        start = text.index(start_token)
+    else:
+        alt = newline + PATCH_MARKER_LINE
+        if alt in text:
+            start = text.index(alt)
+        else:
+            start = text.index(PATCH_MARKER_LINE)
 
-    # Legacy in-place patch rollback: restore the ui_panel tools list if we see our
-    # upgraded entry from older patch versions.
-    upgraded_tools_line = '        "tools": ["create_artifact", "remove_artifact", "clear_artifacts", "stop_runner"],'
-    restored_tools_line = '        "tools": ["render_panel", "close_panel"],'
-    if upgraded_tools_line in text:
-        patched = text.replace(upgraded_tools_line, restored_tools_line, 1)
-        _write_text_with_newline(path, patched, newline)
-        return True, "Restored ui_panel tool list (legacy rollback)"
-
-    return False, "toolsets.py has no hermilinChat artifact toolset patch"
+    end = text.index(anchor, start)
+    patched = text[:start] + text[end:]
+    _write_text_with_newline(path, patched, newline)
+    return True, "Removed hermilinChat artifacts toolset block"
 
 
 def main() -> int:

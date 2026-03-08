@@ -24,7 +24,7 @@ class HermelinConfig:
     #   /usr/local/bin/hermes
     hermes_cmd: str = os.getenv(
         "HERMELIN_HERMES_CMD",
-        'hermes chat --toolsets "hermes-cli, ui_panel"',
+        'hermes chat --toolsets "hermes-cli, artifacts"',
     )
 
     # Hermes Agent home (contains state.db, config.yaml, etc.)

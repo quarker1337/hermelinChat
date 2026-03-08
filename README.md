@@ -210,11 +210,11 @@ python3 scripts/install_hermes_artifact_patch.py
 What it does:
 - detects the Python interpreter used by your installed `hermes` command
 - installs `artifact_tool.py` into that live Hermes installation
-- patches `model_tools.py` and `toolsets.py` to register the `ui_panel` toolset
+- patches `model_tools.py` and `toolsets.py` to register the `artifacts` toolset
 
 Notes:
 - `./scripts/update.sh` runs this patch step automatically unless you pass `--skip-hermes-patch`
-- if your Hermes config uses restricted toolsets, make sure `ui_panel` or `all` is enabled
+- if your Hermes config uses restricted toolsets, make sure `artifacts` or `all` is enabled
 - docs / reference material lives in `docs/artifacts/` (tool schema guide + UI mockup)
 
 ## Auto session titles (optional)
