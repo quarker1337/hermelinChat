@@ -1,6 +1,45 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { marked } from 'marked'
+import hljs from 'highlight.js/lib/core'
+import bash from 'highlight.js/lib/languages/bash'
+import css from 'highlight.js/lib/languages/css'
+import go from 'highlight.js/lib/languages/go'
+import javascript from 'highlight.js/lib/languages/javascript'
+import json from 'highlight.js/lib/languages/json'
+import python from 'highlight.js/lib/languages/python'
+import rust from 'highlight.js/lib/languages/rust'
+import sql from 'highlight.js/lib/languages/sql'
+import typescript from 'highlight.js/lib/languages/typescript'
+import xml from 'highlight.js/lib/languages/xml'
+import yaml from 'highlight.js/lib/languages/yaml'
+import 'highlight.js/styles/github-dark.css'
+
 import { AMBER, SLATE, formatTimestamp, levelColor, semanticColor } from './theme.js'
+
+const HLJS_LANGS = [
+  ['bash', bash],
+  ['css', css],
+  ['go', go],
+  ['javascript', javascript],
+  ['json', json],
+  ['python', python],
+  ['rust', rust],
+  ['sql', sql],
+  ['typescript', typescript],
+  ['xml', xml],
+  ['yaml', yaml],
+]
+
+for (const [name, loader] of HLJS_LANGS) {
+  try {
+    if (!hljs.getLanguage(name)) {
+      hljs.registerLanguage(name, loader)
+    }
+  } catch {
+    // ignore
+  }
+}
 
 function ArtifactEmpty({ title, detail }) {
   return (
@@ -159,103 +198,92 @@ function escapeHtml(text) {
     .replaceAll("'", '&#39;')
 }
 
-function renderInlineMarkdown(text) {
-  let out = escapeHtml(text)
-  out = out.replace(/`([^`]+)`/g, '<code>$1</code>')
-  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  out = out.replace(/(^|\W)\*([^*]+)\*(?=\W|$)/g, '$1<em>$2</em>')
-  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
-  return out
+// ---------------------------------------------------------------------------
+// Markdown rendering (marked + highlight.js)
+// ---------------------------------------------------------------------------
+
+const MARKDOWN_LANG_ALIASES = {
+  sh: 'bash',
+  shell: 'bash',
+  zsh: 'bash',
+  js: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  yml: 'yaml',
+  html: 'xml',
+}
+
+function normalizeMarkdownLanguage(lang) {
+  const raw = String(lang || '').trim().toLowerCase()
+  if (!raw) return ''
+  return MARKDOWN_LANG_ALIASES[raw] || raw
+}
+
+function sanitizeUrl(href) {
+  const raw = String(href || '').trim()
+  if (!raw) return ''
+  const lower = raw.toLowerCase()
+  if (lower.startsWith('javascript:') || lower.startsWith('data:') || lower.startsWith('vbscript:')) return ''
+  return raw
+}
+
+const MARKDOWN_RENDERER = new marked.Renderer()
+
+MARKDOWN_RENDERER.html = ({ text }) => {
+  // Disallow raw HTML passthrough.
+  return escapeHtml(text)
+}
+
+MARKDOWN_RENDERER.link = function ({ href, title, tokens }) {
+  const inner = this.parser.parseInline(tokens)
+  const safe = sanitizeUrl(href)
+  if (!safe) return inner
+
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+  return `<a href="${escapeHtml(safe)}"${titleAttr} target="_blank" rel="noreferrer noopener">${inner}</a>`
+}
+
+MARKDOWN_RENDERER.image = ({ href, title, text }) => {
+  const safe = sanitizeUrl(href)
+  const alt = escapeHtml(text || '')
+  if (!safe) return alt
+
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+  return `<img src="${escapeHtml(safe)}" alt="${alt}"${titleAttr} loading="lazy" />`
+}
+
+MARKDOWN_RENDERER.code = ({ text, lang }) => {
+  const language = normalizeMarkdownLanguage(lang)
+  let highlighted = ''
+
+  if (language && hljs.getLanguage(language)) {
+    try {
+      highlighted = hljs.highlight(text, { language }).value
+    } catch {
+      highlighted = escapeHtml(text)
+    }
+  } else {
+    highlighted = escapeHtml(text)
+  }
+
+  const className = language ? `language-${language}` : ''
+  return `<pre><code class="hljs ${className}">${highlighted}</code></pre>`
 }
 
 function markdownToHtml(markdown) {
-  const source = String(markdown || '').replace(/\r\n/g, '\n')
-  const lines = source.split('\n')
-  const html = []
-  let inList = false
-  let inCode = false
-  let paragraph = []
-  let codeLines = []
-
-  const flushParagraph = () => {
-    if (!paragraph.length) return
-    html.push(`<p>${renderInlineMarkdown(paragraph.join(' '))}</p>`)
-    paragraph = []
+  const source = String(markdown || '')
+  try {
+    return marked.parse(source, {
+      renderer: MARKDOWN_RENDERER,
+      gfm: true,
+      breaks: false,
+      headerIds: false,
+      mangle: false,
+    })
+  } catch {
+    return `<pre><code>${escapeHtml(source)}</code></pre>`
   }
-
-  const closeList = () => {
-    if (!inList) return
-    html.push('</ul>')
-    inList = false
-  }
-
-  const closeCode = () => {
-    if (!inCode) return
-    html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`)
-    codeLines = []
-    inCode = false
-  }
-
-  for (const line of lines) {
-    if (line.trim().startsWith('```')) {
-      flushParagraph()
-      closeList()
-      if (inCode) {
-        closeCode()
-      } else {
-        inCode = true
-      }
-      continue
-    }
-
-    if (inCode) {
-      codeLines.push(line)
-      continue
-    }
-
-    if (!line.trim()) {
-      flushParagraph()
-      closeList()
-      continue
-    }
-
-    const heading = line.match(/^(#{1,6})\s+(.*)$/)
-    if (heading) {
-      flushParagraph()
-      closeList()
-      const level = Math.max(1, Math.min(6, heading[1].length))
-      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`)
-      continue
-    }
-
-    const quote = line.match(/^>\s?(.*)$/)
-    if (quote) {
-      flushParagraph()
-      closeList()
-      html.push(`<blockquote>${renderInlineMarkdown(quote[1])}</blockquote>`)
-      continue
-    }
-
-    const listItem = line.match(/^[-*]\s+(.*)$/)
-    if (listItem) {
-      flushParagraph()
-      if (!inList) {
-        html.push('<ul>')
-        inList = true
-      }
-      html.push(`<li>${renderInlineMarkdown(listItem[1])}</li>`)
-      continue
-    }
-
-    closeList()
-    paragraph.push(line.trim())
-  }
-
-  flushParagraph()
-  closeList()
-  closeCode()
-
-  return html.join('\n')
 }
 
 function MarkdownArtifact({ artifact }) {
@@ -276,7 +304,7 @@ function MarkdownArtifact({ artifact }) {
       }}
     >
       <style>{`
-        .artifact-markdown h1, .artifact-markdown h2, .artifact-markdown h3, .artifact-markdown h4 {
+        .artifact-markdown h1, .artifact-markdown h2, .artifact-markdown h3, .artifact-markdown h4, .artifact-markdown h5, .artifact-markdown h6 {
           color: ${SLATE.textBright};
           margin: 0 0 10px;
           line-height: 1.25;
@@ -284,9 +312,14 @@ function MarkdownArtifact({ artifact }) {
         .artifact-markdown h1 { font-size: 22px; }
         .artifact-markdown h2 { font-size: 18px; }
         .artifact-markdown h3 { font-size: 15px; }
+        .artifact-markdown h4 { font-size: 13px; }
         .artifact-markdown p { margin: 0 0 12px; }
-        .artifact-markdown ul { margin: 0 0 12px 18px; padding: 0; }
+        .artifact-markdown ul, .artifact-markdown ol { margin: 0 0 12px 18px; padding: 0; }
         .artifact-markdown li { margin: 0 0 6px; }
+        .artifact-markdown hr { border: 0; border-top: 1px solid ${SLATE.border}; margin: 14px 0; opacity: 0.55; }
+        .artifact-markdown a { color: ${SLATE.info}; text-decoration: underline; text-underline-offset: 2px; }
+        .artifact-markdown a:hover { color: ${AMBER[300]}; }
+
         .artifact-markdown code {
           font-family: 'JetBrains Mono', monospace;
           background: ${SLATE.elevated};
@@ -295,6 +328,7 @@ function MarkdownArtifact({ artifact }) {
           padding: 1px 4px;
           border-radius: 4px;
         }
+
         .artifact-markdown pre {
           margin: 0 0 12px;
           background: ${SLATE.elevated};
@@ -303,19 +337,52 @@ function MarkdownArtifact({ artifact }) {
           border-radius: 6px;
           overflow: auto;
         }
+
         .artifact-markdown pre code {
           background: transparent;
           border: 0;
           padding: 0;
           color: ${SLATE.text};
         }
+
+        .artifact-markdown pre code.hljs {
+          background: transparent;
+        }
+
+        .artifact-markdown table {
+          width: 100%;
+          border-collapse: collapse;
+          margin: 0 0 12px;
+        }
+        .artifact-markdown th, .artifact-markdown td {
+          border: 1px solid ${SLATE.border};
+          padding: 6px 8px;
+          font-size: 11px;
+          vertical-align: top;
+        }
+        .artifact-markdown th {
+          background: ${SLATE.elevated};
+          color: ${SLATE.textBright};
+          font-size: 9px;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        }
+        .artifact-markdown tbody tr:nth-child(even) {
+          background: ${SLATE.surface}80;
+        }
+
         .artifact-markdown blockquote {
           margin: 0 0 12px;
           padding: 0 0 0 12px;
           border-left: 2px solid ${AMBER[600]};
           color: ${SLATE.muted};
         }
-        .artifact-markdown a { color: ${SLATE.info}; }
+
+        .artifact-markdown img {
+          max-width: 100%;
+          border: 1px solid ${SLATE.border};
+          border-radius: 6px;
+        }
       `}</style>
       <div className="artifact-markdown" dangerouslySetInnerHTML={{ __html: html }} />
     </div>

@@ -43,6 +43,38 @@ function RefreshIcon() {
   )
 }
 
+function InfoIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="10" x2="12" y2="16" />
+      <circle cx="12" cy="7" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+function MaximizeIcon({ maximized }) {
+  if (maximized) {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="9 3 3 3 3 9" />
+        <polyline points="15 21 21 21 21 15" />
+        <line x1="3" y1="3" x2="10" y2="10" />
+        <line x1="21" y1="21" x2="14" y2="14" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 3 21 3 21 9" />
+      <polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  )
+}
+
 function PinIcon({ pinned }) {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill={pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -172,8 +204,28 @@ export default function ArtifactPanel({
   const activeArtifact = artifacts.find((artifact) => artifact?.id === activeArtifactId) || artifacts[0] || null
 
   const [tabMenuOpen, setTabMenuOpen] = useState(false)
+  const [maximized, setMaximized] = useState(false)
+  const restoreWidthRef = useRef(null)
   const triggerRef = useRef(null)
   const menuRef = useRef(null)
+
+  const infoTitle = (() => {
+    if (!activeArtifact) return 'No active artifact'
+
+    const scope = activeArtifact?.persistent ? 'persistent' : 'session'
+    const created = activeArtifact?.created_at || activeArtifact?.timestamp
+    const updated = activeArtifact?.updated_at || activeArtifact?.timestamp
+    const source = activeArtifact?.source || 'create_artifact'
+
+    return [
+      `source: ${source}`,
+      `type: ${activeArtifact?.type || 'artifact'}`,
+      `tab id: ${activeArtifact?.id || ''}`,
+      `scope: ${scope}`,
+      `created: ${formatTimestamp(created) || 'unknown'}`,
+      `updated: ${formatTimestamp(updated) || 'unknown'}`,
+    ].join('\n')
+  })()
 
   useEffect(() => {
     if (!tabMenuOpen) return
@@ -409,9 +461,19 @@ export default function ArtifactPanel({
           background: `${SLATE.surface}ff`,
         }}
       >
-        <div style={{ fontSize: 11, color: AMBER[400], fontWeight: 700 }}>artifact</div>
-        <div style={{ fontSize: 10, color: SLATE.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {activeArtifact?.title || 'panel'}
+        <div
+          style={{
+            fontSize: 12,
+            color: SLATE.textBright,
+            fontWeight: 650,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            minWidth: 0,
+          }}
+          title={activeArtifact?.title || activeArtifact?.id || ''}
+        >
+          {activeArtifact?.title || activeArtifact?.id || 'Artifacts'}
         </div>
         <div style={{ flex: 1 }} />
         <IconButton title={pinned ? 'Unpin panel' : 'Pin panel'} onClick={onTogglePinned} active={pinned}>
@@ -420,7 +482,41 @@ export default function ArtifactPanel({
         <IconButton title="Refresh artifacts" onClick={onRefresh}>
           <RefreshIcon />
         </IconButton>
-        <IconButton title="Hide panel" onClick={onClose}>
+        <IconButton
+          title={infoTitle}
+          onClick={() => {
+            try {
+              globalThis?.navigator?.clipboard?.writeText?.(infoTitle)
+            } catch {
+              // ignore
+            }
+          }}
+        >
+          <InfoIcon />
+        </IconButton>
+        <IconButton
+          title={maximized ? 'Restore panel size' : 'Maximize panel'}
+          onClick={() => {
+            if (!onResizeWidth) return
+            const current = Number(width) || 480
+
+            if (!maximized) {
+              restoreWidthRef.current = current
+              onResizeWidth(960)
+              setMaximized(true)
+              return
+            }
+
+            const restore = Number(restoreWidthRef.current) || 480
+            restoreWidthRef.current = null
+            onResizeWidth(restore)
+            setMaximized(false)
+          }}
+          active={maximized}
+        >
+          <MaximizeIcon maximized={maximized} />
+        </IconButton>
+        <IconButton title="Close panel" onClick={onClose}>
           <CloseIcon />
         </IconButton>
       </div>
@@ -474,7 +570,18 @@ export default function ArtifactPanel({
           >
             {activeArtifact?.title || activeArtifact?.id || 'panel'}
           </span>
-          <span style={{ fontSize: 10, color: SLATE.muted, flexShrink: 0 }}>
+          <span
+            style={{
+              flexShrink: 0,
+              fontSize: 9,
+              color: SLATE.muted,
+              border: `1px solid ${SLATE.border}`,
+              padding: '1px 7px',
+              borderRadius: 999,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+            }}
+          >
             {artifacts.length} tab{artifacts.length === 1 ? '' : 's'}
           </span>
           <span style={{ color: SLATE.muted, display: 'flex', alignItems: 'center' }}>
@@ -599,54 +706,22 @@ export default function ArtifactPanel({
         ) : null}
       </div>
 
-      <div
-        style={{
-          padding: '6px 14px',
-          borderBottom: `1px solid ${SLATE.border}10`,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          fontSize: 10,
-          color: SLATE.muted,
-        }}
-      >
-        <span>via</span>
-        <span style={{ color: AMBER[600], fontWeight: 500 }}>{activeArtifact?.source || 'render_panel'}</span>
-        <span>·</span>
-        <span>{activeArtifact?.type || 'artifact'}</span>
-        {activeArtifact?.task_id ? (
-          <>
-            <span>·</span>
-            <span title={String(activeArtifact.task_id)} style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              task {String(activeArtifact.task_id)}
-            </span>
-          </>
-        ) : null}
-        <div style={{ flex: 1 }} />
-        {activeArtifact?.live ? (
-          <span style={{ color: SLATE.success, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 5, height: 5, borderRadius: '50%', background: SLATE.success, animation: 'artifactLivePulse 2s ease infinite' }} />
-            live
-          </span>
-        ) : null}
-      </div>
-
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
         {activeArtifact ? (
           <ArtifactRenderer artifact={activeArtifact} />
         ) : (
           <div style={{ padding: '18px 16px', fontSize: 12, color: SLATE.muted }}>
-            No artifacts yet. Ask Hermes to call <span style={{ color: AMBER[400] }}>render_panel</span>.
+            No artifacts yet. Ask Hermes to call <span style={{ color: AMBER[400] }}>create_artifact</span>.
           </div>
         )}
       </div>
 
       <div
         style={{
-          padding: '6px 14px',
+          padding: '5px 14px',
           borderTop: `1px solid ${SLATE.border}`,
-          fontSize: 10,
-          color: SLATE.muted,
+          fontSize: 9,
+          color: `${SLATE.muted}cc`,
           display: 'flex',
           justifyContent: 'space-between',
           gap: 12,

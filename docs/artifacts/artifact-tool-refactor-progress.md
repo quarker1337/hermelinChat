@@ -2,7 +2,7 @@
 
 This file tracks execution of: `docs/artifacts/artifact-tool-refactor.md`.
 
-Last updated: 2026-03-08 (Step 9 complete)
+Last updated: 2026-03-08 (Steps 10-11 complete)
 
 ## Checklist
 
@@ -15,8 +15,8 @@ Last updated: 2026-03-08 (Step 9 complete)
 - [x] Step 7: Write the tool schemas
 - [x] Step 8: Register all four tools
 - [x] Step 9: Update hermilinChat backend
-- [ ] Step 10: Clean up the panel header UI
-- [ ] Step 11: Upgrade the markdown renderer
+- [x] Step 10: Clean up the panel header UI
+- [x] Step 11: Upgrade the markdown renderer
 - [ ] Step 12: Verify everything works
 
 ## Notes / Decisions
@@ -72,5 +72,18 @@ Step 9 changes:
   - (plus legacy root-level `~/.hermes/artifacts/*.json` for backward compatibility)
 - Ensures every returned artifact has a correct `persistent: true/false` flag
 - De-dupes by `artifact.id` (newest wins; persistent wins ties)
+
+Step 10 changes:
+- Artifact panel header simplified:
+  - removed the verbose "via … · type · task" metadata row
+  - metadata is now available via an ⓘ (info) tooltip in the header
+  - added a maximize/restore width toggle
+  - empty-state copy now references `create_artifact`
+  - footer typography made more subtle
+
+Step 11 changes:
+- Markdown artifacts now render via `marked` with fenced-code highlighting via `highlight.js`
+- Language support registered: bash, css, go, javascript, json, python, rust, sql, typescript, xml/html, yaml
+- Added basic markdown styling for tables, hr, images, and code blocks
 
 - (pending) Backward compatibility: whether to keep a shim for `render_panel`/`close_panel` (tool aliases).
