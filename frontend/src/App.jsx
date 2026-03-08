@@ -41,7 +41,7 @@ const DEFAULT_ARTIFACT_PANEL_WIDTH = 480
 const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
 
 // First tagged release of the hermilinChat UI.
-const HERMILINCHAT_VERSION = '0.10'
+const HERMILINCHAT_VERSION = '0.11'
 
 const DEFAULT_UI_PREFS = {
   particles: {
