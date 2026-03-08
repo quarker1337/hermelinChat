@@ -2,7 +2,7 @@
 
 This file tracks execution of: `docs/artifacts/artifact-tool-refactor.md`.
 
-Last updated: 2026-03-08 (Steps 7-8 complete)
+Last updated: 2026-03-08 (Step 9 complete)
 
 ## Checklist
 
@@ -14,7 +14,7 @@ Last updated: 2026-03-08 (Steps 7-8 complete)
 - [x] Step 6: Implement stop_runner
 - [x] Step 7: Write the tool schemas
 - [x] Step 8: Register all four tools
-- [ ] Step 9: Update hermilinChat backend
+- [x] Step 9: Update hermilinChat backend
 - [ ] Step 10: Clean up the panel header UI
 - [ ] Step 11: Upgrade the markdown renderer
 - [ ] Step 12: Verify everything works
@@ -64,5 +64,13 @@ Step 7 changes:
 Step 8 changes:
 - Tools now register under toolset: `artifacts`
 - Hermes patch installer injects an `artifacts` toolset and makes `ui_panel` a backward-compatible alias (so older configs still work)
+
+Step 9 changes:
+- Updated hermilinChat backend artifact helpers (`hermelin/artifacts.py`) to read/merge artifacts from:
+  - `~/.hermes/artifacts/session/`
+  - `~/.hermes/artifacts/persistent/`
+  - (plus legacy root-level `~/.hermes/artifacts/*.json` for backward compatibility)
+- Ensures every returned artifact has a correct `persistent: true/false` flag
+- De-dupes by `artifact.id` (newest wins; persistent wins ties)
 
 - (pending) Backward compatibility: whether to keep a shim for `render_panel`/`close_panel` (tool aliases).
