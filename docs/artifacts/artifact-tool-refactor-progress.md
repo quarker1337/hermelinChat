@@ -2,12 +2,12 @@
 
 This file tracks execution of: `docs/artifacts/artifact-tool-refactor.md`.
 
-Last updated: 2026-03-08 (Step 1 complete)
+Last updated: 2026-03-08 (Step 2 complete)
 
 ## Checklist
 
 - [x] Step 1: Rename and restructure the tool file
-- [ ] Step 2: Set up the runtime directory structure
+- [x] Step 2: Set up the runtime directory structure
 - [ ] Step 3: Implement create_artifact
 - [ ] Step 4: Implement remove_artifact
 - [ ] Step 5: Implement clear_artifacts
@@ -26,6 +26,12 @@ Step 1 changes:
 - Installer/uninstaller now patch `model_tools.py` import: `tools.render_panel_tool` -> `tools.artifact_tool`
 - `ui_panel` toolset upgraded to new tool names: `create_artifact`, `remove_artifact`, `clear_artifacts`, `stop_runner`
 - README + examples updated to mention `create_artifact` + `artifact_tool.py`
+
+Step 2 changes:
+- Defined the runtime directory constants in `artifact_tool.py`:
+  - `ARTIFACT_SESSION_DIR`, `ARTIFACT_PERSISTENT_DIR`, `RUNNERS_DIR`, `PIDS_DIR`
+- Added `_ensure_dir()` helper using `os.makedirs(..., exist_ok=True)`
+- Kept legacy behavior for now (still writes to the artifacts root dir); Step 3 will switch to session/persistent.
 
 - (pending) Toolset name migration plan: currently `ui_panel`; later rename to `artifacts` per Step 8.
 - (pending) Backward compatibility: whether to keep a shim for `render_panel`/`close_panel`.

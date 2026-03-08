@@ -31,15 +31,33 @@ from tools.registry import registry
 ALLOWED_ARTIFACT_TYPES = {"chart", "table", "map", "logs", "html", "markdown", "iframe"}
 
 
-def _artifact_dir() -> Path:
-    hermes_home = os.path.expanduser(os.getenv("HERMES_HOME", "~/.hermes"))
-    return Path(hermes_home) / "artifacts"
+# -----------------------------------------------------------------------------
+# Runtime directory layout (Step 2)
+#
+# All runtime files must live under ~/.hermes (or $HERMES_HOME if overridden).
+# Never write runtime state inside a git repository.
+# -----------------------------------------------------------------------------
+
+HERMES_HOME = os.path.expanduser(os.getenv("HERMES_HOME", "~/.hermes"))
+
+ARTIFACT_SESSION_DIR = os.path.join(HERMES_HOME, "artifacts", "session")
+ARTIFACT_PERSISTENT_DIR = os.path.join(HERMES_HOME, "artifacts", "persistent")
+
+# Root artifacts dir holds metadata helper files like _latest.json and
+# _close_signal.json.
+ARTIFACTS_ROOT_DIR = os.path.join(HERMES_HOME, "artifacts")
+
+RUNNERS_DIR = os.path.join(HERMES_HOME, "runners")
+PIDS_DIR = os.path.join(HERMES_HOME, "pids")
 
 
-def _ensure_artifact_dir() -> Path:
-    path = _artifact_dir()
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def _ensure_dir(path: str) -> Path:
+    os.makedirs(path, exist_ok=True)
+    return Path(path)
+
+
+def _ensure_artifacts_root_dir() -> Path:
+    return _ensure_dir(ARTIFACTS_ROOT_DIR)
 
 
 def _sanitize_artifact_id(value: str) -> str:
@@ -52,11 +70,13 @@ def _sanitize_artifact_id(value: str) -> str:
 
 
 def _artifact_path(artifact_id: str) -> Path:
-    return _ensure_artifact_dir() / f"{artifact_id}.json"
+    # Step 2 keeps the legacy single-directory storage model.
+    # Step 3 will choose ARTIFACT_SESSION_DIR vs ARTIFACT_PERSISTENT_DIR.
+    return _ensure_artifacts_root_dir() / f"{artifact_id}.json"
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(path.parent, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
@@ -80,7 +100,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _list_artifact_paths() -> list[Path]:
-    root = _ensure_artifact_dir()
+    root = _ensure_artifacts_root_dir()
     return sorted(
         [p for p in root.glob("*.json") if not p.name.startswith("_")],
         key=lambda p: p.name,
@@ -97,7 +117,7 @@ def _iter_artifacts() -> list[dict[str, Any]]:
 
 
 def _recompute_latest() -> None:
-    latest_path = _ensure_artifact_dir() / "_latest.json"
+    latest_path = _ensure_artifacts_root_dir() / "_latest.json"
     artifacts = _iter_artifacts()
     if not artifacts:
         try:
@@ -111,7 +131,7 @@ def _recompute_latest() -> None:
 
 
 def _write_close_signal(payload: dict[str, Any]) -> None:
-    signal_path = _ensure_artifact_dir() / "_close_signal.json"
+    signal_path = _ensure_artifacts_root_dir() / "_close_signal.json"
     _write_json_atomic(signal_path, payload)
 
 
@@ -178,7 +198,7 @@ def create_artifact(
     }
 
     _write_json_atomic(path, artifact)
-    _write_json_atomic(_ensure_artifact_dir() / "_latest.json", artifact)
+    _write_json_atomic(_ensure_artifacts_root_dir() / "_latest.json", artifact)
 
     return json.dumps(
         {
@@ -201,7 +221,7 @@ def remove_artifact(tab_id: str, task_id: str | None = None) -> str:
     if not artifact_id:
         return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
 
-    root = _ensure_artifact_dir()
+    root = _ensure_artifacts_root_dir()
     target = root / f"{artifact_id}.json"
     now = time.time()
 
