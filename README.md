@@ -138,6 +138,34 @@ Useful flags:
 - `--skip-hermes-patch` if you do not want hermilinChat to patch the active Hermes install
 - `--service NAME` if your systemd service name isn’t `hermelin`
 
+## Uninstall / reset
+
+For rapid testing it is often useful to wipe the local venv + built frontend assets and stop the running service.
+
+Basic reset (stops service if it exists, removes `.venv/` + `hermelin/static/`):
+
+```bash
+./scripts/uninstall.sh --yes
+```
+
+Full purge (also removes Hermes cron jobs, deletes hermilinChat data in Hermes home, and undoes the Hermes patch):
+
+```bash
+./scripts/uninstall.sh \
+  --remove-service \
+  --remove-node-modules \
+  --remove-cronjobs \
+  --purge-data \
+  --unpatch-hermes \
+  --yes
+```
+
+Notes:
+- `--purge-data` deletes:
+  - `$HERMES_HOME/hermilin_meta.db` (+ `-wal`/`-shm`)
+  - `$HERMES_HOME/artifacts/`
+- It does NOT delete your Hermes `state.db` (sessions/messages).
+
 ## Hermes artifact tool patch
 
 The artifact panel UI depends on two Hermes tools that are not upstream yet:
