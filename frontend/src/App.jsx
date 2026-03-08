@@ -2930,10 +2930,16 @@ export default function App() {
 
       if (payload.type === 'artifact_close') {
         const info = payload.payload || {}
+
         if (info.action === 'close_all') {
+          // close_panel() semantics: hide the panel (like the user clicked X)
+          // and clear any in-memory tabs.
           applyArtifacts([], { openOnChange: false })
+          setArtifactPanelDismissed(true)
+          setArtifactPanelOpen(false)
           return true
         }
+
         const id = info.id || info.tab_id
         if (id) {
           const next = (artifactTabsRef.current || []).filter((item) => item.id !== id)

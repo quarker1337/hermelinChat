@@ -1297,9 +1297,34 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 if previous:
                     await websocket.send_text(_artifact_list_payload(previous))
 
+                # Optional control signal written by Hermes' close_panel tool.
+                close_signal_path = config.artifact_dir / "_close_signal.json"
+                close_signal_seen_ns = 0
+                try:
+                    close_signal_seen_ns = close_signal_path.stat().st_mtime_ns
+                except Exception:
+                    close_signal_seen_ns = 0
+
                 while True:
                     await asyncio.sleep(0.75)
                     current = _artifact_snapshot()
+
+                    # If close_panel() wrote a close_all signal, forward it so the UI can
+                    # actually hide the panel (not just remove tabs).
+                    try:
+                        ns = close_signal_path.stat().st_mtime_ns
+                        if ns and ns != close_signal_seen_ns:
+                            close_signal_seen_ns = ns
+                            try:
+                                sig = json.loads(close_signal_path.read_text(encoding="utf-8"))
+                            except Exception:
+                                sig = None
+                            if isinstance(sig, dict) and sig.get("action") == "close_all":
+                                await websocket.send_text(json.dumps({"type": "artifact_close", "payload": sig}, ensure_ascii=False))
+                    except FileNotFoundError:
+                        pass
+                    except Exception:
+                        pass
 
                     for artifact_id in sorted(previous.keys() - current.keys()):
                         await websocket.send_text(_artifact_close_payload(artifact_id))

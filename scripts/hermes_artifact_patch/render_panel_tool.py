@@ -177,38 +177,52 @@ def render_panel(
 
 
 def close_panel(tab_id: str = "", task_id: str | None = None) -> str:
-    """Close one artifact tab or all artifacts for the current task."""
+    """Close one artifact tab, or close the whole panel.
+
+    Notes:
+    - If tab_id is provided: remove that artifact file.
+    - If tab_id is omitted/empty: remove *all* artifacts (panel reset) and emit a close signal.
+
+    We intentionally do NOT scope this to Hermes "task_id" because task IDs can change between
+    consecutive user turns, which makes "close_panel()" appear to do nothing.
+    """
+
     root = _ensure_artifact_dir()
     requested_id = _sanitize_artifact_id(tab_id)
     now = time.time()
 
     if requested_id:
         target = root / f"{requested_id}.json"
-        removed = False
+
+        if not target.exists():
+            return json.dumps(
+                {"status": "not_found", "tab_id": requested_id, "removed": False},
+                ensure_ascii=False,
+            )
+
         try:
-            if target.exists():
-                target.unlink()
-                removed = True
+            target.unlink()
         except OSError as exc:
             return json.dumps({"error": f"Failed to remove artifact '{requested_id}': {exc}"}, ensure_ascii=False)
 
         _recompute_latest()
+
+        # Optional: allow UI to react immediately (server may choose to forward this).
         _write_close_signal({
             "action": "close",
             "id": requested_id,
             "task_id": task_id,
             "timestamp": now,
         })
-        return json.dumps({"status": "closed", "tab_id": requested_id, "removed": removed}, ensure_ascii=False)
+
+        return json.dumps({"status": "closed", "tab_id": requested_id, "removed": True}, ensure_ascii=False)
 
     removed_ids: list[str] = []
     for path in _list_artifact_paths():
         payload = _read_json(path)
         if not isinstance(payload, dict):
             continue
-        payload_task_id = payload.get("task_id")
-        if task_id and payload_task_id and payload_task_id != task_id:
-            continue
+
         try:
             path.unlink(missing_ok=True)
             artifact_id = payload.get("id")
@@ -218,12 +232,15 @@ def close_panel(tab_id: str = "", task_id: str | None = None) -> str:
             continue
 
     _recompute_latest()
+
+    # Always emit close_all even if no artifacts existed (lets UI close the empty-state panel).
     _write_close_signal({
         "action": "close_all",
         "task_id": task_id,
         "artifact_ids": removed_ids,
         "timestamp": now,
     })
+
     return json.dumps({"status": "panel_closed", "artifact_ids": removed_ids}, ensure_ascii=False)
 
 
