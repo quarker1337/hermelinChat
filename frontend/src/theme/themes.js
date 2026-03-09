@@ -1,5 +1,7 @@
 import HERMILIN_NOT_FLIPPED_RAW from '../assets/hermilin-not-flipped.svg?raw'
 import STOUT_MASCOT_RAW from '../assets/stout-mascot.svg?raw'
+import MATRIX_SKULL_RAW from '../assets/matrix-skull.svg?raw'
+import WHITE_RABBIT_RAW from '../assets/white-rabbit.svg?raw'
 
 export const DEFAULT_THEME_ID = 'hermilin'
 
@@ -50,40 +52,49 @@ export const THEMES = {
 
   matrix: {
     id: 'matrix',
-    label: 'Matrix (emerald)',
+    label: 'Matrix (rabbit)',
     AMBER: {
       // Keep the token name AMBER for compatibility; in this theme it represents the accent scale.
-      300: '#a7f3d0',
-      400: '#34d399',
-      500: '#10b981',
-      600: '#059669',
-      700: '#047857',
-      800: '#065f46',
-      900: '#064e3b',
+      300: '#b7ffd6',
+      400: '#4dffa1',
+      500: '#2da565',
+      600: '#248a53',
+      700: '#1a6b3f',
+      800: '#114d2c',
+      900: '#0a3019',
     },
     SLATE: {
-      bg: '#060a08',
-      surface: '#0a120e',
-      elevated: '#0f1a14',
-      border: '#1a2a22',
-      muted: '#4b5f57',
-      text: '#b7d6c9',
-      textBright: '#e6fff3',
-      accent: '#34d399',
+      bg: '#0c0f0e',
+      surface: '#111514',
+      elevated: '#1a201f',
+      border: '#2a3533',
+      muted: '#5a6f6a',
+      text: '#c8d8d3',
+      textBright: '#e8f0ec',
+      accent: '#4dffa1',
       danger: '#fb7185',
-      success: '#34d399',
+      success: '#4dffa1',
       info: '#60a5fa',
       purple: '#a78bfa',
       cyan: '#22d3ee',
+      yellow: '#f5e642',
     },
     icons: {
-      faviconHref: '/favicon-matrix.svg',
-      topbarSvgRaw: HERMILIN_NOT_FLIPPED_RAW,
-      alignmentSvgRaw: STOUT_MASCOT_RAW,
-      alignmentTitle: 'the stout knows…',
+      faviconHref: '/favicon-skull.svg',
+      topbarSvgRaw: MATRIX_SKULL_RAW,
+      alignmentSvgRaw: WHITE_RABBIT_RAW,
+      alignmentTitle: 'follow the white rabbit...',
     },
     background: {
       kind: 'matrix-rain',
+      matrixRain: {
+        colWidth: 14,
+        fontSize: 12,
+        fadeAlpha: 0.04,
+        opacity: 0.3,
+        speedBase: 0.3,
+        speedJitter: 0.25,
+      },
       overlay: { kind: 'scanlines', opacity: 0.06 },
     },
   },

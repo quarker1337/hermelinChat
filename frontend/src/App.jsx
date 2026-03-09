@@ -366,19 +366,37 @@ const GrainOverlay = ({ opacity = 0.03 }) => (
 )
 
 // ─── MATRIX RAIN FIELD ───────────────────────────────────────────────
-const MatrixRainField = ({ intensity = 50 }) => {
+const MatrixRainField = ({ intensity = 50, config }) => {
   const canvasRef = useRef(null)
 
   const pct = clampNum(intensity, 0, 100)
-  // 75 == "normal" speed
+  // 75 == "normal" intensity
   const factor = pct / 75
-  const canvasOpacity = clampNum(0.22 + 0.28 * factor, 0, 1)
 
-  const accentHex = AMBER[400] || '#34d399'
-  const accentRgb = hexToRgb(accentHex) || { r: 52, g: 211, b: 153 }
+  const cfg = config && typeof config === 'object' ? config : {}
 
-  const bgHex = SLATE.bg || '#060a08'
-  const bgRgb = hexToRgb(bgHex) || { r: 6, g: 10, b: 8 }
+  const colWidth = clampNum(cfg.colWidth ?? 14, 8, 32)
+  const fontSize = clampNum(cfg.fontSize ?? 12, 8, 24)
+  const fadeAlpha = clampNum(cfg.fadeAlpha ?? 0.04, 0.01, 0.2)
+  const baseOpacity = clampNum(cfg.opacity ?? 0.3, 0, 1)
+  const canvasOpacity = clampNum(baseOpacity * factor, 0, 1)
+
+  const speedBase = clampNum(cfg.speedBase ?? 0.3, 0.01, 5)
+  const speedJitter = clampNum(cfg.speedJitter ?? 0.25, 0, 5)
+
+  const brightHex = AMBER[400] || '#4dffa1'
+  const midHex = AMBER[500] || brightHex
+  const dimHex = AMBER[700] || midHex
+
+  const bright = hexToRgb(brightHex) || { r: 77, g: 255, b: 161 }
+  const mid = hexToRgb(midHex) || bright
+  const dim = hexToRgb(dimHex) || mid
+
+  const bgHex = SLATE.bg || '#0c0f0e'
+  const bgRgb = hexToRgb(bgHex) || { r: 12, g: 15, b: 14 }
+
+  const chars =
+    'アウエオカキクケコサシスセソタチツテトナニネノハヒフヘホマミムメモヤユヨラリルレロワン01234589ABCDEF'
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -394,19 +412,15 @@ const MatrixRainField = ({ intensity = 50 }) => {
     let animId
     let drops = []
     let columns = 0
-    let fontSize = 14
-
-    // Simple mix of ascii + katakana for the vibe.
-    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzアイウエオカキクケコサシスセソタチツテト'
 
     const init = () => {
       canvas.width = canvas.parentElement?.offsetWidth || 800
       canvas.height = canvas.parentElement?.offsetHeight || 600
 
-      // Higher intensity = slightly larger glyphs + faster drops.
-      fontSize = Math.max(10, Math.min(18, Math.round(11 + (pct / 100) * 7)))
-      columns = Math.max(1, Math.floor(canvas.width / fontSize))
-      drops = Array.from({ length: columns }, () => Math.random() * (canvas.height / fontSize))
+      columns = Math.max(1, Math.floor(canvas.width / colWidth))
+      drops = Array(columns)
+        .fill(0)
+        .map(() => Math.random() * -80)
 
       ctx.font = `${fontSize}px 'JetBrains Mono', monospace`
       ctx.textBaseline = 'top'
@@ -419,24 +433,32 @@ const MatrixRainField = ({ intensity = 50 }) => {
       last = ts
 
       // Fade to background (creates trails).
-      ctx.fillStyle = `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},0.08)`
+      ctx.fillStyle = `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},${fadeAlpha})`
       ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-      ctx.fillStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0.85)`
-
-      const speed = Math.max(0.25, 0.9 * factor) * (dt / 16)
+      const step = (dt / 16) * factor
 
       for (let i = 0; i < drops.length; i++) {
-        const ch = chars[Math.floor(Math.random() * chars.length)]
-        const x = i * fontSize
-        const y = drops[i] * fontSize
+        const c = chars[Math.floor(Math.random() * chars.length)]
+        const b = Math.random()
 
-        ctx.fillText(ch, x, y)
+        if (b > 0.96) {
+          ctx.fillStyle = `rgba(${bright.r},${bright.g},${bright.b},0.5)`
+        } else if (b > 0.85) {
+          ctx.fillStyle = `rgba(${mid.r},${mid.g},${mid.b},0.18)`
+        } else {
+          ctx.fillStyle = `rgba(${dim.r},${dim.g},${dim.b},0.08)`
+        }
 
-        if (y > canvas.height && Math.random() > 0.975) {
+        const x = i * colWidth
+        const y = drops[i] * colWidth
+
+        ctx.fillText(c, x, y)
+
+        if (y > canvas.height && Math.random() > 0.98) {
           drops[i] = 0
         } else {
-          drops[i] += speed
+          drops[i] += (speedBase + Math.random() * speedJitter) * step
         }
       }
 
@@ -451,7 +473,34 @@ const MatrixRainField = ({ intensity = 50 }) => {
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
     }
-  }, [pct, factor, accentRgb.r, accentRgb.g, accentRgb.b, bgRgb.r, bgRgb.g, bgRgb.b])
+  }, [
+    colWidth,
+    fontSize,
+    fadeAlpha,
+    factor,
+    speedBase,
+    speedJitter,
+
+    brightHex,
+    bright.r,
+    bright.g,
+    bright.b,
+
+    midHex,
+    mid.r,
+    mid.g,
+    mid.b,
+
+    dimHex,
+    dim.r,
+    dim.g,
+    dim.b,
+
+    bgHex,
+    bgRgb.r,
+    bgRgb.g,
+    bgRgb.b,
+  ])
 
   return (
     <canvas
@@ -3966,7 +4015,7 @@ export default function App() {
       >
         {uiPrefs.particles.enabled && uiPrefs.particles.intensity > 0 && (
           activeTheme?.background?.kind === 'matrix-rain' ? (
-            <MatrixRainField intensity={uiPrefs.particles.intensity} />
+            <MatrixRainField intensity={uiPrefs.particles.intensity} config={activeTheme?.background?.matrixRain} />
           ) : (
             <ParticleField intensity={uiPrefs.particles.intensity} />
           )
