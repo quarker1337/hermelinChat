@@ -1103,6 +1103,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         themefile: str | None = None
         if ui_theme == "hermilin":
             themefile = "hermiline.yaml"
+        elif ui_theme == "matrix":
+            themefile = "matrix-hans.yaml"
 
         # Only append if the caller didn't already specify a theme in the command.
         if themefile and ("--theme" not in argv and "--themefile" not in argv):
