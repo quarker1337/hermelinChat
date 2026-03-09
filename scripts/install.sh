@@ -17,6 +17,7 @@ SERVICE_MODE="system"  # system|user
 SKIP_FRONTEND=0
 SKIP_PYTHON=0
 SKIP_HERMES_PATCH=0
+SKIP_HERMES_THEMES=0
 
 usage() {
   cat <<EOF
@@ -42,6 +43,7 @@ Options:
   --skip-frontend        Skip npm install/build (NOT recommended; UI will 404 on /)
   --skip-python          Skip pip install -e .
   --skip-hermes-patch    Skip patching the active Hermes installation with artifact tools
+  --skip-hermes-themes   Skip patching Hermes CLI with theme system + installing themes
 
   -y, --yes              Do not prompt for confirmation
   -h, --help             Show help
@@ -106,6 +108,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-hermes-patch)
       SKIP_HERMES_PATCH=1
+      shift
+      ;;
+    --skip-hermes-themes)
+      SKIP_HERMES_THEMES=1
       shift
       ;;
 
@@ -259,6 +265,9 @@ if [[ "$SKIP_PYTHON" -eq 1 ]]; then
 fi
 if [[ "$SKIP_HERMES_PATCH" -eq 1 ]]; then
   UPDATE_ARGS+=("--skip-hermes-patch")
+fi
+if [[ "$SKIP_HERMES_THEMES" -eq 1 ]]; then
+  UPDATE_ARGS+=("--skip-hermes-themes")
 fi
 
 "$SELF_DIR/update.sh" "${UPDATE_ARGS[@]}"

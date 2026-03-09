@@ -1,0 +1,126 @@
+# hermiline.yaml — hermilinChat amber/slate theme for Hermes Agent
+#
+# After running scripts/install_hermes_themes.py, use this theme via:
+#   hermes --theme hermiline.yaml         # (or: --themefile)
+#
+# Or make it the default:
+#   cp hermiline.yaml $HERMES_HOME/theme.yaml
+#
+# Or drop it in:
+#   $HERMES_HOME/themes/hermiline.yaml
+#   hermes --theme hermiline.yaml         # auto-found in $HERMES_HOME/themes/
+#
+# All fields are optional — anything omitted falls back to the baked-in default.
+# Colour placeholders like {primary} are interpolated from the "colors" section.
+
+meta:
+  name: hermiline
+  description: "hermilinChat amber/slate theme"
+
+# ─── Rich markup hex colours ──────────────────────────────────────────
+colors:
+  primary:      "#f5b731"    # HERMELIN_AMBER_400 — main accent
+  secondary:    "#9a6c12"    # HERMELIN_AMBER_700
+  tertiary:     "#3d2a08"    # HERMELIN_AMBER_900
+  text:         "#b8b8cc"    # HERMELIN_SLATE_TEXT
+  text_bright:  "#e8e8f0"    # HERMELIN_SLATE_TEXT_BRIGHT
+  muted:        "#55556a"    # HERMELIN_SLATE_MUTED
+  border:       "#232330"    # HERMELIN_SLATE_BORDER
+  surface:      "#0e0e12"    # HERMELIN_SLATE_SURFACE
+  background:   "#08080a"    # HERMELIN_SLATE_BG
+  session:      "#55556a"
+  success:      "#38c878"
+  danger:       "#e84057"
+
+# ─── ANSI escape codes (conversation renderer, response boxes) ────────
+ansi:
+  accent: "\x1b[38;2;245;183;49m"   # truecolor #f5b731
+  bold:   "\x1b[1m"
+  dim:    "\x1b[2m"
+  reset:  "\x1b[0m"
+  muted:  "\x1b[38;2;85;85;106m"    # truecolor #55556a — response box borders
+
+# ─── Branding text ────────────────────────────────────────────────────
+branding:
+  product_name:     hermilinChat
+  org_name:         Nous Research
+  tagline:          "Hermes Agent Terminal"
+  compact_tagline:  "Hermes Agent Terminal"
+  compact_symbol:   "⚕"
+  compact_label:    hermilinChat
+  panel_title:      hermilinChat
+  response_label:   " ⚕ Hermes "
+  goodbye:          "Goodbye! ⚕"
+  welcome:          "Welcome to hermilinChat! Type your message or /help for commands."
+
+# ─── ASCII art: large logo (terminal >= 95 cols) ─────────────────────
+logo_large: |
+  [bold {primary}]██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗██╗     ██╗███╗   ██╗       █████╗  ██████╗ ███████╗███╗   ██╗████████╗[/]
+  [bold {primary}]██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██║     ██║████╗  ██║      ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝[/]
+  [bold {primary}]███████║█████╗  ██████╔╝██╔████╔██║█████╗  ██║     ██║██╔██╗ ██║█████╗███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   [/]
+  [bold {primary}]██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ██║     ██║██║╚██╗██║╚════╝██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   [/]
+  [bold {primary}]██║  ██║███████╗██║  ██║██║ ╚═╝ ██║███████╗███████╗██║██║ ╚████║      ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   [/]
+  [bold {primary}]╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝╚═╝╚═╝  ╚═══╝      ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   [/]
+
+# ─── ASCII art: medium logo (terminal 75-94 cols) ────────────────────
+logo_medium: |
+  [bold {primary}]██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗██╗     ██╗███╗   ██╗[/]
+  [bold {primary}]██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██║     ██║████╗  ██║[/]
+  [bold {primary}]███████║█████╗  ██████╔╝██╔████╔██║█████╗  ██║     ██║██╔██╗ ██║[/]
+  [bold {primary}]██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ██║     ██║██║╚██╗██║[/]
+  [bold {primary}]██║  ██║███████╗██║  ██║██║ ╚═╝ ██║███████╗███████╗██║██║ ╚████║[/]
+  [bold {primary}]╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝╚═╝╚═╝  ╚═══╝[/]
+
+# ─── ASCII art: small logo (< 75 cols / compact mode) ────────────────
+logo_small: |
+  [bold {primary}] _   _                          _ _       [/]
+  [bold {primary}]| | | |                        | (_)      [/]
+  [bold {primary}]| |_| | ___ _ __ _ __ ___   ___| |_ _ __  [/]
+  [bold {primary}]|  _  |/ _ \ '__| '_ ` _ \ / _ \ | | '_ \ [/]
+  [bold {primary}]| | | |  __/ |  | | | | | |  __/ | | | | |[/]
+  [bold {primary}]\_| |_/\___|_|  |_| |_| |_|\___|_|_|_| |_|[/]
+
+# ─── Caduceus / icon art (left panel in the welcome banner) ──────────
+# This is the hermelin stoat/ermine mascot instead of the caduceus
+caduceus: |
+  [{primary}]⠀⠀⠀⠀⢀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡀⠀⠀⠀⠀[/]
+  [{primary}]⠀⠀⢀⣿⠛⠻⢷⣦⣄⢤⣴⣶⣶⣶⣶⣶⣦⣤⣤⣴⣾⠿⠛⢻⣇⠀⠀⠀[/]
+  [{primary}]⠀⠀⢸⡇⠀⠀⠀⢙⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣅⠀⠀⠀⣿⠀⠀⠀[/]
+  [{primary}]⠀⠀⠈⣿⡀⣤⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⡄⢠⡟⠀⠀⠀[/]
+  [{primary}]⠀⠀⠀⠘⣷⣿⣿⣿⠟⠛⠻⣿⣿⣿⣿⣿⣿⡿⠛⠛⢿⣿⣿⣾⠁⠀⠀⠀[/]
+  [{primary}]⠀⠀⠀⠀⣨⣿⣿⣿⡀⠀⠀⢸⣿⣿⣿⣿⣿⠀⠀⠀⣸⣿⣿⣿⠀⠀⠀⠀[/]
+  [{primary}]⠀⠀⠀⠀⠹⣿⣿⣿⣿⣿⣿⣿⡿⠟⠛⠻⢿⣿⣿⣿⣿⣿⡿⠃⠀⠀⠀⠀[/]
+  [{primary}]⠀⠀⠀⠀⠀⠈⠉⢛⣿⣿⣿⣿⣄⠀⠀⠀⣰⣿⣿⣿⣟⠉⠀⠀⠀⠀⠀⠀[/]
+  [{primary}]⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⠛⠿⠿⠛⠀⠛⠿⠟⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀[/]
+
+# ─── prompt_toolkit style overrides (input area, menus, dialogs) ──────
+pt_styles:
+  input-area:                            "#b8b8cc"
+  placeholder:                           "#555555 italic"
+  prompt:                                "#b8b8cc"
+  prompt-working:                        "#888888 italic"
+  hint:                                  "#555555 italic"
+  input-rule:                            "#232330"
+  image-badge:                           "#87CEEB bold"
+  completion-menu:                       "bg:#0e0e12 #b8b8cc"
+  completion-menu.completion:            "bg:#0e0e12 #b8b8cc"
+  completion-menu.completion.current:    "bg:#232330 #f5b731"
+  completion-menu.meta.completion:       "bg:#0e0e12 #888888"
+  completion-menu.meta.completion.current: "bg:#232330 #9a6c12"
+  clarify-border:                        "#232330"
+  clarify-title:                         "#f5b731 bold"
+  clarify-question:                      "#b8b8cc bold"
+  clarify-choice:                        "#AAAAAA"
+  clarify-selected:                      "#f5b731 bold"
+  clarify-active-other:                  "#f5b731 italic"
+  clarify-countdown:                     "#9a6c12"
+  sudo-prompt:                           "#e84057 bold"
+  sudo-border:                           "#232330"
+  sudo-title:                            "#e84057 bold"
+  sudo-text:                             "#b8b8cc"
+  approval-border:                       "#232330"
+  approval-title:                        "#f5b731 bold"
+  approval-desc:                         "#b8b8cc bold"
+  approval-cmd:                          "#AAAAAA italic"
+  approval-choice:                       "#AAAAAA"
+  approval-selected:                     "#f5b731 bold"
