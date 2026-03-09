@@ -782,6 +782,57 @@ def patch_cli(cli_path: str, theme: dict, hermes_home: Path | None = None, dry_r
         text = text[:func_start] + helper_part + body_part + text[func_end:]
         changes.append("Replaced hardcoded colours in build_welcome_banner()")
 
+    # ── 5b. Rewrite embedded Rich markup colours inside build_welcome_banner ─
+    # The banner contains lots of inline markup like "[dim #B8860B]...".
+    # Earlier patch versions only replaced *standalone* hex strings ("#FFD700"),
+    # which leaves the banner looking gold even under a green theme.
+    if "def build_welcome_banner" in text:
+        theme_markup_helper = (
+            '    def _theme_markup(s: str) -> str:\n'
+            '        if not _HERMES_ACTIVE_THEME:\n'
+            '            return s\n'
+            '        for _a, _b in (\n'
+            '            ("#FFD700", _C_PRI),\n'
+            '            ("#FFBF00", _C_SEC),\n'
+            '            ("#CD7F32", _C_TER),\n'
+            '            ("#FFF8DC", _C_TXT),\n'
+            '            ("#B8860B", _C_MUT),\n'
+            '            ("#8B8682", _C_SES),\n'
+            '        ):\n'
+            '            try:\n'
+            '                s = s.replace(_a, _b)\n'
+            '            except Exception:\n'
+            '                pass\n'
+            '        return s\n'
+            '\n'
+        )
+
+        # Insert helper right after our colour lookup block.
+        if "def _theme_markup" not in text and "# ── Theme-aware colour lookup" in text:
+            anchor = '_ORG = _tb.get("org_name", "Nous Research")\n'
+            if anchor in text:
+                text = text.replace(anchor, anchor + theme_markup_helper, 1)
+                changes.append("Added _theme_markup() helper to build_welcome_banner()")
+
+        # Apply helper to the joined banner strings.
+        text = text.replace(
+            'left_content = "\\n".join(left_lines)',
+            'left_content = _theme_markup("\\n".join(left_lines))',
+        )
+        text = text.replace(
+            'right_content = "\\n".join(right_lines)',
+            'right_content = _theme_markup("\\n".join(right_lines))',
+        )
+
+        # Make the outer panel title use theme branding + theme colours.
+        text = text.replace(
+            'title=f"[bold #FFD700]Hermes Agent {VERSION}[/]",',
+            'title=_theme_markup(f"[bold #FFD700]{_PANEL_TITLE} {VERSION}[/]"),',
+        )
+
+        # Let org_name come from the theme.
+        text = text.replace('Nous Research[/]",', '{_ORG}[/]",')
+
     # ── 6. Patch the response box to use theme muted ANSI ──────────────
     # The response box uses _GOLD for its borders.  We add _THEME_MUTED_ANSI
     # so themes can use a different colour for the box vs the accent.

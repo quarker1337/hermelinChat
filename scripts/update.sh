@@ -157,7 +157,7 @@ if [[ "$SKIP_HERMES_THEMES" -eq 0 ]]; then
     echo "ERROR: python3 not found (needed for Hermes theme installer)." >&2
     exit 1
   fi
-  python3 scripts/install_hermes_themes.py --auto
+  python3 scripts/install_hermes_themes.py --auto --force-theme-install
 fi
 
 if [[ "$SKIP_FRONTEND" -eq 0 ]]; then
