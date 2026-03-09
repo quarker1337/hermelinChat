@@ -92,10 +92,20 @@ export const THEMES = {
         fontSize: 12,
         fadeAlpha: 0.04,
         opacity: 0.3,
+
+        // Throttle draws so the animation doesn't smear at low speeds.
+        frameMs: 50,
+
         // Slower fall speed so the effect feels ambient, not distracting.
         // Units are roughly "cells per frame" scaled by dt/16 inside MatrixRainField.
         speedBase: 0.025,
         speedJitter: 0.03,
+
+        // A little "glitch" red, per matrix_effect.js reference.
+        redChance: 0.18,
+
+        // When a column is past the bottom, chance per draw to reset back to the top.
+        resetChance: 0.985,
       },
       overlay: { kind: 'scanlines', opacity: 0.06 },
     },

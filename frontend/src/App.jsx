@@ -384,6 +384,20 @@ const MatrixRainField = ({ intensity = 50, config }) => {
   const speedBase = clampNum(cfg.speedBase ?? 0.3, 0.01, 5)
   const speedJitter = clampNum(cfg.speedJitter ?? 0.25, 0, 5)
 
+  // Optional throttling + palette tweaks (see matrix_effect.js reference)
+  const frameMs = clampNum(cfg.frameMs ?? 0, 0, 250)
+  const redChance = clampNum(cfg.redChance ?? 0, 0, 1)
+  // When a drop is past the bottom, chance (per draw) to reset it back to the top.
+  const resetChance = clampNum(cfg.resetChance ?? 0.98, 0, 1)
+
+  const redBrightHex = cfg.redBright ?? '#ff4d4d'
+  const redMidHex = cfg.redMid ?? '#cc2a2a'
+  const redDimHex = cfg.redDim ?? '#7a1616'
+
+  const redBright = hexToRgb(redBrightHex) || { r: 255, g: 77, b: 77 }
+  const redMid = hexToRgb(redMidHex) || redBright
+  const redDim = hexToRgb(redDimHex) || redMid
+
   const brightHex = AMBER[400] || '#4dffa1'
   const midHex = AMBER[500] || brightHex
   const dimHex = AMBER[700] || midHex
@@ -412,9 +426,7 @@ const MatrixRainField = ({ intensity = 50, config }) => {
     let animId
     let drops = []
     let columns = 0
-    let glyphs = []
-    let tones = []
-    let lastCells = []
+    let lastDraw = 0
 
     const init = () => {
       canvas.width = canvas.parentElement?.offsetWidth || 800
@@ -425,23 +437,18 @@ const MatrixRainField = ({ intensity = 50, config }) => {
         .fill(0)
         .map(() => Math.random() * -80)
 
-      // Cache glyphs + tone per column so we don't redraw a different character every frame
-      // (which can smear into a solid line when speed is slow).
-      glyphs = Array(columns)
-        .fill(0)
-        .map(() => chars[Math.floor(Math.random() * chars.length)])
-      tones = Array(columns).fill(0).map(() => Math.random())
-      lastCells = drops.map((d) => Math.floor(d))
-
-      ctx.font = `${fontSize}px 'JetBrains Mono', monospace`
+      ctx.font = `${fontSize}px monospace`
       ctx.textBaseline = 'top'
     }
 
-    let last = 0
-
     const draw = (ts) => {
-      const dt = last ? Math.min(64, ts - last) : 16
-      last = ts
+      animId = requestAnimationFrame(draw)
+
+      // Throttle draws (prevents smear when speed is low).
+      if (frameMs > 0 && lastDraw && ts - lastDraw < frameMs) return
+
+      const dt = lastDraw ? Math.min(200, ts - lastDraw) : 16
+      lastDraw = ts
 
       // Fade to background (creates trails).
       ctx.fillStyle = `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},${fadeAlpha})`
@@ -450,41 +457,39 @@ const MatrixRainField = ({ intensity = 50, config }) => {
       const step = (dt / 16) * factor
 
       for (let i = 0; i < drops.length; i++) {
-        const cell = Math.floor(drops[i])
+        const c = chars[Math.floor(Math.random() * chars.length)]
+        const b = Math.random()
+        const isRed = redChance > 0 && Math.random() < redChance
 
-        // Only change the glyph when we move to the next "row".
-        // This avoids high-frequency flicker and prevents the slow rain from smearing into a solid line.
-        if (cell !== lastCells[i]) {
-          glyphs[i] = chars[Math.floor(Math.random() * chars.length)]
-          tones[i] = Math.random()
-          lastCells[i] = cell
-        }
-
-        const c = glyphs[i]
-        const b = tones[i] ?? 0
-
-        if (b > 0.96) {
-          ctx.fillStyle = `rgba(${bright.r},${bright.g},${bright.b},0.5)`
-        } else if (b > 0.85) {
-          ctx.fillStyle = `rgba(${mid.r},${mid.g},${mid.b},0.18)`
+        if (isRed) {
+          if (b > 0.96) {
+            ctx.fillStyle = `rgba(${redBright.r},${redBright.g},${redBright.b},0.5)`
+          } else if (b > 0.85) {
+            ctx.fillStyle = `rgba(${redMid.r},${redMid.g},${redMid.b},0.18)`
+          } else {
+            ctx.fillStyle = `rgba(${redDim.r},${redDim.g},${redDim.b},0.08)`
+          }
         } else {
-          ctx.fillStyle = `rgba(${dim.r},${dim.g},${dim.b},0.08)`
+          if (b > 0.96) {
+            ctx.fillStyle = `rgba(${bright.r},${bright.g},${bright.b},0.5)`
+          } else if (b > 0.85) {
+            ctx.fillStyle = `rgba(${mid.r},${mid.g},${mid.b},0.18)`
+          } else {
+            ctx.fillStyle = `rgba(${dim.r},${dim.g},${dim.b},0.08)`
+          }
         }
 
         const x = i * colWidth
-        const y = cell * colWidth
+        const y = drops[i] * colWidth
 
         ctx.fillText(c, x, y)
 
-        if (y > canvas.height && Math.random() > 0.98) {
+        if (y > canvas.height && Math.random() > resetChance) {
           drops[i] = 0
-          lastCells[i] = null
         } else {
           drops[i] += (speedBase + Math.random() * speedJitter) * step
         }
       }
-
-      animId = requestAnimationFrame(draw)
     }
 
     init()
@@ -502,6 +507,24 @@ const MatrixRainField = ({ intensity = 50, config }) => {
     factor,
     speedBase,
     speedJitter,
+    frameMs,
+    redChance,
+    resetChance,
+
+    redBrightHex,
+    redBright.r,
+    redBright.g,
+    redBright.b,
+
+    redMidHex,
+    redMid.r,
+    redMid.g,
+    redMid.b,
+
+    redDimHex,
+    redDim.r,
+    redDim.g,
+    redDim.b,
 
     brightHex,
     bright.r,
