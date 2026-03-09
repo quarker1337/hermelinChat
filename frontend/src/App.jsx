@@ -21,6 +21,8 @@ const HERMILINCHAT_VERSION = '0.12'
 
 const DEFAULT_UI_PREFS = {
   theme: DEFAULT_THEME_ID,
+  // Displayed in the sidebar header + browser tab title. (Empty => fallback)
+  appName: 'hermilinChat',
   particles: {
     enabled: true,
     // 50..100 (50 matches the old look)
@@ -55,8 +57,16 @@ function normalizeUiPrefs(raw) {
 
   const theme = normalizeThemeId(r.theme ?? DEFAULT_UI_PREFS.theme)
 
+  const appNameRaw = r.appName
+  // Keep empty string (means "use default") to make text editing ergonomic.
+  const appName =
+    appNameRaw === undefined || appNameRaw === null
+      ? DEFAULT_UI_PREFS.appName
+      : String(appNameRaw).slice(0, 64)
+
   return {
     theme,
+    appName: appName.trim(),
     particles: {
       enabled: p.enabled === undefined ? DEFAULT_UI_PREFS.particles.enabled : !!p.enabled,
       intensity: clampNum(p.intensity ?? DEFAULT_UI_PREFS.particles.intensity, 50, 100),
@@ -2155,6 +2165,41 @@ const SettingsPanel = ({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>App name</div>
+              <div style={{ flex: 1 }} />
+              <input
+                type="text"
+                value={ui.appName}
+                placeholder={DEFAULT_UI_PREFS.appName}
+                maxLength={64}
+                onChange={(e) => {
+                  onUiPrefsChange?.((prev) => ({
+                    ...prev,
+                    appName: e.target.value,
+                  }))
+                }}
+                style={{
+                  width: 220,
+                  background: SLATE.elevated,
+                  border: `1px solid ${SLATE.border}`,
+                  color: SLATE.textBright,
+                  padding: '6px 8px',
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: 11,
+                  outline: 'none',
+                  borderRadius: 8,
+                }}
+              />
+            </div>
+
+            <div style={{ marginTop: 6, fontSize: 10, color: SLATE.muted, lineHeight: 1.4 }}>
+              Shown in the sidebar header and browser tab title. Leave empty to use{' '}
+              <span style={{ color: AMBER[500] }}>{DEFAULT_UI_PREFS.appName}</span>.
+            </div>
+
+            <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Theme</div>
               <div style={{ flex: 1 }} />
               <select
@@ -2791,6 +2836,11 @@ export default function App() {
     return THEMES[id] || THEMES[DEFAULT_THEME_ID]
   }, [uiPrefs.theme])
 
+  const appNameLabel = useMemo(() => {
+    const s = (uiPrefs.appName || '').toString().trim()
+    return s || DEFAULT_UI_PREFS.appName
+  }, [uiPrefs.appName])
+
   useEffect(() => {
     if (typeof document === 'undefined') return
 
@@ -2839,6 +2889,15 @@ export default function App() {
       // ignore
     }
   }, [activeTheme])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    try {
+      document.title = appNameLabel
+    } catch {
+      // ignore
+    }
+  }, [appNameLabel])
 
   const updateUiPrefs = useCallback((updater) => {
     setUiPrefs((prev) => {
@@ -3004,11 +3063,6 @@ export default function App() {
 
   useEffect(() => {
     refreshAuth()
-    try {
-      document.title = 'hermilinChat'
-    } catch {
-      // ignore
-    }
   }, [])
 
   useEffect(() => {
@@ -3648,6 +3702,7 @@ export default function App() {
         >
           {!sidebarCollapsed && (
             <div
+              title={appNameLabel}
               style={{
                 fontSize: 12,
                 fontWeight: 600,
@@ -3655,9 +3710,13 @@ export default function App() {
                 opacity: 0.68,
                 letterSpacing: '0.02em',
                 userSelect: 'none',
+                maxWidth: 200,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
             >
-              hermilinChat
+              {appNameLabel}
             </div>
           )}
 
