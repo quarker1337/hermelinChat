@@ -92,8 +92,10 @@ export const THEMES = {
         fontSize: 12,
         fadeAlpha: 0.04,
         opacity: 0.3,
-        speedBase: 0.3,
-        speedJitter: 0.25,
+        // Slower fall speed so the effect feels ambient, not distracting.
+        // Units are roughly "cells per frame" scaled by dt/16 inside MatrixRainField.
+        speedBase: 0.025,
+        speedJitter: 0.03,
       },
       overlay: { kind: 'scanlines', opacity: 0.06 },
     },
