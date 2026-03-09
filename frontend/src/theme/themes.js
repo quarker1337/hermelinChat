@@ -80,7 +80,16 @@ export const THEMES = {
       yellow: '#f5e642',
     },
     icons: {
-      faviconHref: '/favicon-skull.svg',
+      // Skull is great in the UI, but too thin for tiny favicons.
+      // Use the dedicated Hans favicon assets instead.
+      faviconHref: '/hans/hans-favicon.svg',
+      favicons: [
+        { rel: 'icon', type: 'image/svg+xml', sizes: 'any', href: '/hans/hans-favicon.svg' },
+        { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/hans/favicon-32x32.png' },
+        { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/hans/favicon-16x16.png' },
+        { rel: 'apple-touch-icon', sizes: '180x180', href: '/hans/apple-touch-icon-180x180.png' },
+      ],
+
       topbarSvgRaw: MATRIX_SKULL_RAW,
       topbarSize: 20,
       alignmentSvgRaw: WHITE_RABBIT_RAW,

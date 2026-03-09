@@ -2793,22 +2793,48 @@ export default function App() {
 
   useEffect(() => {
     if (typeof document === 'undefined') return
-    const href = activeTheme?.icons?.faviconHref || '/favicon.svg'
-    if (!href) return
 
     try {
-      let link =
+      const icons = activeTheme?.icons || {}
+      const desired =
+        Array.isArray(icons.favicons) && icons.favicons.length
+          ? icons.favicons
+          : [{ rel: 'icon', href: icons.faviconHref || '/favicon.svg' }]
+
+      const entries = desired.filter((e) => e && typeof e === 'object' && e.href)
+      if (!entries.length) return
+
+      // Remove any previous theme-managed icons.
+      document.querySelectorAll('link[data-hermilin-theme-icon="1"]').forEach((el) => el.remove())
+
+      const applyLink = (el, cfg) => {
+        el.setAttribute('data-hermilin-theme-icon', '1')
+        el.setAttribute('rel', cfg.rel || 'icon')
+        if (cfg.type) el.setAttribute('type', cfg.type)
+        else el.removeAttribute('type')
+        if (cfg.sizes) el.setAttribute('sizes', cfg.sizes)
+        else el.removeAttribute('sizes')
+        el.setAttribute('href', cfg.href)
+      }
+
+      // Reuse the existing <link rel="icon"> from index.html (first load) if present.
+      let base =
         document.querySelector('link[rel="icon"]') ||
         document.querySelector('link[rel="shortcut icon"]') ||
         document.querySelector('link[rel~="icon"]')
 
-      if (!link) {
-        link = document.createElement('link')
-        link.rel = 'icon'
-        document.head.appendChild(link)
+      if (!base) {
+        base = document.createElement('link')
+        document.head.appendChild(base)
       }
 
-      link.setAttribute('href', href)
+      applyLink(base, entries[0])
+
+      for (const cfg of entries.slice(1)) {
+        const el = document.createElement('link')
+        applyLink(el, cfg)
+        document.head.appendChild(el)
+      }
     } catch {
       // ignore
     }

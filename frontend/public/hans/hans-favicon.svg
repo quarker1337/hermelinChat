@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="50 34 136 136" stroke="none">
+  <defs>
+    <mask id="skull-mask">
+      <rect x="50" y="34" width="136" height="136" fill="black" />
+      <path d="M 116 50 L 76 70 L 66 100 L 66 133 L 76 140 L 73 153 L 93 163 L 103 186 L 133 186 L 143 163 L 163 153 L 160 140 L 170 133 L 170 100 L 156 66 Z" fill="white" />
+      <path d="M 76 118 L 78 116 L 94 116 L 97 118 L 100 118 L 108 126 L 108 132 L 105 134 L 105 138 L 97 143 L 92 135 L 86 135 L 78 127 L 78 122 Z" fill="black" />
+      <path d="M 160 116 L 162 118 L 160 122 L 160 127 L 152 135 L 146 135 L 143 138 L 143 143 L 141 143 L 138 143 L 132 138 L 132 134 L 130 132 L 130 126 L 134 122 L 138 118 L 144 116 Z" fill="black" />
+      <path d="M 116 133 L 120 133 L 123 136 L 123 143 L 126 146 L 126 153 L 120 160 L 116 160 L 110 153 L 110 146 L 113 143 L 113 136 Z" fill="black" />
+    </mask>
+  </defs>
+  <rect x="50" y="34" width="136" height="136" fill="rgb(16, 185, 129)" mask="url(#skull-mask)" />
+</svg>
