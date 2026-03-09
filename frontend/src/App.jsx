@@ -781,10 +781,12 @@ const SearchHitRow = ({ hit, active, onClick, showTimestamp = true }) => {
   )
 }
 
-const AlignmentEasterEgg = ({ toast, svgRaw, title }) => {
+const AlignmentEasterEgg = ({ toast, svgRaw, title, whisperText, fetchFromApi = true }) => {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState(false)
-  const [whisper, setWhisper] = useState('aligned to you…')
+
+  const baseWhisper = ((whisperText || '').toString().trim() || 'aligned to you…').slice(0, 80)
+  const [whisper, setWhisper] = useState(baseWhisper)
 
   const toastText = (toast?.text || '').toString().trim()
   const toastActive = !!toastText
@@ -799,17 +801,25 @@ const AlignmentEasterEgg = ({ toast, svgRaw, title }) => {
       if (!r.ok) throw new Error(`http ${r.status}`)
       const data = await r.json()
       const t = (data?.text || '').toString().trim()
-      setWhisper(t || 'aligned to you…')
+      setWhisper((t || baseWhisper || 'aligned to you…').slice(0, 80))
     } catch {
-      setWhisper('aligned to you…')
+      setWhisper((baseWhisper || 'aligned to you…').slice(0, 80))
     }
-  }, [])
+  }, [baseWhisper])
 
   useEffect(() => {
-    if (!open) return
-    setWhisper('…')
-    fetchWhisper()
-  }, [open, fetchWhisper])
+    if (!open) {
+      // Keep the default whisper in sync with theme changes.
+      setWhisper(baseWhisper)
+      return
+    }
+
+    // Always show the theme-appropriate whisper immediately.
+    setWhisper(baseWhisper)
+
+    // Optionally override with a server-provided whisper.
+    if (fetchFromApi) fetchWhisper()
+  }, [open, fetchWhisper, fetchFromApi, baseWhisper])
 
   return (
     <div
@@ -4238,6 +4248,8 @@ export default function App() {
                   toast={eggToast}
                   svgRaw={activeTheme?.icons?.alignmentSvgRaw}
                   title={activeTheme?.icons?.alignmentTitle}
+                  whisperText={activeTheme?.icons?.alignmentWhisperText}
+                  fetchFromApi={activeTheme?.icons?.alignmentFetchWhisper ?? true}
                 />
               </>
             ) : (

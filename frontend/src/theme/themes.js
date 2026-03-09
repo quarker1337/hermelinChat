@@ -43,6 +43,8 @@ export const THEMES = {
       // Bottom-right easter egg.
       alignmentSvgRaw: STOUT_MASCOT_RAW,
       alignmentTitle: 'the stout knows…',
+      alignmentWhisperText: 'aligned to you…',
+      alignmentFetchWhisper: true,
     },
     background: {
       kind: 'particles',
@@ -94,6 +96,8 @@ export const THEMES = {
       topbarSize: 20,
       alignmentSvgRaw: WHITE_RABBIT_RAW,
       alignmentTitle: 'follow the white rabbit...',
+      alignmentWhisperText: 'follow the white rabbit...',
+      alignmentFetchWhisper: false,
     },
     background: {
       kind: 'matrix-rain',
