@@ -2551,6 +2551,11 @@ export default function App() {
   const [connected, setConnected] = useState(false)
   const [newSessionStartedAt, setNewSessionStartedAt] = useState(null)
 
+  // When the user explicitly starts a new session, snapshot the current session IDs.
+  // This lets us reliably auto-highlight the *new* session once it shows up in /api/sessions,
+  // even if session-id detection from terminal output is delayed or missed.
+  const newSessionBaselineRef = useRef(null) // Set<string> | null
+
   // Keep some state in refs so callbacks passed to TerminalPane can stay stable
   // (and not cause a WS reconnect on every render).
   const ptyResumeIdRef = useRef(ptyResumeId)
@@ -2972,6 +2977,11 @@ export default function App() {
 
   const startNewSession = () => {
     if (!auth.authenticated) return
+
+    // Snapshot current session IDs so our "new session" auto-select logic won't
+    // accidentally re-select a recent previous session.
+    newSessionBaselineRef.current = new Set((sessions || []).map((s) => s?.id).filter(Boolean))
+
     setSearchQuery('')
     ptyResumeIdRef.current = null
     activeSessionIdRef.current = null
@@ -3127,8 +3137,11 @@ export default function App() {
   }, [ptyResumeId])
 
   // Once we know which session we're in, we no longer need the "new session started" timestamp.
+  // Also clear any baseline snapshot captured during an explicit "New session" action.
   useEffect(() => {
-    if (activeSessionId) setNewSessionStartedAt(null)
+    if (!activeSessionId) return
+    setNewSessionStartedAt(null)
+    newSessionBaselineRef.current = null
   }, [activeSessionId])
 
   const activeSessionMissing = useMemo(() => {
@@ -3204,8 +3217,13 @@ export default function App() {
         const list = data.sessions || []
         if (!cancelled) setSessions(list)
 
-        const candidate = list.find((s) => (s.started_at || 0) >= newSessionStartedAt - 10)
+        const baseline = newSessionBaselineRef.current
+        const candidate = baseline
+          ? list.find((s) => s?.id && !baseline.has(s.id))
+          : list.find((s) => (s.started_at || 0) >= newSessionStartedAt - 10)
+
         if (candidate?.id) {
+          activeSessionIdRef.current = candidate.id
           setActiveSessionId(candidate.id)
           if (timer) clearInterval(timer)
           return
