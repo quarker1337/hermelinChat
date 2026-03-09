@@ -2467,6 +2467,13 @@ function TerminalPane({
   const fitRef = useRef(null)
   const wsRef = useRef(null)
 
+  const [termReady, setTermReady] = useState(false)
+
+  const themeIdRef = useRef(themeId)
+  useEffect(() => {
+    themeIdRef.current = themeId
+  }, [themeId])
+
   const onSessionIdRef = useRef(onSessionId)
   useEffect(() => {
     onSessionIdRef.current = onSessionId
@@ -2482,111 +2489,163 @@ function TerminalPane({
     const container = containerRef.current
     if (!container) return
 
-    const term = new Terminal({
-      fontFamily: "'JetBrains Mono', monospace",
-      fontSize: 13,
-      lineHeight: 1,
-      letterSpacing: 0,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      cursorWidth: 1,
-      scrollback: 10000,
-      convertEol: true,
-      allowTransparency: true,
-      theme: {
-        // Transparent terminal so the ParticleField (and grain) can show through.
-        // NOTE: allowTransparency must be true for this to work.
-        background: 'rgba(0,0,0,0)',
-        foreground: SLATE.textBright,
-        cursor: AMBER[400],
-        selectionBackground: `${AMBER[700]}44`,
-      },
-    })
+    let disposed = false
 
-    // Windows Terminal-like clipboard shortcuts:
-    // - Ctrl/Cmd+C copies selection (when something is selected)
-    // - Ctrl/Cmd+V pastes (browser handles paste into xterm textarea)
-    const copyTextToClipboard = async (text) => {
-      const t = (text || '').toString()
-      if (!t) return
-
-      // Async Clipboard API (requires HTTPS or localhost)
+    const start = async () => {
+      // Wait for webfonts before opening xterm, otherwise it can measure the grid
+      // using fallback font metrics and keep subtly-wrong geometry.
       try {
-        if (window.isSecureContext && navigator?.clipboard?.writeText) {
-          await navigator.clipboard.writeText(t)
-          return
+        if (document?.fonts?.load) {
+          await document.fonts.load('13px "JetBrains Mono"')
+        }
+        if (document?.fonts?.ready) {
+          await document.fonts.ready
         }
       } catch {
         // ignore
       }
 
-      // Fallback for http://<ip>: execCommand('copy')
+      if (disposed) return
+
+      const term = new Terminal({
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 13,
+        lineHeight: 1,
+        letterSpacing: 0,
+        cursorBlink: true,
+        cursorStyle: 'bar',
+        cursorWidth: 1,
+        scrollback: 10000,
+        convertEol: true,
+        allowTransparency: true,
+        theme: {
+          // Transparent terminal so the ParticleField (and grain) can show through.
+          // NOTE: allowTransparency must be true for this to work.
+          background: 'rgba(0,0,0,0)',
+          foreground: SLATE.textBright,
+          cursor: AMBER[400],
+          selectionBackground: `${AMBER[700]}44`,
+        },
+      })
+
+      // Windows Terminal-like clipboard shortcuts:
+      // - Ctrl/Cmd+C copies selection (when something is selected)
+      // - Ctrl/Cmd+V pastes (browser handles paste into xterm textarea)
+      const copyTextToClipboard = async (text) => {
+        const t = (text || '').toString()
+        if (!t) return
+
+        // Async Clipboard API (requires HTTPS or localhost)
+        try {
+          if (window.isSecureContext && navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(t)
+            return
+          }
+        } catch {
+          // ignore
+        }
+
+        // Fallback for http://<ip>: execCommand('copy')
+        try {
+          const ta = document.createElement('textarea')
+          ta.value = t
+          ta.setAttribute('readonly', 'true')
+          ta.style.position = 'fixed'
+          ta.style.opacity = '0'
+          ta.style.left = '-9999px'
+          ta.style.top = '-9999px'
+          document.body.appendChild(ta)
+          ta.focus()
+          ta.select()
+          document.execCommand('copy')
+          document.body.removeChild(ta)
+        } catch {
+          // ignore
+        }
+      }
+
+      term.attachCustomKeyEventHandler((ev) => {
+        if (ev.type !== 'keydown') return true
+
+        const key = (ev.key || '').toLowerCase()
+        const ctrlOrMeta = ev.ctrlKey || ev.metaKey
+
+        // Ctrl/Cmd+C: copy selection instead of sending ^C
+        if (ctrlOrMeta && key === 'c' && term.hasSelection()) {
+          ev.preventDefault()
+          ev.stopPropagation()
+          void copyTextToClipboard(term.getSelection())
+          term.clearSelection()
+          setTimeout(() => {
+            try {
+              term.focus()
+            } catch {
+              // ignore
+            }
+          }, 0)
+          return false
+        }
+
+        // Ctrl/Cmd+V: let the browser paste; just don't forward ^V to the PTY.
+        if (ctrlOrMeta && key === 'v') {
+          return false
+        }
+
+        return true
+      })
+
+      const fit = new FitAddon()
+      term.loadAddon(fit)
+
+      term.open(container)
       try {
-        const ta = document.createElement('textarea')
-        ta.value = t
-        ta.setAttribute('readonly', 'true')
-        ta.style.position = 'fixed'
-        ta.style.opacity = '0'
-        ta.style.left = '-9999px'
-        ta.style.top = '-9999px'
-        document.body.appendChild(ta)
-        ta.focus()
-        ta.select()
-        document.execCommand('copy')
-        document.body.removeChild(ta)
+        fit.fit()
       } catch {
         // ignore
       }
+
+      // Second fit on next frame: gives the browser a beat to settle layout,
+      // and helps avoid subtle off-by-one geometry in Firefox.
+      requestAnimationFrame(() => {
+        if (disposed) return
+        try {
+          fit.fit()
+          term.refresh(0, Math.max(0, term.rows - 1))
+        } catch {
+          // ignore
+        }
+      })
+
+      if (disposed) {
+        try {
+          term.dispose()
+        } catch {
+          // ignore
+        }
+        return
+      }
+
+      termRef.current = term
+      fitRef.current = fit
+      setTermReady(true)
     }
 
-    term.attachCustomKeyEventHandler((ev) => {
-      if (ev.type !== 'keydown') return true
-
-      const key = (ev.key || '').toLowerCase()
-      const ctrlOrMeta = ev.ctrlKey || ev.metaKey
-
-      // Ctrl/Cmd+C: copy selection instead of sending ^C
-      if (ctrlOrMeta && key === 'c' && term.hasSelection()) {
-        ev.preventDefault()
-        ev.stopPropagation()
-        void copyTextToClipboard(term.getSelection())
-        term.clearSelection()
-        setTimeout(() => {
-          try {
-            term.focus()
-          } catch {
-            // ignore
-          }
-        }, 0)
-        return false
-      }
-
-      // Ctrl/Cmd+V: let the browser paste; just don't forward ^V to the PTY.
-      if (ctrlOrMeta && key === 'v') {
-        return false
-      }
-
-      return true
-    })
-
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(container)
-    fit.fit()
-
-    termRef.current = term
-    fitRef.current = fit
+    start()
 
     return () => {
+      disposed = true
       try {
-        term.dispose()
+        termRef.current?.dispose()
       } catch {
         // ignore
       }
+      termRef.current = null
+      fitRef.current = null
     }
   }, [])
 
   useEffect(() => {
+    if (!termReady) return
     const term = termRef.current
     if (!term) return
 
@@ -2604,9 +2663,10 @@ function TerminalPane({
     } catch {
       // ignore
     }
-  }, [cursorStyle, cursorBlink])
+  }, [termReady, cursorStyle, cursorBlink])
 
   useEffect(() => {
+    if (!termReady) return
     const term = termRef.current
     if (!term) return
 
@@ -2621,9 +2681,10 @@ function TerminalPane({
     } catch {
       // ignore
     }
-  }, [themeId])
+  }, [termReady, themeId])
 
   useEffect(() => {
+    if (!termReady) return
     const term = termRef.current
     const fit = fitRef.current
     const container = containerRef.current
@@ -2642,10 +2703,8 @@ function TerminalPane({
     term.reset()
     term.clear()
 
-    // Webfonts (JetBrains Mono) load async. If we spawn the PTY before the font
-    // is ready, fit/proposeDimensions can compute a cols/rows value based on
-    // fallback font metrics, causing Rich to render the banner at the wrong
-    // width. We therefore wait for fonts before the initial WS connect.
+    // NOTE: xterm is opened only after webfonts are ready (see init effect above),
+    // so fit/proposeDimensions should be stable here.
     let cancelled = false
     let ws = null
     let ro = null
@@ -2694,18 +2753,7 @@ function TerminalPane({
       }, 50)
     }
 
-    const start = async () => {
-      try {
-        // Trigger the actual font load so document.fonts.ready includes it.
-        if (document?.fonts?.load) {
-          await document.fonts.load('13px "JetBrains Mono"')
-        }
-        if (document?.fonts?.ready) {
-          await document.fonts.ready
-        }
-      } catch {
-        // ignore
-      }
+    const start = () => {
       if (cancelled) return
 
       // IMPORTANT: spawn the backend PTY with the *real* cols/rows from xterm.
@@ -2723,7 +2771,11 @@ function TerminalPane({
       }
       if (cancelled) return
 
-      const wsUrl = buildWsUrl(resumeId, { cols: initialCols, rows: initialRows, themeId })
+      const wsUrl = buildWsUrl(resumeId, {
+        cols: initialCols,
+        rows: initialRows,
+        themeId: themeIdRef.current,
+      })
       ws = new WebSocket(wsUrl)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
@@ -2811,7 +2863,7 @@ function TerminalPane({
 
       wsRef.current = null
     }
-  }, [resumeId, spawnNonce, onConnectionChange])
+  }, [termReady, resumeId, spawnNonce, onConnectionChange])
 
   return (
     <div
