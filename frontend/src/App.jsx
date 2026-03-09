@@ -2485,7 +2485,8 @@ function TerminalPane({
     const term = new Terminal({
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 13,
-      lineHeight: 1.2,
+      lineHeight: 1,
+      letterSpacing: 0,
       cursorBlink: true,
       cursorStyle: 'bar',
       cursorWidth: 1,
