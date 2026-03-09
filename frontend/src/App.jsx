@@ -2928,6 +2928,18 @@ export default function App() {
         return true
       }
 
+      if (payload.type === 'artifact_focus') {
+        const info = payload.payload || {}
+        const id = info.tab_id || info.id || info.artifact_id || null
+        if (!id) return true
+
+        setActiveArtifactId(String(id))
+        setArtifactPanelDismissed(false)
+        setArtifactPanelOpen(true)
+        closePeek()
+        return true
+      }
+
       if (payload.type === 'artifact_close') {
         const info = payload.payload || {}
 

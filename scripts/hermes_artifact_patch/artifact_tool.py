@@ -7,6 +7,7 @@ See docs/artifacts/artifact-tool-refactor.md for rationale.
 
 Provides tools:
 - list_artifacts
+- focus_artifact
 - create_artifact
 - remove_artifact
 - clear_artifacts
@@ -533,6 +534,38 @@ def list_artifacts(scope: str = "all") -> str:
     return json.dumps(summaries, ensure_ascii=False)
 
 
+def focus_artifact(tab_id: str) -> str:
+    """Write a focus signal so hermilinChat switches the active artifact tab."""
+
+    artifact_id = _sanitize_artifact_id(tab_id)
+    if not artifact_id:
+        return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
+
+    candidates = [
+        Path(ARTIFACT_SESSION_DIR) / f"{artifact_id}.json",
+        Path(ARTIFACT_PERSISTENT_DIR) / f"{artifact_id}.json",
+        # Legacy (older layouts may have root-level artifacts)
+        Path(ARTIFACTS_ROOT_DIR) / f"{artifact_id}.json",
+    ]
+
+    if not any(path.exists() for path in candidates):
+        return json.dumps({"error": f"artifact not found: {artifact_id}"}, ensure_ascii=False)
+
+    now = time.time()
+    payload = {
+        "action": "focus",
+        "tab_id": artifact_id,
+        "timestamp": now,
+    }
+
+    try:
+        _write_json_atomic(_ensure_artifacts_root_dir() / "_focus.json", payload)
+    except Exception as exc:
+        return json.dumps({"error": f"failed to write focus signal: {exc}"}, ensure_ascii=False)
+
+    return json.dumps({"status": "focused", "tab_id": artifact_id}, ensure_ascii=False)
+
+
 def stop_runner(tab_id: str) -> str:
     """Stop a background runner process for a live artifact.
 
@@ -642,6 +675,25 @@ LIST_ARTIFACTS_SCHEMA = {
             }
         },
         "required": [],
+    },
+}
+
+
+FOCUS_ARTIFACT_SCHEMA = {
+    "name": "focus_artifact",
+    "description": (
+        "Switch hermilinChat's artifact panel to display a specific artifact by its tab_id. "
+        "Also opens the panel if it is currently closed."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {
+                "type": "string",
+                "description": "Artifact tab ID to focus.",
+            }
+        },
+        "required": ["tab_id"],
     },
 }
 
@@ -783,6 +835,10 @@ def _handle_list_artifacts(args, **kw):
     return list_artifacts(scope=args.get("scope", "all"))
 
 
+def _handle_focus_artifact(args, **kw):
+    return focus_artifact(tab_id=args.get("tab_id", ""))
+
+
 def _handle_create_artifact(args, **kw):
     return create_artifact(
         artifact_type=args.get("artifact_type", ""),
@@ -813,6 +869,14 @@ registry.register(
     toolset="artifacts",
     schema=LIST_ARTIFACTS_SCHEMA,
     handler=_handle_list_artifacts,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="focus_artifact",
+    toolset="artifacts",
+    schema=FOCUS_ARTIFACT_SCHEMA,
+    handler=_handle_focus_artifact,
     check_fn=_check_requirements,
 )
 

@@ -1346,6 +1346,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 except Exception:
                     close_signal_seen_ns = 0
 
+                # Optional focus signal written by Hermes' focus_artifact tool.
+                focus_signal_path = config.artifact_dir / "_focus.json"
+                focus_signal_seen_ns = 0
+
                 while True:
                     await asyncio.sleep(0.75)
                     current = _artifact_snapshot()
@@ -1362,6 +1366,33 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                                 sig = None
                             if isinstance(sig, dict) and sig.get("action") == "close_all":
                                 await websocket.send_text(json.dumps({"type": "artifact_close", "payload": sig}, ensure_ascii=False))
+                    except FileNotFoundError:
+                        pass
+                    except Exception:
+                        pass
+
+                    # If focus_artifact() wrote a focus signal, forward it so the UI can
+                    # switch the active tab and open the panel.
+                    try:
+                        ns = focus_signal_path.stat().st_mtime_ns
+                        if ns and ns != focus_signal_seen_ns:
+                            focus_signal_seen_ns = ns
+                            try:
+                                sig = json.loads(focus_signal_path.read_text(encoding="utf-8"))
+                            except Exception:
+                                sig = None
+
+                            if isinstance(sig, dict) and sig.get("action") == "focus":
+                                tab_id = sig.get("tab_id")
+                                if tab_id:
+                                    await websocket.send_text(
+                                        json.dumps({"type": "artifact_focus", "payload": sig}, ensure_ascii=False)
+                                    )
+                                    # Delete the one-shot signal after processing.
+                                    try:
+                                        focus_signal_path.unlink()
+                                    except Exception:
+                                        pass
                     except FileNotFoundError:
                         pass
                     except Exception:
