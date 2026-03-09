@@ -1087,6 +1087,36 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 return
 
         argv = shlex.split(config.hermes_cmd)
+
+        # -------------------------------------------------------------
+        # hermilinChat UI theme -> Hermes CLI themefile
+        # -------------------------------------------------------------
+        # We only map known UI theme IDs to a bundled Hermes theme YAML.
+        # If there is no mapping (or the file isn't present), Hermes falls back
+        # to its baked-in default / $HERMES_HOME/theme.yaml.
+        ui_theme = ""
+        try:
+            ui_theme = (websocket.query_params.get("ui_theme") or "").strip()
+        except Exception:
+            ui_theme = ""
+
+        themefile: str | None = None
+        if ui_theme == "hermilin":
+            themefile = "hermiline.yaml"
+
+        # Only append if the caller didn't already specify a theme in the command.
+        if themefile and ("--theme" not in argv and "--themefile" not in argv):
+            try:
+                # If hermes isn't the thing we're spawning, don't inject CLI args.
+                exe_name = Path(argv[0]).name.lower() if argv else ""
+                if "hermes" in exe_name:
+                    candidate = config.hermes_home / "themes" / themefile
+                    if candidate.is_file():
+                        argv += ["--theme", themefile]
+            except Exception:
+                # Best-effort only; fall back to Hermes defaults.
+                pass
+
         if resume:
             argv += ["--resume", resume]
         elif cont:

@@ -2434,6 +2434,9 @@ function buildWsUrl(resumeId, opts = {}) {
   if (cols > 0) params.set('cols', String(cols))
   if (rows > 0) params.set('rows', String(rows))
 
+  const themeId = String(opts?.themeId || '').trim()
+  if (themeId) params.set('ui_theme', themeId)
+
   const q = params.toString()
   return `${proto}://${window.location.host}/ws/pty${q ? `?${q}` : ''}`
 }
@@ -2719,7 +2722,7 @@ function TerminalPane({
       }
       if (cancelled) return
 
-      const wsUrl = buildWsUrl(resumeId, { cols: initialCols, rows: initialRows })
+      const wsUrl = buildWsUrl(resumeId, { cols: initialCols, rows: initialRows, themeId })
       ws = new WebSocket(wsUrl)
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
