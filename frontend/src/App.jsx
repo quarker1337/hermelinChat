@@ -4087,7 +4087,7 @@ export default function App() {
             backdropFilter: 'blur(8px)',
           }}
         >
-          <InlineSvgIcon svgRaw={activeTheme?.icons?.topbarSvgRaw} size={18} />
+          <InlineSvgIcon svgRaw={activeTheme?.icons?.topbarSvgRaw} size={activeTheme?.icons?.topbarSize ?? 18} />
           <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
           <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
           <span style={{ fontSize: 11, color: SLATE.muted }}>

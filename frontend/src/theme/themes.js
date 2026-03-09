@@ -82,6 +82,7 @@ export const THEMES = {
     icons: {
       faviconHref: '/favicon-skull.svg',
       topbarSvgRaw: MATRIX_SKULL_RAW,
+      topbarSize: 20,
       alignmentSvgRaw: WHITE_RABBIT_RAW,
       alignmentTitle: 'follow the white rabbit...',
     },
