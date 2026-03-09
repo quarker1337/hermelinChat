@@ -1,3 +1,6 @@
+import HERMILIN_NOT_FLIPPED_RAW from '../assets/hermilin-not-flipped.svg?raw'
+import STOUT_MASCOT_RAW from '../assets/stout-mascot.svg?raw'
+
 export const DEFAULT_THEME_ID = 'hermilin'
 
 export const THEMES = {
@@ -28,6 +31,21 @@ export const THEMES = {
       purple: '#a78bfa',
       cyan: '#22d3ee',
     },
+    icons: {
+      // Browser tab icon + small mark (used in headers).
+      faviconHref: '/favicon.svg',
+
+      // Topbar session mark.
+      topbarSvgRaw: HERMILIN_NOT_FLIPPED_RAW,
+
+      // Bottom-right easter egg.
+      alignmentSvgRaw: STOUT_MASCOT_RAW,
+      alignmentTitle: 'the stout knows…',
+    },
+    background: {
+      kind: 'particles',
+      overlay: { kind: 'grain', opacity: 0.03 },
+    },
   },
 
   matrix: {
@@ -57,6 +75,16 @@ export const THEMES = {
       info: '#60a5fa',
       purple: '#a78bfa',
       cyan: '#22d3ee',
+    },
+    icons: {
+      faviconHref: '/favicon-matrix.svg',
+      topbarSvgRaw: HERMILIN_NOT_FLIPPED_RAW,
+      alignmentSvgRaw: STOUT_MASCOT_RAW,
+      alignmentTitle: 'the stout knows…',
+    },
+    background: {
+      kind: 'matrix-rain',
+      overlay: { kind: 'scanlines', opacity: 0.06 },
     },
   },
 }

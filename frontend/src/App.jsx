@@ -3,11 +3,9 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-import STOUT_MASCOT_RAW from './assets/stout-mascot.svg?raw'
-import HERMILIN_NOT_FLIPPED_RAW from './assets/hermilin-not-flipped.svg?raw'
 import ArtifactPanel from './components/ArtifactPanel.jsx'
 
-import { AMBER, SLATE, DEFAULT_THEME_ID, THEME_OPTIONS, normalizeThemeId, setActiveThemeId, hexToRgb } from './theme/index.js'
+import { AMBER, SLATE, DEFAULT_THEME_ID, THEME_OPTIONS, THEMES, normalizeThemeId, setActiveThemeId, hexToRgb } from './theme/index.js'
 
 // ─── UI PREFS (LOCAL) ───────────────────────────────────────────────
 // Stored in localStorage and applied instantly (no backend required).
@@ -135,9 +133,9 @@ function saveArtifactPanelWidth(width) {
 
 // Small inline version for headers
 // Reuses the app favicon (yellow circle + hermelin face)
-const InvertelinSmall = ({ size = 22 }) => (
+const InvertelinSmall = ({ size = 22, href = '/favicon.svg' }) => (
   <img
-    src="/favicon.svg"
+    src={href}
     width={size}
     height={size}
     alt=""
@@ -146,34 +144,35 @@ const InvertelinSmall = ({ size = 22 }) => (
   />
 )
 
-const STOUT_MASCOT_SVG = STOUT_MASCOT_RAW
-  .replace('<svg ', '<svg width="100%" height="100%" style="display:block" ')
-  .replace(/fill="black"/g, 'fill="currentColor"')
-
-const StoutMascot = ({ size = 18, color = AMBER[400] }) => {
-  const w = Math.round(size * (370 / 238))
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        width: w,
-        height: size,
-        color,
-        lineHeight: 0,
-      }}
-      dangerouslySetInnerHTML={{ __html: STOUT_MASCOT_SVG }}
-    />
-  )
+function normalizeInlineSvg(svgRaw) {
+  const s = (svgRaw || '').toString()
+  if (!s) return ''
+  return s
+    .replace('<svg ', '<svg width="100%" height="100%" style="display:block" ')
+    .replace(/fill="black"/g, 'fill="currentColor"')
 }
 
-const HERMILIN_NOT_FLIPPED_SVG = HERMILIN_NOT_FLIPPED_RAW
-  .replace('<svg ', '<svg width="100%" height="100%" style="display:block" ')
-  .replace(/fill="black"/g, 'fill="currentColor"')
+function svgViewBoxAspect(svgRaw) {
+  const s = (svgRaw || '').toString()
+  if (!s) return 1
+  const m = s.match(/viewBox\s*=\s*"([^"]+)"/)
+  if (!m) return 1
+  const parts = m[1].trim().split(/[\s,]+/).map((v) => Number(v))
+  if (parts.length !== 4) return 1
+  const w = parts[2]
+  const h = parts[3]
+  if (!Number.isFinite(w) || !Number.isFinite(h) || h === 0) return 1
+  return w / h
+}
 
-const HermilinNotFlipped = ({ size = 18, color = AMBER[400] }) => {
-  const w = Math.round(size * (370 / 238))
+const InlineSvgIcon = ({ svgRaw, size = 18, color = AMBER[400], title = '' }) => {
+  const svg = useMemo(() => normalizeInlineSvg(svgRaw), [svgRaw])
+  const aspect = svgViewBoxAspect(svgRaw)
+  const w = Math.round(size * aspect)
+
   return (
     <span
+      title={title || undefined}
       style={{
         display: 'inline-block',
         width: w,
@@ -181,7 +180,7 @@ const HermilinNotFlipped = ({ size = 18, color = AMBER[400] }) => {
         color,
         lineHeight: 0,
       }}
-      dangerouslySetInnerHTML={{ __html: HERMILIN_NOT_FLIPPED_SVG }}
+      dangerouslySetInnerHTML={{ __html: svg }}
     />
   )
 }
@@ -348,7 +347,7 @@ const ParticleField = ({ intensity = 50 }) => {
   )
 }
 
-const GrainOverlay = () => (
+const GrainOverlay = ({ opacity = 0.03 }) => (
   <div
     style={{
       position: 'absolute',
@@ -358,13 +357,141 @@ const GrainOverlay = () => (
       bottom: 0,
       pointerEvents: 'none',
       zIndex: 10,
-      opacity: 0.03,
+      opacity,
       mixBlendMode: 'overlay',
       backgroundImage:
         "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E\")",
     }}
   />
 )
+
+// ─── MATRIX RAIN FIELD ───────────────────────────────────────────────
+const MatrixRainField = ({ intensity = 50 }) => {
+  const canvasRef = useRef(null)
+
+  const pct = clampNum(intensity, 0, 100)
+  // 75 == "normal" speed
+  const factor = pct / 75
+  const canvasOpacity = clampNum(0.22 + 0.28 * factor, 0, 1)
+
+  const accentHex = AMBER[400] || '#34d399'
+  const accentRgb = hexToRgb(accentHex) || { r: 52, g: 211, b: 153 }
+
+  const bgHex = SLATE.bg || '#060a08'
+  const bgRgb = hexToRgb(bgHex) || { r: 6, g: 10, b: 8 }
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const prefersReducedMotion =
+      !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)')?.matches
+
+    if (prefersReducedMotion) return
+
+    let animId
+    let drops = []
+    let columns = 0
+    let fontSize = 14
+
+    // Simple mix of ascii + katakana for the vibe.
+    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzアイウエオカキクケコサシスセソタチツテト'
+
+    const init = () => {
+      canvas.width = canvas.parentElement?.offsetWidth || 800
+      canvas.height = canvas.parentElement?.offsetHeight || 600
+
+      // Higher intensity = slightly larger glyphs + faster drops.
+      fontSize = Math.max(10, Math.min(18, Math.round(11 + (pct / 100) * 7)))
+      columns = Math.max(1, Math.floor(canvas.width / fontSize))
+      drops = Array.from({ length: columns }, () => Math.random() * (canvas.height / fontSize))
+
+      ctx.font = `${fontSize}px 'JetBrains Mono', monospace`
+      ctx.textBaseline = 'top'
+    }
+
+    let last = 0
+
+    const draw = (ts) => {
+      const dt = last ? Math.min(64, ts - last) : 16
+      last = ts
+
+      // Fade to background (creates trails).
+      ctx.fillStyle = `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},0.08)`
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+      ctx.fillStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0.85)`
+
+      const speed = Math.max(0.25, 0.9 * factor) * (dt / 16)
+
+      for (let i = 0; i < drops.length; i++) {
+        const ch = chars[Math.floor(Math.random() * chars.length)]
+        const x = i * fontSize
+        const y = drops[i] * fontSize
+
+        ctx.fillText(ch, x, y)
+
+        if (y > canvas.height && Math.random() > 0.975) {
+          drops[i] = 0
+        } else {
+          drops[i] += speed
+        }
+      }
+
+      animId = requestAnimationFrame(draw)
+    }
+
+    init()
+    window.addEventListener('resize', init)
+    animId = requestAnimationFrame(draw)
+
+    return () => {
+      cancelAnimationFrame(animId)
+      window.removeEventListener('resize', init)
+    }
+  }, [pct, factor, accentRgb.r, accentRgb.g, accentRgb.b, bgRgb.r, bgRgb.g, bgRgb.b])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        opacity: canvasOpacity,
+        zIndex: 0,
+      }}
+    />
+  )
+}
+
+const ScanlinesOverlay = ({ opacity = 0.06 }) => {
+  const accentHex = AMBER[400] || '#34d399'
+  const accentRgb = hexToRgb(accentHex) || { r: 52, g: 211, b: 153 }
+  const stripe = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0.12)`
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        pointerEvents: 'none',
+        zIndex: 10,
+        opacity,
+        mixBlendMode: 'overlay',
+        backgroundImage: `repeating-linear-gradient(to bottom, ${stripe} 0, ${stripe} 1px, rgba(0,0,0,0) 4px, rgba(0,0,0,0) 7px)`,
+      }}
+    />
+  )
+}
 
 const SidebarItem = ({ label, active, onClick }) => {
   const [hovered, setHovered] = useState(false)
@@ -550,7 +677,7 @@ const SearchHitRow = ({ hit, active, onClick, showTimestamp = true }) => {
   )
 }
 
-const AlignmentEasterEgg = ({ toast }) => {
+const AlignmentEasterEgg = ({ toast, svgRaw, title }) => {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [whisper, setWhisper] = useState('aligned to you…')
@@ -608,9 +735,9 @@ const AlignmentEasterEgg = ({ toast }) => {
         filter: open || toastActive ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
         userSelect: 'none',
       }}
-      title="the stout knows…"
+      title={title || 'the stout knows…'}
     >
-      <StoutMascot size={18} />
+      <InlineSvgIcon svgRaw={svgRaw} size={18} />
 
       {toastActive && (
         <div
@@ -1967,7 +2094,7 @@ const SettingsPanel = ({
             <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Particle background</div>
+              <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Background effect</div>
               <div style={{ flex: 1 }} />
               <input
                 type="checkbox"
@@ -2564,6 +2691,34 @@ export default function App() {
     setActiveThemeId(prefs.theme)
     return prefs
   })
+
+  const activeTheme = useMemo(() => {
+    const id = normalizeThemeId(uiPrefs.theme)
+    return THEMES[id] || THEMES[DEFAULT_THEME_ID]
+  }, [uiPrefs.theme])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const href = activeTheme?.icons?.faviconHref || '/favicon.svg'
+    if (!href) return
+
+    try {
+      let link =
+        document.querySelector('link[rel="icon"]') ||
+        document.querySelector('link[rel="shortcut icon"]') ||
+        document.querySelector('link[rel~="icon"]')
+
+      if (!link) {
+        link = document.createElement('link')
+        link.rel = 'icon'
+        document.head.appendChild(link)
+      }
+
+      link.setAttribute('href', href)
+    } catch {
+      // ignore
+    }
+  }, [activeTheme])
 
   const updateUiPrefs = useCallback((updater) => {
     setUiPrefs((prev) => {
@@ -3810,9 +3965,18 @@ export default function App() {
         }}
       >
         {uiPrefs.particles.enabled && uiPrefs.particles.intensity > 0 && (
-          <ParticleField intensity={uiPrefs.particles.intensity} />
+          activeTheme?.background?.kind === 'matrix-rain' ? (
+            <MatrixRainField intensity={uiPrefs.particles.intensity} />
+          ) : (
+            <ParticleField intensity={uiPrefs.particles.intensity} />
+          )
         )}
-        <GrainOverlay />
+
+        {activeTheme?.background?.overlay?.kind === 'scanlines' ? (
+          <ScanlinesOverlay opacity={activeTheme?.background?.overlay?.opacity ?? 0.06} />
+        ) : activeTheme?.background?.overlay?.kind === 'grain' ? (
+          <GrainOverlay opacity={activeTheme?.background?.overlay?.opacity ?? 0.03} />
+        ) : null}
 
         <div
           style={{
@@ -3829,7 +3993,7 @@ export default function App() {
             backdropFilter: 'blur(8px)',
           }}
         >
-          <HermilinNotFlipped size={18} />
+          <InlineSvgIcon svgRaw={activeTheme?.icons?.topbarSvgRaw} size={18} />
           <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
           <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
           <span style={{ fontSize: 11, color: SLATE.muted }}>
@@ -3892,7 +4056,11 @@ export default function App() {
                   onSessionId={handleDetectedSessionId}
                   onControlMessage={handleArtifactControlMessage}
                 />
-                <AlignmentEasterEgg toast={eggToast} />
+                <AlignmentEasterEgg
+                  toast={eggToast}
+                  svgRaw={activeTheme?.icons?.alignmentSvgRaw}
+                  title={activeTheme?.icons?.alignmentTitle}
+                />
               </>
             ) : (
               <div
@@ -4027,7 +4195,7 @@ export default function App() {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <InvertelinSmall size={18} />
+                <InvertelinSmall size={18} href={activeTheme?.icons?.faviconHref} />
                 <div style={{ color: AMBER[400], fontWeight: 700, fontSize: 12 }}>Login required</div>
               </div>
 
