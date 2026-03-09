@@ -47,7 +47,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         # Non-fatal; UI will just fall back to first message titles.
         pass
 
-    app = FastAPI(title="hermelinChat", version="0.11", docs_url="/api/docs", redoc_url=None)
+    app = FastAPI(title="hermelinChat", version="0.12", docs_url="/api/docs", redoc_url=None)
 
     # Dev-friendly; production should lock this down.
     app.add_middleware(
