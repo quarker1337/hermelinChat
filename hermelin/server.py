@@ -1391,9 +1391,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                                     # Delete the one-shot signal after processing.
                                     try:
                                         focus_signal_path.unlink()
+                                        # Reset so a new focus signal written within the
+                                        # same filesystem timestamp resolution still fires.
+                                        focus_signal_seen_ns = 0
                                     except Exception:
                                         pass
                     except FileNotFoundError:
+                        focus_signal_seen_ns = 0
                         pass
                     except Exception:
                         pass
