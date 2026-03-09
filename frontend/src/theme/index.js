@@ -1,28 +1,8 @@
-export const AMBER = {
-  300: '#ffd480',
-  400: '#f5b731',
-  500: '#e0a020',
-  600: '#c48a18',
-  700: '#9a6c12',
-  800: '#6b4a0e',
-  900: '#3d2a08',
-}
+import { AMBER, SLATE } from './store.js'
 
-export const SLATE = {
-  bg: '#08080a',
-  surface: '#0e0e12',
-  elevated: '#16161d',
-  border: '#232330',
-  muted: '#55556a',
-  text: '#b8b8cc',
-  textBright: '#e8e8f0',
-  accent: '#f5b731',
-  danger: '#e84057',
-  success: '#38c878',
-  info: '#60a5fa',
-  purple: '#a78bfa',
-  cyan: '#22d3ee',
-}
+export { DEFAULT_THEME_ID, THEMES, THEME_OPTIONS, normalizeThemeId } from './themes.js'
+export { AMBER, SLATE, getActiveTheme, getActiveThemeId, setActiveThemeId } from './store.js'
+export { hexToRgb } from './utils.js'
 
 export function levelColor(level) {
   const key = String(level || '').toUpperCase()

@@ -15,7 +15,7 @@ import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
 import 'highlight.js/styles/github-dark.css'
 
-import { AMBER, SLATE, formatTimestamp, levelColor, semanticColor } from './theme.js'
+import { AMBER, SLATE, formatTimestamp, levelColor, semanticColor } from '../../theme/index.js'
 
 const HLJS_LANGS = [
   ['bash', bash],

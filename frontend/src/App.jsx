@@ -7,29 +7,7 @@ import STOUT_MASCOT_RAW from './assets/stout-mascot.svg?raw'
 import HERMILIN_NOT_FLIPPED_RAW from './assets/hermilin-not-flipped.svg?raw'
 import ArtifactPanel from './components/ArtifactPanel.jsx'
 
-// ─── NOUS / HERMELIN PALETTE ───────────────────────────────────────
-const AMBER = {
-  300: '#ffd480',
-  400: '#f5b731',
-  500: '#e0a020',
-  600: '#c48a18',
-  700: '#9a6c12',
-  800: '#6b4a0e',
-  900: '#3d2a08',
-}
-
-const SLATE = {
-  bg: '#08080a',
-  surface: '#0e0e12',
-  elevated: '#16161d',
-  border: '#232330',
-  muted: '#55556a',
-  text: '#b8b8cc',
-  textBright: '#e8e8f0',
-  accent: '#f5b731',
-  danger: '#e84057',
-  success: '#38c878',
-}
+import { AMBER, SLATE, DEFAULT_THEME_ID, THEME_OPTIONS, normalizeThemeId, setActiveThemeId, hexToRgb } from './theme/index.js'
 
 // ─── UI PREFS (LOCAL) ───────────────────────────────────────────────
 // Stored in localStorage and applied instantly (no backend required).
@@ -44,6 +22,7 @@ const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
 const HERMILINCHAT_VERSION = '0.12'
 
 const DEFAULT_UI_PREFS = {
+  theme: DEFAULT_THEME_ID,
   particles: {
     enabled: true,
     // 50..100 (50 matches the old look)
@@ -76,7 +55,10 @@ function normalizeUiPrefs(raw) {
     ? cursorStyleStr
     : DEFAULT_UI_PREFS.terminal.cursorStyle
 
+  const theme = normalizeThemeId(r.theme ?? DEFAULT_UI_PREFS.theme)
+
   return {
+    theme,
     particles: {
       enabled: p.enabled === undefined ? DEFAULT_UI_PREFS.particles.enabled : !!p.enabled,
       intensity: clampNum(p.intensity ?? DEFAULT_UI_PREFS.particles.intensity, 50, 100),
@@ -279,6 +261,9 @@ const ParticleField = ({ intensity = 50 }) => {
   const factor = pct / 50
   const canvasOpacity = clampNum(0.5 * factor, 0, 1)
 
+  const accentHex = AMBER[400] || '#f5b731'
+  const accentRgb = hexToRgb(accentHex) || { r: 245, g: 183, b: 49 }
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -314,7 +299,7 @@ const ParticleField = ({ intensity = 50 }) => {
         if (p.y > canvas.height) p.y = 0
         ctx.beginPath()
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(245,183,49,${p.o})`
+        ctx.fillStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${p.o})`
         ctx.fill()
       }
 
@@ -328,7 +313,7 @@ const ParticleField = ({ intensity = 50 }) => {
             ctx.beginPath()
             ctx.moveTo(particles[i].x, particles[i].y)
             ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.strokeStyle = `rgba(245,183,49,${connBase * (1 - d / 120)})`
+            ctx.strokeStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${connBase * (1 - d / 120)})`
             ctx.lineWidth = 0.5
             ctx.stroke()
           }
@@ -344,7 +329,7 @@ const ParticleField = ({ intensity = 50 }) => {
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
     }
-  }, [factor])
+  }, [factor, accentRgb.r, accentRgb.g, accentRgb.b])
 
   return (
     <canvas
@@ -1949,6 +1934,39 @@ const SettingsPanel = ({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Theme</div>
+              <div style={{ flex: 1 }} />
+              <select
+                value={ui.theme}
+                onChange={(e) => {
+                  onUiPrefsChange?.((prev) => ({
+                    ...prev,
+                    theme: e.target.value,
+                  }))
+                }}
+                style={{
+                  background: SLATE.elevated,
+                  border: `1px solid ${SLATE.border}`,
+                  color: SLATE.textBright,
+                  padding: '6px 8px',
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: 11,
+                  outline: 'none',
+                  borderRadius: 8,
+                }}
+                title="UI theme"
+              >
+                {THEME_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Particle background</div>
               <div style={{ flex: 1 }} />
               <input
@@ -2161,6 +2179,7 @@ function TerminalPane({
   onConnectionChange,
   onSessionId,
   onControlMessage,
+  themeId = DEFAULT_THEME_ID,
   cursorStyle = DEFAULT_UI_PREFS.terminal.cursorStyle,
   cursorBlink = DEFAULT_UI_PREFS.terminal.cursorBlink,
 }) {
@@ -2306,6 +2325,23 @@ function TerminalPane({
       // ignore
     }
   }, [cursorStyle, cursorBlink])
+
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+
+    try {
+      term.options.theme = {
+        // Keep transparent so the ParticleField (and grain) can show through.
+        background: 'rgba(0,0,0,0)',
+        foreground: SLATE.textBright,
+        cursor: AMBER[400],
+        selectionBackground: `${AMBER[700]}44`,
+      }
+    } catch {
+      // ignore
+    }
+  }, [themeId])
 
   useEffect(() => {
     const term = termRef.current
@@ -2523,19 +2559,26 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const [uiPrefs, setUiPrefs] = useState(() => loadUiPrefs())
+  const [uiPrefs, setUiPrefs] = useState(() => {
+    const prefs = loadUiPrefs()
+    setActiveThemeId(prefs.theme)
+    return prefs
+  })
 
   const updateUiPrefs = useCallback((updater) => {
     setUiPrefs((prev) => {
       const base = normalizeUiPrefs(prev)
-      const next = typeof updater === 'function' ? updater(base) : updater
-      return normalizeUiPrefs(next)
+      const nextRaw = typeof updater === 'function' ? updater(base) : updater
+      const next = normalizeUiPrefs(nextRaw)
+      setActiveThemeId(next.theme)
+      return next
     })
   }, [])
 
   useEffect(() => {
     saveUiPrefs(uiPrefs)
   }, [uiPrefs])
+
 
 
   // Terminal connection mode:
@@ -3842,6 +3885,7 @@ export default function App() {
                 <TerminalPane
                   resumeId={ptyResumeId}
                   spawnNonce={ptySpawnNonce}
+                  themeId={uiPrefs.theme}
                   cursorStyle={uiPrefs.terminal.cursorStyle}
                   cursorBlink={uiPrefs.terminal.cursorBlink}
                   onConnectionChange={handleConnectionChange}
