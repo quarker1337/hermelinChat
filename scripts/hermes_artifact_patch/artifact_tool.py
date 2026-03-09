@@ -11,7 +11,9 @@ Provides tools:
 - create_artifact
 - remove_artifact
 - clear_artifacts
+- start_runner
 - stop_runner
+- tail_runner_log
 
 Artifacts are written under:
 - $HERMES_HOME/artifacts/session/
@@ -864,6 +866,104 @@ def stop_runner(tab_id: str, keep_script: bool = False) -> str:
     )
 
 
+def _tail_text_file(path: Path, lines: int, max_bytes: int = 200_000) -> tuple[list[str], bool]:
+    """Return the last N lines from a UTF-8-ish text file.
+
+    Reads from the end in binary mode so large log files don't blow up memory.
+
+    Returns:
+      (lines, truncated)
+
+    truncated=True means we hit max_bytes before collecting enough newlines.
+    """
+
+    if lines <= 0:
+        return [], False
+
+    block_size = 8192
+    data = b""
+    truncated = False
+
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            remaining = handle.tell()
+
+            while remaining > 0 and data.count(b"\n") <= lines and len(data) < max_bytes:
+                read_size = min(block_size, remaining)
+                remaining -= read_size
+                handle.seek(remaining)
+                chunk = handle.read(read_size)
+                data = chunk + data
+
+            if remaining > 0 and len(data) >= max_bytes:
+                truncated = True
+
+    except Exception:
+        # Fallback: small files or weird environments.
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            all_lines = text.splitlines()
+            return all_lines[-lines:], False
+        except Exception:
+            return [], False
+
+    text = data.decode("utf-8", errors="replace")
+    out_lines = text.splitlines()[-lines:]
+    return out_lines, truncated
+
+
+def tail_runner_log(tab_id: str, lines: int = 200) -> str:
+    """Return the last N lines of the runner.log for a given artifact tab."""
+
+    artifact_id = _sanitize_artifact_id(tab_id)
+    if not artifact_id:
+        return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
+
+    try:
+        requested = int(lines or 0)
+    except (TypeError, ValueError):
+        requested = 200
+
+    requested = max(1, min(2000, requested))
+
+    projects_root = _ensure_dir(RUNNER_PROJECTS_DIR)
+    log_path = Path(projects_root) / artifact_id / "runner.log"
+
+    if not log_path.exists() or not log_path.is_file():
+        return json.dumps(
+            {
+                "status": "not_found",
+                "tab_id": artifact_id,
+                "log_path": str(log_path),
+                "requested_lines": requested,
+                "lines": [],
+            },
+            ensure_ascii=False,
+        )
+
+    try:
+        file_size = log_path.stat().st_size
+    except Exception:
+        file_size = None
+
+    out_lines, truncated = _tail_text_file(log_path, requested)
+
+    return json.dumps(
+        {
+            "status": "ok",
+            "tab_id": artifact_id,
+            "log_path": str(log_path),
+            "requested_lines": requested,
+            "returned_lines": len(out_lines),
+            "truncated": bool(truncated),
+            "file_size": file_size,
+            "lines": out_lines,
+        },
+        ensure_ascii=False,
+    )
+
+
 LIST_ARTIFACTS_SCHEMA = {
     "name": "list_artifacts",
     "description": (
@@ -1064,6 +1164,32 @@ START_RUNNER_SCHEMA = {
 }
 
 
+TAIL_RUNNER_LOG_SCHEMA = {
+    "name": "tail_runner_log",
+    "description": (
+        "Return the last N lines of the background runner log for a given artifact tab_id "
+        "(from ~/.hermes/artifacts/runners/projects/{tab_id}/runner.log)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {
+                "type": "string",
+                "description": "Artifact tab ID whose runner.log should be tailed.",
+            },
+            "lines": {
+                "type": "integer",
+                "description": "Number of lines to return from the end of the log file.",
+                "default": 200,
+                "minimum": 1,
+                "maximum": 2000,
+            },
+        },
+        "required": ["tab_id"],
+    },
+}
+
+
 STOP_RUNNER_SCHEMA = {
     "name": "stop_runner",
     "description": "Stop a live artifact updater runner process for a given tab_id.",
@@ -1131,6 +1257,10 @@ def _handle_stop_runner(args, **kw):
     return stop_runner(tab_id=args.get("tab_id", ""), keep_script=args.get("keep_script", False))
 
 
+def _handle_tail_runner_log(args, **kw):
+    return tail_runner_log(tab_id=args.get("tab_id", ""), lines=args.get("lines", 200))
+
+
 registry.register(
     name="list_artifacts",
     toolset="artifacts",
@@ -1176,6 +1306,14 @@ registry.register(
     toolset="artifacts",
     schema=START_RUNNER_SCHEMA,
     handler=_handle_start_runner,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="tail_runner_log",
+    toolset="artifacts",
+    schema=TAIL_RUNNER_LOG_SCHEMA,
+    handler=_handle_tail_runner_log,
     check_fn=_check_requirements,
 )
 
