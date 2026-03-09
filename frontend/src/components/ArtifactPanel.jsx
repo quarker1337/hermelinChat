@@ -194,38 +194,15 @@ export default function ArtifactPanel({
   onResizeWidth,
   artifacts,
   activeArtifactId,
-  pinned,
   onSelectArtifact,
   onClose,
-  onRefresh,
-  onTogglePinned,
   onDeleteArtifact,
 }) {
   const activeArtifact = artifacts.find((artifact) => artifact?.id === activeArtifactId) || artifacts[0] || null
 
   const [tabMenuOpen, setTabMenuOpen] = useState(false)
-  const [maximized, setMaximized] = useState(false)
-  const restoreWidthRef = useRef(null)
   const triggerRef = useRef(null)
   const menuRef = useRef(null)
-
-  const infoTitle = (() => {
-    if (!activeArtifact) return 'No active artifact'
-
-    const scope = activeArtifact?.persistent ? 'persistent' : 'session'
-    const created = activeArtifact?.created_at || activeArtifact?.timestamp
-    const updated = activeArtifact?.updated_at || activeArtifact?.timestamp
-    const source = activeArtifact?.source || 'create_artifact'
-
-    return [
-      `source: ${source}`,
-      `type: ${activeArtifact?.type || 'artifact'}`,
-      `tab id: ${activeArtifact?.id || ''}`,
-      `scope: ${scope}`,
-      `created: ${formatTimestamp(created) || 'unknown'}`,
-      `updated: ${formatTimestamp(updated) || 'unknown'}`,
-    ].join('\n')
-  })()
 
   useEffect(() => {
     if (!tabMenuOpen) return
@@ -389,15 +366,20 @@ export default function ArtifactPanel({
           to { opacity: 1; transform: translateY(0); }
         }
 
-        .artifactTabDropdown__trigger:hover {
+        .artifactPanelHeader__trigger:hover {
           background: ${SLATE.elevated};
         }
 
-        .artifactTabDropdown__item:hover {
-          background: ${SLATE.elevated};
+        .artifactPanelDropdown__row:hover {
+          background: ${SLATE.border}55;
         }
 
-        .artifactTabDropdown__close:hover {
+        .artifactPanelDropdown__row:hover .artifactPanelDropdown__trash {
+          opacity: 1;
+          pointer-events: auto;
+        }
+
+        .artifactPanelDropdown__trash:hover {
           color: ${SLATE.danger};
         }
 
@@ -459,137 +441,160 @@ export default function ArtifactPanel({
           alignItems: 'center',
           gap: 10,
           background: `${SLATE.surface}ff`,
+          position: 'relative',
+          zIndex: 40,
         }}
       >
-        <div
-          style={{
-            fontSize: 12,
-            color: SLATE.textBright,
-            fontWeight: 650,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            minWidth: 0,
-          }}
-          title={activeArtifact?.title || activeArtifact?.id || ''}
-        >
-          {activeArtifact?.title || activeArtifact?.id || 'Artifacts'}
-        </div>
-        <div style={{ flex: 1 }} />
-        <IconButton title={pinned ? 'Unpin panel' : 'Pin panel'} onClick={onTogglePinned} active={pinned}>
-          <PinIcon pinned={pinned} />
-        </IconButton>
-        <IconButton title="Refresh artifacts" onClick={onRefresh}>
-          <RefreshIcon />
-        </IconButton>
-        <IconButton
-          title={infoTitle}
-          onClick={() => {
-            try {
-              globalThis?.navigator?.clipboard?.writeText?.(infoTitle)
-            } catch {
-              // ignore
-            }
-          }}
-        >
-          <InfoIcon />
-        </IconButton>
-        <IconButton
-          title={maximized ? 'Restore panel size' : 'Maximize panel'}
-          onClick={() => {
-            if (!onResizeWidth) return
-            const current = Number(width) || 480
-
-            if (!maximized) {
-              restoreWidthRef.current = current
-              onResizeWidth(960)
-              setMaximized(true)
-              return
-            }
-
-            const restore = Number(restoreWidthRef.current) || 480
-            restoreWidthRef.current = null
-            onResizeWidth(restore)
-            setMaximized(false)
-          }}
-          active={maximized}
-        >
-          <MaximizeIcon maximized={maximized} />
-        </IconButton>
-        <IconButton title="Close panel" onClick={onClose}>
-          <CloseIcon />
-        </IconButton>
-      </div>
-
-      <div style={{ position: 'relative', flexShrink: 0, borderBottom: `1px solid ${SLATE.border}` }}>
-        <button
-          ref={triggerRef}
-          type="button"
-          onClick={() => setTabMenuOpen((open) => !open)}
-          className="artifactTabDropdown__trigger"
-          style={{
-            width: '100%',
-            padding: '9px 12px',
-            cursor: 'pointer',
-            fontSize: 11,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            color: SLATE.text,
-            border: 0,
-            background: `${SLATE.surface}ff`,
-            fontFamily: "'JetBrains Mono', monospace",
-            textAlign: 'left',
-          }}
-          title={activeArtifact?.title || activeArtifact?.id}
-        >
-          <span style={{ color: AMBER[400], display: 'flex', alignItems: 'center' }}>
-            <ArtifactTabIcon type={activeArtifact?.type} />
-          </span>
-          {activeArtifact?.live ? (
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: SLATE.success,
-                animation: 'artifactLivePulse 2s ease infinite',
-                flexShrink: 0,
-              }}
-            />
-          ) : null}
-          <span
+        {artifacts.length ? (
+          <button
+            ref={triggerRef}
+            type="button"
+            onClick={() => setTabMenuOpen((open) => !open)}
+            className="artifactPanelHeader__trigger"
             style={{
               flex: 1,
+              minWidth: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              border: 0,
+              background: 'transparent',
+              cursor: 'pointer',
+              padding: '6px 8px',
+              margin: '-6px -8px',
+              borderRadius: 8,
+              fontFamily: "'JetBrains Mono', monospace",
+              textAlign: 'left',
+              color: SLATE.text,
+            }}
+            title={activeArtifact?.title || activeArtifact?.id}
+          >
+            <span style={{ color: AMBER[400], display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <ArtifactTabIcon type={activeArtifact?.type} />
+            </span>
+
+            <span
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                color: SLATE.textBright,
+                fontWeight: 650,
+                fontSize: 12,
+                minWidth: 0,
+              }}
+            >
+              {activeArtifact?.title || activeArtifact?.id || '—'}
+            </span>
+
+            <div style={{ flex: 1 }} />
+
+            {activeArtifact?.live ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: SLATE.success,
+                  fontSize: 10,
+                  flexShrink: 0,
+                  opacity: 0.95,
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: SLATE.success,
+                    animation: 'artifactLivePulse 2s ease infinite',
+                  }}
+                />
+                <span style={{ fontSize: 10 }}>live</span>
+              </span>
+            ) : null}
+
+            {activeArtifact?.persistent ? (
+              <span
+                style={{
+                  flexShrink: 0,
+                  fontSize: 9,
+                  color: SLATE.purple,
+                  border: `1px solid ${SLATE.purple}66`,
+                  background: `${SLATE.purple}22`,
+                  padding: '1px 7px',
+                  borderRadius: 999,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                }}
+              >
+                saved
+              </span>
+            ) : null}
+
+            {artifacts.length > 1 ? (
+              <span
+                style={{
+                  flexShrink: 0,
+                  fontSize: 9,
+                  color: SLATE.muted,
+                  border: `1px solid ${SLATE.border}`,
+                  padding: '1px 7px',
+                  borderRadius: 999,
+                }}
+              >
+                {artifacts.length}
+              </span>
+            ) : null}
+
+            <span style={{ color: SLATE.muted, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <ChevronDownIcon open={tabMenuOpen} />
+            </span>
+          </button>
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 12,
+              color: SLATE.textBright,
+              fontWeight: 650,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              color: SLATE.textBright,
-              fontWeight: 500,
             }}
           >
-            {activeArtifact?.title || activeArtifact?.id || 'panel'}
-          </span>
-          <span
-            style={{
-              flexShrink: 0,
-              fontSize: 9,
-              color: SLATE.muted,
-              border: `1px solid ${SLATE.border}`,
-              padding: '1px 7px',
-              borderRadius: 999,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-            }}
-          >
-            {artifacts.length} tab{artifacts.length === 1 ? '' : 's'}
-          </span>
-          <span style={{ color: SLATE.muted, display: 'flex', alignItems: 'center' }}>
-            <ChevronDownIcon open={tabMenuOpen} />
-          </span>
+            Artifacts
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onClose?.()
+          }}
+          title="Close panel"
+          aria-label="Close panel"
+          style={{
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 4,
+            border: 0,
+            background: 'transparent',
+            color: SLATE.muted,
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = SLATE.danger)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = SLATE.muted)}
+        >
+          <CloseIcon />
         </button>
 
-        {tabMenuOpen ? (
+        {tabMenuOpen && artifacts.length ? (
           <div
             ref={menuRef}
             style={{
@@ -598,11 +603,11 @@ export default function ArtifactPanel({
               left: 10,
               right: 10,
               border: `1px solid ${SLATE.border}`,
-              background: `${SLATE.surface}ff`,
-              borderRadius: 8,
+              background: `${SLATE.elevated}ff`,
+              borderRadius: 10,
               boxShadow: '0 12px 28px rgba(0,0,0,0.55)',
               padding: 6,
-              zIndex: 50,
+              zIndex: 70,
               maxHeight: 320,
               overflowY: 'auto',
               animation: 'artifactTabMenuDrop 0.12s ease both',
@@ -610,8 +615,8 @@ export default function ArtifactPanel({
           >
             {artifacts.map((artifact) => {
               const active = activeArtifact?.id === artifact?.id
-              const title = artifact?.title || artifact?.id || 'artifact'
-              const type = artifact?.type || 'artifact'
+              const title = artifact?.title || artifact?.id || 'untitled'
+              const type = String(artifact?.type || 'unknown')
 
               return (
                 <button
@@ -621,7 +626,7 @@ export default function ArtifactPanel({
                     onSelectArtifact?.(artifact?.id)
                     setTabMenuOpen(false)
                   }}
-                  className="artifactTabDropdown__item"
+                  className="artifactPanelDropdown__row"
                   style={{
                     width: '100%',
                     display: 'flex',
@@ -629,9 +634,9 @@ export default function ArtifactPanel({
                     gap: 8,
                     padding: '8px 10px',
                     border: 0,
-                    borderRadius: 6,
+                    borderRadius: 8,
                     cursor: 'pointer',
-                    background: active ? `${AMBER[900]}35` : 'transparent',
+                    background: active ? `${AMBER[900]}2a` : 'transparent',
                     color: active ? AMBER[300] : SLATE.text,
                     fontFamily: "'JetBrains Mono', monospace",
                     textAlign: 'left',
@@ -642,8 +647,23 @@ export default function ArtifactPanel({
                   <span style={{ color: active ? AMBER[400] : SLATE.muted, display: 'flex', alignItems: 'center' }}>
                     <ArtifactTabIcon type={type} />
                   </span>
+
+                  <span
+                    style={{
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: 11,
+                      color: active ? AMBER[200] : SLATE.textBright,
+                    }}
+                  >
+                    {title}
+                  </span>
+
                   {artifact?.live ? (
                     <span
+                      title="live"
                       style={{
                         width: 6,
                         height: 6,
@@ -654,17 +674,25 @@ export default function ArtifactPanel({
                       }}
                     />
                   ) : null}
-                  <span
-                    style={{
-                      flex: 1,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      fontSize: 11,
-                    }}
-                  >
-                    {title}
-                  </span>
+
+                  {artifact?.persistent ? (
+                    <span
+                      style={{
+                        flexShrink: 0,
+                        fontSize: 9,
+                        color: SLATE.purple,
+                        border: `1px solid ${SLATE.purple}66`,
+                        background: `${SLATE.purple}22`,
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                      }}
+                    >
+                      saved
+                    </span>
+                  ) : null}
+
                   <span
                     style={{
                       flexShrink: 0,
@@ -677,27 +705,34 @@ export default function ArtifactPanel({
                       letterSpacing: '0.06em',
                     }}
                   >
-                    {String(type)}
+                    {type}
                   </span>
+
                   {onDeleteArtifact ? (
-                    <span
-                      className="artifactTabDropdown__close"
+                    <button
+                      type="button"
+                      className="artifactPanelDropdown__trash"
                       onClick={(event) => {
                         event.stopPropagation()
                         onDeleteArtifact(artifact?.id)
                       }}
                       style={{
+                        border: 0,
+                        background: 'transparent',
                         color: SLATE.muted,
                         fontSize: 14,
                         lineHeight: 1,
                         padding: '0 4px',
                         cursor: 'pointer',
                         flexShrink: 0,
+                        opacity: 0,
+                        pointerEvents: 'none',
                       }}
-                      title="Close tab"
+                      title="Delete"
+                      aria-label="Delete"
                     >
                       ×
-                    </span>
+                    </button>
                   ) : null}
                 </button>
               )
@@ -710,30 +745,49 @@ export default function ArtifactPanel({
         {activeArtifact ? (
           <ArtifactRenderer artifact={activeArtifact} />
         ) : (
-          <div style={{ padding: '18px 16px', fontSize: 12, color: SLATE.muted }}>
-            No artifacts yet. Ask Hermes to call <span style={{ color: AMBER[400] }}>create_artifact</span>.
+          <div
+            style={{
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              padding: '28px 16px',
+              textAlign: 'center',
+              color: SLATE.muted,
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            <div style={{ fontSize: 22, opacity: 0.55 }}>📭</div>
+            <div style={{ fontSize: 12, color: SLATE.textBright, opacity: 0.9 }}>No artifacts</div>
+            <div style={{ fontSize: 11, color: SLATE.muted, opacity: 0.75 }}>Ask the agent to create one</div>
           </div>
         )}
       </div>
 
-      <div
-        style={{
-          padding: '5px 14px',
-          borderTop: `1px solid ${SLATE.border}`,
-          fontSize: 9,
-          color: `${SLATE.muted}cc`,
-          display: 'flex',
-          justifyContent: 'space-between',
-          gap: 12,
-        }}
-      >
-        <span title={formatTimestamp(activeArtifact?.timestamp)}>
-          updated {formatTimeAgo(activeArtifact?.timestamp)}
-        </span>
-        <span>
-          {activeArtifact?.live ? `auto-refresh: ${Math.max(0, Number(activeArtifact?.refresh_seconds || 0))}s` : 'manual refresh'}
-        </span>
-      </div>
+      {activeArtifact ? (
+        <div
+          style={{
+            padding: '4px 12px',
+            borderTop: `1px solid ${SLATE.border}`,
+            fontSize: 9,
+            color: SLATE.muted,
+            opacity: 0.35,
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 12,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}
+        >
+          <span title={formatTimestamp(activeArtifact?.timestamp)}>
+            updated {formatTimeAgo(activeArtifact?.timestamp)}
+          </span>
+          <span>
+            {activeArtifact?.live ? `auto-refresh: ${Math.max(0, Number(activeArtifact?.refresh_seconds || 0))}s` : 'manual refresh'}
+          </span>
+        </div>
+      ) : null}
     </div>
   )
 }

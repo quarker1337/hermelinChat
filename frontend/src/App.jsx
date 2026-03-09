@@ -2875,7 +2875,7 @@ export default function App() {
         closePeek()
       }
     },
-    [artifactPanelDismissed, artifactPanelPinned, normalizeArtifacts],
+    [artifactPanelDismissed, normalizeArtifacts],
   )
 
   const refreshArtifacts = useCallback(
@@ -3856,7 +3856,7 @@ export default function App() {
                   setArtifactPanelOpen(true)
                   closePeek()
                 }}
-                title="Open artifact panel"
+                title="Open panel"
                 style={{
                   position: 'absolute',
                   right: 0,
@@ -3865,22 +3865,39 @@ export default function App() {
                   background: SLATE.surface,
                   border: `1px solid ${SLATE.border}`,
                   borderRight: 'none',
-                  borderRadius: '6px 0 0 6px',
-                  padding: '12px 6px',
+                  borderRadius: '8px 0 0 8px',
+                  padding: '12px 7px',
                   cursor: 'pointer',
                   color: SLATE.muted,
                   zIndex: 12,
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  gap: 4,
+                  gap: 6,
                   userSelect: 'none',
+                  boxShadow: '0 10px 28px rgba(0,0,0,0.55)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = AMBER[400]
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = SLATE.muted
                 }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <polyline points="15 18 9 12 15 6" />
                 </svg>
-                <span style={{ fontSize: 8, writingMode: 'vertical-lr', letterSpacing: '0.1em', textTransform: 'uppercase' }}>PANEL</span>
+                <span
+                  style={{
+                    fontSize: 9,
+                    writingMode: 'vertical-rl',
+                    textOrientation: 'mixed',
+                    letterSpacing: '0.04em',
+                    userSelect: 'none',
+                  }}
+                >
+                  {`${artifactTabs.length} artifact${artifactTabs.length === 1 ? '' : 's'}`}
+                </span>
               </div>
             )}
           </div>
