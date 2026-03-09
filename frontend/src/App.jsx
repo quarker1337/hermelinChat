@@ -4174,7 +4174,6 @@ export default function App() {
         >
           <InlineSvgIcon svgRaw={activeTheme?.icons?.topbarSvgRaw} size={activeTheme?.icons?.topbarSize ?? 18} />
           <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
-          <span style={{ color: SLATE.muted, fontSize: 11 }}>·</span>
           <span style={{ fontSize: 11, color: SLATE.muted }}>
             {auth.loading
               ? 'auth…'
