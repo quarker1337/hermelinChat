@@ -412,6 +412,9 @@ const MatrixRainField = ({ intensity = 50, config }) => {
     let animId
     let drops = []
     let columns = 0
+    let glyphs = []
+    let tones = []
+    let lastCells = []
 
     const init = () => {
       canvas.width = canvas.parentElement?.offsetWidth || 800
@@ -421,6 +424,14 @@ const MatrixRainField = ({ intensity = 50, config }) => {
       drops = Array(columns)
         .fill(0)
         .map(() => Math.random() * -80)
+
+      // Cache glyphs + tone per column so we don't redraw a different character every frame
+      // (which can smear into a solid line when speed is slow).
+      glyphs = Array(columns)
+        .fill(0)
+        .map(() => chars[Math.floor(Math.random() * chars.length)])
+      tones = Array(columns).fill(0).map(() => Math.random())
+      lastCells = drops.map((d) => Math.floor(d))
 
       ctx.font = `${fontSize}px 'JetBrains Mono', monospace`
       ctx.textBaseline = 'top'
@@ -439,8 +450,18 @@ const MatrixRainField = ({ intensity = 50, config }) => {
       const step = (dt / 16) * factor
 
       for (let i = 0; i < drops.length; i++) {
-        const c = chars[Math.floor(Math.random() * chars.length)]
-        const b = Math.random()
+        const cell = Math.floor(drops[i])
+
+        // Only change the glyph when we move to the next "row".
+        // This avoids high-frequency flicker and prevents the slow rain from smearing into a solid line.
+        if (cell !== lastCells[i]) {
+          glyphs[i] = chars[Math.floor(Math.random() * chars.length)]
+          tones[i] = Math.random()
+          lastCells[i] = cell
+        }
+
+        const c = glyphs[i]
+        const b = tones[i] ?? 0
 
         if (b > 0.96) {
           ctx.fillStyle = `rgba(${bright.r},${bright.g},${bright.b},0.5)`
@@ -451,12 +472,13 @@ const MatrixRainField = ({ intensity = 50, config }) => {
         }
 
         const x = i * colWidth
-        const y = drops[i] * colWidth
+        const y = cell * colWidth
 
         ctx.fillText(c, x, y)
 
         if (y > canvas.height && Math.random() > 0.98) {
           drops[i] = 0
+          lastCells[i] = null
         } else {
           drops[i] += (speedBase + Math.random() * speedJitter) * step
         }
