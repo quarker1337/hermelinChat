@@ -933,18 +933,77 @@ def patch_cli(cli_path: str, theme: dict, hermes_home: Path | None = None, dry_r
         changes.append("Patched goodbye message to use theme branding")
 
     # ── 11. Patch the _build_compact_banner to use theme ───────────────
-    old_compact_narrow = '''return "\\n[#FFBF00]⚕ NOUS HERMES[/] [dim #B8860B]- Nous Research[/]\\n"'''
-    if old_compact_narrow in text:
-        new_compact_narrow = (
-            '_t = _HERMES_ACTIVE_THEME or {}\n'
-            '        _tc = _t.get("colors", {})\n'
-            '        _tb = _t.get("branding", {})\n'
-            '        return f"\\n[{_tc.get(\'secondary\', \'#FFBF00\')}]'
-            '{_tb.get(\'compact_symbol\', \'⚕\')} {_tb.get(\'compact_label\', \'NOUS HERMES\')}[/] '
-            '[dim {_tc.get(\'muted\', \'#B8860B\')}]- {_tb.get(\'org_name\', \'Nous Research\')}[/]\\n"'
+    # Newer Hermes versions build the compact banner dynamically to fit terminal
+    # width.  The helper still hardcodes the gold palette in its return strings.
+    if "def _build_compact_banner" in text:
+        func_start = text.find("def _build_compact_banner")
+        next_def = re.search(r"\n(?:def |class )", text[func_start + 1:])
+        func_end = func_start + 1 + next_def.start() if next_def else len(text)
+        func_text = text[func_start:func_end]
+
+        # Inject theme/branding lookups at the top of the function.
+        if "# ── Theme-aware colour lookup (compact banner)" not in func_text:
+            header_pat = r"(def _build_compact_banner\([^\)]*\)[^\n]*:\n(?:\s+\"\"\"[\s\S]*?\"\"\"\n)?)"
+            m = re.search(header_pat, func_text)
+            if m:
+                insert_at = m.end()
+                helper = (
+                    "    # ── Theme-aware colour lookup (compact banner) ──\n"
+                    "    _t = _HERMES_ACTIVE_THEME or {}\n"
+                    "    _tc = _t.get(\"colors\", {})\n"
+                    "    _tb = _t.get(\"branding\", {})\n"
+                    "    _C_PRI = _tc.get(\"primary\", \"#FFD700\")\n"
+                    "    _C_SEC = _tc.get(\"secondary\", \"#FFBF00\")\n"
+                    "    _C_TER = _tc.get(\"tertiary\", \"#CD7F32\")\n"
+                    "    _C_MUT = _tc.get(\"muted\", \"#B8860B\")\n"
+                    "    _SYM = _tb.get(\"compact_symbol\", \"⚕\")\n"
+                    "    _LBL = _tb.get(\"compact_label\", \"NOUS HERMES\")\n"
+                    "    _TAG = _tb.get(\"compact_tagline\", \"AI Agent Framework\")\n"
+                    "    _TL = _tb.get(\"tagline\", \"Messenger of the Digital Gods\")\n"
+                    "    _ORG = _tb.get(\"org_name\", \"Nous Research\")\n"
+                )
+                func_text = func_text[:insert_at] + helper + func_text[insert_at:]
+                changes.append("Injected theme lookup into _build_compact_banner()")
+
+        # Patch function body strings/markup (leave other parts of cli.py alone).
+        helper_end_marker = "_ORG = _tb.get(\"org_name\", \"Nous Research\")\n"
+        split_idx = func_text.find(helper_end_marker)
+        if split_idx != -1:
+            split_idx += len(helper_end_marker)
+            helper_part = func_text[:split_idx]
+            body_part = func_text[split_idx:]
+        else:
+            helper_part = ""
+            body_part = func_text
+
+        # w < 30 branch (very narrow): theme colours + branding
+        body_part = body_part.replace(
+            'return "\\n[#FFBF00]⚕ NOUS HERMES[/] [dim #B8860B]- Nous Research[/]\\n"',
+            'return f"\\n[{_C_SEC}]{_SYM} {_LBL}[/] [dim {_C_MUT}]- {_ORG}[/]\\n"',
         )
-        text = text.replace(old_compact_narrow, new_compact_narrow)
-        changes.append("Patched narrow compact banner to use theme")
+
+        # Main compact banner strings: branding
+        body_part = body_part.replace(
+            'line1 = "⚕ NOUS HERMES - AI Agent Framework"',
+            'line1 = f"{_SYM} {_LBL} - {_TAG}"',
+        )
+        body_part = body_part.replace(
+            'line2 = "Messenger of the Digital Gods  ·  Nous Research"',
+            'line2 = f"{_TL}  ·  {_ORG}"',
+        )
+
+        # Main compact banner strings: colours
+        body_part = body_part.replace("[bold #FFD700]", "[bold {_C_PRI}]")
+        body_part = body_part.replace("[#FFBF00]", "[{_C_SEC}]")
+        body_part = body_part.replace("[#CD7F32]", "[{_C_TER}]")
+        body_part = body_part.replace("[dim #B8860B]", "[dim {_C_MUT}]")
+
+        new_func_text = helper_part + body_part
+        if new_func_text != func_text:
+            func_text = new_func_text
+            changes.append("Patched _build_compact_banner() to use theme colours/branding")
+
+        text = text[:func_start] + func_text + text[func_end:]
 
     # ── 12. Patch the response label ───────────────────────────────────
     old_label = 'label = " ⚕ Hermes "'
