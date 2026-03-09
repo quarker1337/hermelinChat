@@ -1225,6 +1225,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             prefetched = []
 
         print(f"[hermelin] spawning PTY cols={init_cols} rows={init_rows} (query cols={cols} rows={rows})")
+
+        # Ensure the spawn cwd exists (default is ~/.hermes/artifacts/runners/projects).
+        try:
+            config.spawn_cwd.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
         p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=init_cols, rows=init_rows)
 
         def _artifact_snapshot() -> dict[str, dict]:

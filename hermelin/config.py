@@ -11,6 +11,7 @@ def _env_bool(name: str, default: str = "0") -> bool:
 
 _DEFAULT_HERMES_HOME = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
 _DEFAULT_META_DB = _DEFAULT_HERMES_HOME / "hermilin_meta.db"
+_DEFAULT_SPAWN_CWD = _DEFAULT_HERMES_HOME / "artifacts" / "runners" / "projects"
 
 
 @dataclass(frozen=True)
@@ -34,8 +35,11 @@ class HermelinConfig:
     meta_db_path: Path = Path(os.getenv("HERMELIN_META_DB_PATH", str(_DEFAULT_META_DB))).expanduser()
 
     # Working directory to run the hermes CLI in.
-    # Defaults to the directory hermelinChat is started from.
-    spawn_cwd: Path = Path(os.getenv("HERMELIN_SPAWN_CWD", os.getcwd())).expanduser()
+    # Default: a safe scratch workspace under ~/.hermes so Hermes doesn't create
+    # ad-hoc files inside whatever git repo hermelinChat was launched from.
+    #
+    # Override with HERMELIN_SPAWN_CWD if you want a different workspace.
+    spawn_cwd: Path = Path(os.getenv("HERMELIN_SPAWN_CWD", str(_DEFAULT_SPAWN_CWD))).expanduser()
 
     # Security:
     # Comma-separated allowlist of IPs/CIDRs that can access HTTP + WebSocket.
