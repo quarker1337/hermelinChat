@@ -506,6 +506,82 @@ def _write_backup(src: Path, hermes_home: Path, dry_run: bool = False) -> Path:
     return backup_path
 
 
+def _ensure_single_themefile_param(text: str, changes: list[str]) -> str:
+    """Ensure cli.py's def main(...) has *exactly one* themefile parameter.
+
+    Older versions of this patcher could insert `themefile` multiple times when
+    re-run, breaking Hermes with:
+
+        SyntaxError: duplicate argument 'themefile'
+
+    This function is intentionally idempotent and also repairs that broken state.
+    """
+
+    lines = text.split("\n")
+
+    # Find the main() entrypoint signature.
+    start = None
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*def\s+main\s*\(", line):
+            start = i
+            break
+
+    if start is None:
+        return text
+
+    end = None
+    for j in range(start, min(start + 250, len(lines))):
+        # match: "):" or ") -> int:"
+        if re.search(r"\)\s*(?:->\s*[^:]+)?\s*:", lines[j]):
+            end = j
+            break
+
+    if end is None:
+        return text
+
+    sig = lines[start : end + 1]
+
+    theme_line_idxs = [k for k, l in enumerate(sig) if re.search(r"\bthemefile\b", l)]
+
+    if len(theme_line_idxs) > 1:
+        for idx in reversed(theme_line_idxs[1:]):
+            del sig[idx]
+        changes.append("Removed duplicate themefile parameter(s) from main()")
+
+    # Recompute after potential deletions
+    theme_line_idxs = [k for k, l in enumerate(sig) if re.search(r"\bthemefile\b", l)]
+
+    if len(theme_line_idxs) == 0:
+        insert_at = None
+        indent = None
+
+        # Prefer inserting just before verbose (keeps signature readable).
+        for k, l in enumerate(sig):
+            if re.search(r"\bverbose\b", l) and ":" in l:
+                insert_at = k
+                indent = re.match(r"^(\s*)", l).group(1)
+                break
+
+        if insert_at is None:
+            # Fallback: insert before the closing paren line.
+            insert_at = max(len(sig) - 1, 0)
+
+            for k in range(len(sig) - 2, -1, -1):
+                m = re.match(r"^(\s+)\w", sig[k])
+                if m:
+                    indent = m.group(1)
+                    break
+
+        if indent is None:
+            indent = "    "
+
+        sig.insert(insert_at, f"{indent}themefile: str = None,")
+        changes.append("Added --themefile parameter to main()")
+
+    lines = lines[:start] + sig + lines[end + 1 :]
+    return "\n".join(lines)
+
+
 def patch_cli(cli_path: str, theme: dict, hermes_home: Path | None = None, dry_run: bool = False) -> list[str]:
     """
     Patch cli.py on disk.  Returns a list of human-readable changes made.
@@ -598,16 +674,8 @@ def patch_cli(cli_path: str, theme: dict, hermes_home: Path | None = None, dry_r
         changes.append("Replaced ANSI definitions with theme-aware defaults")
 
     # ── 4. Add --themefile to main() ───────────────────────────────────
-    # We add 'themefile: str = None' to the main() function signature
-    # and the theme loading call at the top of main().
-    main_sig_pattern = r'(def main\([^)]*)(verbose: bool = False)'
-    if re.search(main_sig_pattern, text):
-        text = re.sub(
-            main_sig_pattern,
-            r'\1themefile: str = None,\n    verbose: bool = False',
-            text,
-        )
-        changes.append("Added --themefile parameter to main()")
+    # Ensure def main(...) has exactly one themefile param (idempotent + repairs old duplicates).
+    text = _ensure_single_themefile_param(text, changes)
 
     # Also add the docstring entry
     if "themefile" not in text.split("Args:")[1].split("Examples:")[0] if "Args:" in text else "":
