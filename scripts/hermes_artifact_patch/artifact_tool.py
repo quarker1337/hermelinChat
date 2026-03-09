@@ -33,6 +33,9 @@ import json
 import os
 import signal
 import re
+import shlex
+import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -63,6 +66,7 @@ ARTIFACT_PERSISTENT_DIR = os.path.join(ARTIFACTS_HOME, "persistent")
 ARTIFACTS_ROOT_DIR = ARTIFACTS_HOME
 
 RUNNERS_DIR = os.path.join(ARTIFACTS_HOME, "runners")
+RUNNER_PROJECTS_DIR = os.path.join(RUNNERS_DIR, "projects")
 PIDS_DIR = os.path.join(ARTIFACTS_HOME, "pids")
 
 # Legacy (pre-move) locations
@@ -444,6 +448,43 @@ def _is_pid_running(pid: int) -> bool:
         return False
 
 
+def _terminate_pid(pid: int) -> tuple[bool, str | None, str | None]:
+    """Best-effort SIGTERM with optional process-group termination.
+
+    Returns: (killed, method, error)
+      method: 'killpg' or 'kill'
+      error: None | 'process_not_found' | 'permission_denied' | <exception str>
+    """
+
+    if not isinstance(pid, int) or pid <= 0:
+        return False, None, "invalid_pid"
+
+    method = "kill"
+    try:
+        use_pgid = False
+        if hasattr(os, "getpgid") and hasattr(os, "killpg"):
+            try:
+                pgid = os.getpgid(pid)
+                use_pgid = pgid == pid
+            except Exception:
+                use_pgid = False
+
+        if use_pgid:
+            method = "killpg"
+            os.killpg(pid, signal.SIGTERM)
+        else:
+            method = "kill"
+            os.kill(pid, signal.SIGTERM)
+
+        return True, method, None
+    except ProcessLookupError:
+        return False, method, "process_not_found"
+    except PermissionError:
+        return False, method, "permission_denied"
+    except Exception as exc:
+        return False, method, str(exc)
+
+
 def list_artifacts(scope: str = "all") -> str:
     """List artifacts for the model so it can discover existing panel tabs.
 
@@ -566,14 +607,179 @@ def focus_artifact(tab_id: str) -> str:
     return json.dumps({"status": "focused", "tab_id": artifact_id}, ensure_ascii=False)
 
 
-def stop_runner(tab_id: str) -> str:
+def start_runner(
+    tab_id: str,
+    runner_code: str = "",
+    command: str = "",
+    restart: bool = False,
+) -> str:
+    """Start a background runner process for a live artifact.
+
+    - Project workspace: ~/.hermes/artifacts/runners/projects/{tab_id}/
+    - Runner script (optional): ~/.hermes/artifacts/runners/{tab_id}_runner.py
+    - PID file (plain text): ~/.hermes/artifacts/pids/{tab_id}.pid
+    - Logs: ~/.hermes/artifacts/runners/projects/{tab_id}/runner.log
+
+    Provide either:
+    - runner_code: Python source to write to the runner script (then it is executed), OR
+    - command: a command line to execute (split with shlex; no shell).
+
+    If restart=True and a runner is already active, it is stopped first (but the runner
+    script is kept so you can restart without re-sending runner_code).
+    """
+
+    artifact_id = _sanitize_artifact_id(tab_id)
+    if not artifact_id:
+        return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
+
+    pid_root = _ensure_dir(PIDS_DIR)
+    runner_root = _ensure_dir(RUNNERS_DIR)
+    projects_root = _ensure_dir(RUNNER_PROJECTS_DIR)
+    project_dir = _ensure_dir(str(projects_root / artifact_id))
+
+    pid_path = pid_root / f"{artifact_id}.pid"
+    runner_path = runner_root / f"{artifact_id}_runner.py"
+    log_path = project_dir / "runner.log"
+
+    existing_pid: int | None = None
+    if pid_path.exists() and pid_path.is_file():
+        try:
+            existing_pid = int(pid_path.read_text(encoding="utf-8").strip())
+        except Exception:
+            existing_pid = None
+
+    if existing_pid is not None and _is_pid_running(existing_pid):
+        if not restart:
+            return json.dumps(
+                {
+                    "status": "already_running",
+                    "tab_id": artifact_id,
+                    "pid": existing_pid,
+                    "pid_path": str(pid_path),
+                    "runner_path": str(runner_path) if runner_path.exists() else None,
+                    "project_dir": str(project_dir),
+                    "log_path": str(log_path),
+                },
+                ensure_ascii=False,
+            )
+
+        # Stop but keep runner script (restart semantics).
+        try:
+            stop_runner(tab_id=artifact_id, keep_script=True)
+        except Exception:
+            pass
+    else:
+        # Clean up stale PID file.
+        if pid_path.exists():
+            try:
+                pid_path.unlink()
+            except Exception:
+                pass
+
+    # If runner_code is provided, write/update the runner script now.
+    if runner_code:
+        try:
+            runner_path.write_text(str(runner_code), encoding="utf-8")
+        except Exception as exc:
+            return json.dumps({"error": f"failed to write runner script: {exc}"}, ensure_ascii=False)
+
+    mode = "command" if str(command or "").strip() else "python"
+
+    argv: list[str]
+    if mode == "command":
+        try:
+            argv = shlex.split(str(command))
+        except Exception as exc:
+            return json.dumps({"error": f"invalid command: {exc}"}, ensure_ascii=False)
+        if not argv:
+            return json.dumps({"error": "command is empty"}, ensure_ascii=False)
+    else:
+        if not runner_path.exists():
+            return json.dumps(
+                {
+                    "error": f"runner script not found: {runner_path}. Provide runner_code or command.",
+                    "tab_id": artifact_id,
+                },
+                ensure_ascii=False,
+            )
+        argv = [sys.executable, str(runner_path)]
+
+    # Spawn detached so the PTY lifecycle doesn't SIGHUP-kill it.
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    env["HERMES_ARTIFACT_TAB_ID"] = artifact_id
+    env["HERMES_ARTIFACTS_HOME"] = str(Path(ARTIFACTS_HOME))
+    env["HERMES_ARTIFACT_PROJECT_DIR"] = str(project_dir)
+
+    log_handle = None
+    try:
+        log_handle = log_path.open("ab")
+        try:
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            log_handle.write(
+                f"\n\n[artifact_tool] start_runner {artifact_id} at {stamp} (mode={mode})\n".encode("utf-8")
+            )
+            log_handle.flush()
+        except Exception:
+            pass
+
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(project_dir),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=log_handle,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        try:
+            if log_handle:
+                log_handle.close()
+        except Exception:
+            pass
+        return json.dumps({"error": f"failed to start runner: {exc}"}, ensure_ascii=False)
+    finally:
+        try:
+            if log_handle:
+                log_handle.close()
+        except Exception:
+            pass
+
+    try:
+        pid_path.write_text(str(proc.pid), encoding="utf-8")
+    except Exception as exc:
+        # If we can't write the PID file, immediately stop the runner so it doesn't become orphaned.
+        try:
+            _terminate_pid(proc.pid)
+        except Exception:
+            pass
+        return json.dumps({"error": f"failed to write pid file: {exc}"}, ensure_ascii=False)
+
+    return json.dumps(
+        {
+            "status": "started",
+            "tab_id": artifact_id,
+            "pid": proc.pid,
+            "mode": mode,
+            "argv": argv,
+            "runner_path": str(runner_path) if runner_path.exists() else None,
+            "pid_path": str(pid_path),
+            "project_dir": str(project_dir),
+            "log_path": str(log_path),
+        },
+        ensure_ascii=False,
+    )
+
+
+def stop_runner(tab_id: str, keep_script: bool = False) -> str:
     """Stop a background runner process for a live artifact.
 
     Step 6 behavior:
     - Read PID from ~/.hermes/artifacts/pids/{tab_id}.pid
     - If found, send SIGTERM to that PID
     - Delete the PID file
-    - Delete the runner script ~/.hermes/artifacts/runners/{tab_id}_runner.py if it exists
+    - Delete the runner script ~/.hermes/artifacts/runners/{tab_id}_runner.py unless keep_script=true
 
     Best-effort: processes may already be dead; cleanup should still succeed.
     """
@@ -611,17 +817,15 @@ def stop_runner(tab_id: str) -> str:
             pid = None
 
     killed = False
+    kill_method: str | None = None
     kill_error: str | None = None
 
     if pid is not None:
         try:
-            os.kill(pid, signal.SIGTERM)
-            killed = True
-        except ProcessLookupError:
-            kill_error = "process_not_found"
-        except PermissionError:
-            kill_error = "permission_denied"
+            killed, kill_method, kill_error = _terminate_pid(pid)
         except Exception as exc:
+            killed = False
+            kill_method = None
             kill_error = str(exc)
 
     pid_file_removed = False
@@ -635,7 +839,7 @@ def stop_runner(tab_id: str) -> str:
         pass
 
     try:
-        if runner_path.exists():
+        if not keep_script and runner_path.exists():
             runner_path.unlink()
             runner_script_removed = True
     except Exception:
@@ -649,9 +853,11 @@ def stop_runner(tab_id: str) -> str:
             "tab_id": artifact_id,
             "pid": pid,
             "killed": killed,
+            "kill_method": kill_method,
             "kill_error": kill_error,
             "pid_file_removed": pid_file_removed,
             "runner_script_removed": runner_script_removed,
+            "keep_script": bool(keep_script),
             "warning": warning,
         },
         ensure_ascii=False,
@@ -723,7 +929,7 @@ CREATE_ARTIFACT_SCHEMA = {
         "3) The script must write its PID to ~/.hermes/artifacts/pids/{tab_id}.pid on startup\n"
         "4) The script loops, gathers data, and overwrites the artifact JSON file\n"
         "   in ~/.hermes/artifacts/session/{tab_id}.json (or persistent/ if persistent=true)\n"
-        "5) Launch with: nohup python3 ~/.hermes/artifacts/runners/{tab_id}_runner.py &\n"
+        "5) Prefer launching via start_runner(tab_id='{tab_id}', runner_code=...) so Hermes manages PID files and a safe cwd automatically.\n"
         "6) NEVER place runner scripts inside any git repository\n"
         "7) Handle SIGTERM gracefully for clean shutdown (stop_runner sends SIGTERM)\n"
         "\n"
@@ -815,6 +1021,49 @@ CLEAR_ARTIFACTS_SCHEMA = {
 }
 
 
+START_RUNNER_SCHEMA = {
+    "name": "start_runner",
+    "description": (
+        "Start a background runner process for a live artifact. "
+        "This tool enforces a safe workspace under ~/.hermes/artifacts/runners/projects/{tab_id}/ "
+        "and always writes a plain-text PID file to ~/.hermes/artifacts/pids/{tab_id}.pid so "
+        "stop_runner() and session cleanup can terminate it reliably. "
+        "Runner output is appended to ~/.hermes/artifacts/runners/projects/{tab_id}/runner.log."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {
+                "type": "string",
+                "description": "Artifact tab ID whose runner should be started.",
+            },
+            "runner_code": {
+                "type": "string",
+                "description": (
+                    "Optional Python source code to write to ~/.hermes/artifacts/runners/{tab_id}_runner.py "
+                    "before starting it. If omitted, start_runner will run the existing runner script."
+                ),
+                "default": "",
+            },
+            "command": {
+                "type": "string",
+                "description": (
+                    "Optional command line to run instead of a Python runner script (split with shlex; no shell). "
+                    "Example: 'npm run dev -- --port 5173'."
+                ),
+                "default": "",
+            },
+            "restart": {
+                "type": "boolean",
+                "description": "If true and a runner is already active, stop it first (keeping the script) then start again.",
+                "default": False,
+            },
+        },
+        "required": ["tab_id"],
+    },
+}
+
+
 STOP_RUNNER_SCHEMA = {
     "name": "stop_runner",
     "description": "Stop a live artifact updater runner process for a given tab_id.",
@@ -824,7 +1073,12 @@ STOP_RUNNER_SCHEMA = {
             "tab_id": {
                 "type": "string",
                 "description": "Artifact tab ID whose runner should be stopped.",
-            }
+            },
+            "keep_script": {
+                "type": "boolean",
+                "description": "If true, keep ~/.hermes/artifacts/runners/{tab_id}_runner.py on disk (useful for restart).",
+                "default": False,
+            },
         },
         "required": ["tab_id"],
     },
@@ -864,8 +1118,17 @@ def _handle_clear_artifacts(args, **kw):
     return clear_artifacts(scope=args.get("scope", "session"), task_id=kw.get("task_id"))
 
 
+def _handle_start_runner(args, **kw):
+    return start_runner(
+        tab_id=args.get("tab_id", ""),
+        runner_code=args.get("runner_code", ""),
+        command=args.get("command", ""),
+        restart=args.get("restart", False),
+    )
+
+
 def _handle_stop_runner(args, **kw):
-    return stop_runner(tab_id=args.get("tab_id", ""))
+    return stop_runner(tab_id=args.get("tab_id", ""), keep_script=args.get("keep_script", False))
 
 
 registry.register(
@@ -905,6 +1168,14 @@ registry.register(
     toolset="artifacts",
     schema=CLEAR_ARTIFACTS_SCHEMA,
     handler=_handle_clear_artifacts,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="start_runner",
+    toolset="artifacts",
+    schema=START_RUNNER_SCHEMA,
+    handler=_handle_start_runner,
     check_fn=_check_requirements,
 )
 

@@ -261,7 +261,18 @@ def cleanup_session_artifacts(root: Path) -> dict[str, Any]:
             if pid is not None and pid > 0:
                 kill_attempts += 1
                 try:
-                    os.kill(pid, signal.SIGTERM)
+                    # Prefer killing the whole process group if the runner was started detached
+                    # (artifact_tool.start_runner uses start_new_session=True so pgid==pid).
+                    if hasattr(os, "getpgid") and hasattr(os, "killpg"):
+                        try:
+                            if os.getpgid(pid) == pid:
+                                os.killpg(pid, signal.SIGTERM)
+                            else:
+                                os.kill(pid, signal.SIGTERM)
+                        except Exception:
+                            os.kill(pid, signal.SIGTERM)
+                    else:
+                        os.kill(pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
                 except PermissionError:
