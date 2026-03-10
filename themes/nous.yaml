@@ -1,0 +1,86 @@
+# nous.yaml — Nous Research aqua theme for Hermes Agent
+#
+# After running scripts/install_hermes_themes.py (via ./scripts/update.sh), use:
+#   hermes --theme nous.yaml
+#
+# Or make it the default:
+#   cp nous.yaml $HERMES_HOME/theme.yaml
+#
+# All fields are optional — anything omitted falls back to the baked-in default.
+
+meta:
+  name: nous
+  description: "Nous Research aqua theme"
+
+# ─── Rich markup hex colours ──────────────────────────────────────────
+colors:
+  primary:      "#5cc8e6"   # accent
+  secondary:    "#3aa8c8"
+  tertiary:     "#1e6888"
+
+  text:         "#8acade"
+  text_bright:  "#c0e8f4"
+  muted:        "#4a7a88"
+  border:       "#1a3a44"
+  surface:      "#0a2028"
+  background:   "#06181e"
+  session:      "#4a7a88"
+
+  success:      "#38c878"
+  danger:       "#e84057"
+  info:         "#5cc8e6"
+  purple:       "#a78bfa"
+  cyan:         "#22d3ee"
+
+# ─── ANSI escape codes (conversation renderer, response boxes) ────────
+ansi:
+  accent: "\x1b[38;2;92;200;230m"   # truecolor #5cc8e6
+  bold:   "\x1b[1m"
+  dim:    "\x1b[2m"
+  reset:  "\x1b[0m"
+  muted:  "\x1b[38;2;74;122;136m"   # truecolor #4a7a88 — response box borders
+
+# ─── Branding text ────────────────────────────────────────────────────
+branding:
+  product_name:     hermilinChat
+  org_name:         Nous Research
+  tagline:          "Nous Research"
+  compact_tagline:  "Nous terminal"
+  compact_symbol:   "⚕"
+  compact_label:    hermilinChat
+  panel_title:      hermilinChat
+  response_label:   " ⚕ Hermes "
+  goodbye:          "Goodbye! ⚕"
+  welcome:          "Welcome to hermilinChat! Type your message or /help for commands."
+
+# ─── prompt_toolkit style overrides (input area, menus, dialogs) ──────
+pt_styles:
+  input-area:                            "#8acade"
+  placeholder:                           "#555555 italic"
+  prompt:                                "#8acade"
+  prompt-working:                        "#888888 italic"
+  hint:                                  "#555555 italic"
+  input-rule:                            "#1a3a44"
+  image-badge:                           "#87CEEB bold"
+  completion-menu:                       "bg:#0a2028 #8acade"
+  completion-menu.completion:            "bg:#0a2028 #8acade"
+  completion-menu.completion.current:    "bg:#1a3a44 #5cc8e6"
+  completion-menu.meta.completion:       "bg:#0a2028 #888888"
+  completion-menu.meta.completion.current: "bg:#1a3a44 #3aa8c8"
+  clarify-border:                        "#1a3a44"
+  clarify-title:                         "#5cc8e6 bold"
+  clarify-question:                      "#8acade bold"
+  clarify-choice:                        "#AAAAAA"
+  clarify-selected:                      "#5cc8e6 bold"
+  clarify-active-other:                  "#5cc8e6 italic"
+  clarify-countdown:                     "#3aa8c8"
+  sudo-prompt:                           "#e84057 bold"
+  sudo-border:                           "#1a3a44"
+  sudo-title:                            "#e84057 bold"
+  sudo-text:                             "#8acade"
+  approval-border:                       "#1a3a44"
+  approval-title:                        "#5cc8e6 bold"
+  approval-desc:                         "#8acade bold"
+  approval-cmd:                          "#AAAAAA italic"
+  approval-choice:                       "#AAAAAA"
+  approval-selected:                     "#5cc8e6 bold"

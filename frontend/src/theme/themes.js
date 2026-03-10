@@ -2,6 +2,9 @@ import HERMILIN_NOT_FLIPPED_RAW from '../assets/hermilin-not-flipped.svg?raw'
 import STOUT_MASCOT_RAW from '../assets/stout-mascot.svg?raw'
 import MATRIX_SKULL_RAW from '../assets/matrix-skull.svg?raw'
 import WHITE_RABBIT_RAW from '../assets/white-rabbit.svg?raw'
+import NOUS_ALIGNMENT_RAW from '../assets/nous-alignment.svg?raw'
+import NOUS_MARK_RAW from '../assets/nous-alignment-flipped.svg?raw'
+import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
 
 export const DEFAULT_THEME_ID = 'hermilin'
 
@@ -122,6 +125,47 @@ export const THEMES = {
         resetChance: 0.985,
       },
       overlay: { kind: 'scanlines', opacity: 0.06 },
+    },
+  },
+
+  nous: {
+    id: 'nous',
+    label: 'Nous (aqua)',
+    AMBER: {
+      300: '#9ae1f2',
+      400: '#5cc8e6',
+      500: '#3aa8c8',
+      600: '#2a88a8',
+      700: '#1e6888',
+      800: '#144868',
+      900: '#0a2838',
+    },
+    SLATE: {
+      bg: '#06181e',
+      surface: '#0a2028',
+      elevated: '#0e2830',
+      border: '#1a3a44',
+      muted: '#4a7a88',
+      text: '#8acade',
+      textBright: '#c0e8f4',
+      accent: '#5cc8e6',
+      danger: '#e84057',
+      success: '#38c878',
+      info: '#5cc8e6',
+      purple: '#a78bfa',
+      cyan: '#22d3ee',
+    },
+    icons: {
+      faviconHref: NOUS_MARK_URL,
+      topbarSvgRaw: NOUS_MARK_RAW,
+      alignmentSvgRaw: NOUS_ALIGNMENT_RAW,
+      alignmentTitle: 'nous research',
+      alignmentWhisperText: 'aligned to nous…',
+      alignmentFetchWhisper: true,
+    },
+    background: {
+      kind: 'particles',
+      overlay: { kind: 'grain', opacity: 0.03 },
     },
   },
 }
