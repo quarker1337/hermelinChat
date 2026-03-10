@@ -3,8 +3,6 @@
 
 This module is installed into Hermes as: tools/artifact_tool.py
 
-See docs/artifacts/artifact-tool-refactor.md for rationale.
-
 Provides tools:
 - list_artifacts
 - focus_artifact
