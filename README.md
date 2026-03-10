@@ -192,10 +192,14 @@ Notes:
 
 ## Hermes artifact tool patch
 
-The artifact panel UI depends on Hermes tools that are not upstream yet:
+The artifact panel UI depends on Hermes tools that are not upstream yet (installed via this repo's patch):
 - `create_artifact`
 - `remove_artifact`
 - `clear_artifacts`
+- `list_artifacts`
+- `focus_artifact`
+- `start_runner`
+- `tail_runner_log`
 - `stop_runner`
 
 This repo keeps that integration as a local patch under `scripts/` instead of pushing it upstream.
@@ -215,7 +219,7 @@ What it does:
 Notes:
 - `./scripts/update.sh` runs this patch step automatically unless you pass `--skip-hermes-patch`
 - if your Hermes config uses restricted toolsets, make sure `artifacts` or `all` is enabled
-- docs / reference material lives in `docs/artifacts/` (tool schema guide + UI mockup)
+- example payloads live in `examples/artifacts/payloads.json`
 
 ## Auto session titles (optional)
 

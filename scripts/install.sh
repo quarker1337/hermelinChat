@@ -143,6 +143,11 @@ ENV_DIR="$(dirname "$ENV_FILE")"
 DEFAULT_HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 DEFAULT_HERMES_HOME="${DEFAULT_HERMES_HOME/#\~/$HOME}"
 
+DEFAULT_HERMES_EXE="hermes"
+if command -v hermes >/dev/null 2>&1; then
+  DEFAULT_HERMES_EXE="$(command -v hermes)"
+fi
+
 if command -v id >/dev/null 2>&1; then
   DEFAULT_USER="$(id -un)"
 else
@@ -238,7 +243,7 @@ HERMELIN_COOKIE_SECRET='$COOKIE_SECRET'
 
 # Hermes integration
 HERMES_HOME=$DEFAULT_HERMES_HOME
-HERMELIN_HERMES_CMD='hermes chat --toolsets "hermes-cli, artifacts"'
+HERMELIN_HERMES_CMD="$DEFAULT_HERMES_EXE chat --toolsets \"hermes-cli, artifacts\""
 
 # Optional
 # HERMELIN_META_DB_PATH=$DEFAULT_HERMES_HOME/hermilin_meta.db
