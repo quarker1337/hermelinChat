@@ -164,8 +164,8 @@ export const THEMES = {
       alignmentFetchWhisper: true,
     },
     background: {
-      kind: 'particles',
-      overlay: { kind: 'scanlines', opacity: 0.06 },
+      kind: 'nous-crt',
+      overlay: { kind: 'grain', opacity: 0.03 },
     },
   },
 }
