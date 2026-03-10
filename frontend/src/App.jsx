@@ -15,6 +15,7 @@ const ARTIFACT_PANEL_WIDTH_STORAGE_KEY = 'hermilinChat.artifactPanelWidth'
 const DEFAULT_ARTIFACT_PANEL_WIDTH = 480
 
 const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
+const BACKGROUND_OVERLAY_VALUES = ['auto', 'none', 'grain', 'scanlines']
 
 // Release version (keep in sync with git tag + backend pyproject).
 const HERMILINCHAT_VERSION = '0.12'
@@ -27,6 +28,10 @@ const DEFAULT_UI_PREFS = {
     enabled: true,
     // 50..100 (50 matches the old look)
     intensity: 75,
+  },
+  background: {
+    // 'auto' means "use the active theme's default overlay"
+    overlay: 'auto',
   },
   timestamps: {
     enabled: true,
@@ -46,6 +51,7 @@ function clampNum(n, min, max) {
 function normalizeUiPrefs(raw) {
   const r = raw && typeof raw === 'object' ? raw : {}
   const p = r.particles && typeof r.particles === 'object' ? r.particles : {}
+  const bg = r.background && typeof r.background === 'object' ? r.background : {}
   const ts = r.timestamps && typeof r.timestamps === 'object' ? r.timestamps : {}
   const term = r.terminal && typeof r.terminal === 'object' ? r.terminal : {}
 
@@ -64,12 +70,21 @@ function normalizeUiPrefs(raw) {
       ? DEFAULT_UI_PREFS.appName
       : String(appNameRaw).slice(0, 64)
 
+  const overlayRaw = bg.overlay ?? DEFAULT_UI_PREFS.background.overlay
+  const overlayStr = String(overlayRaw || '').toLowerCase()
+  const overlay = BACKGROUND_OVERLAY_VALUES.includes(overlayStr)
+    ? overlayStr
+    : DEFAULT_UI_PREFS.background.overlay
+
   return {
     theme,
     appName: appName.trim(),
     particles: {
       enabled: p.enabled === undefined ? DEFAULT_UI_PREFS.particles.enabled : !!p.enabled,
       intensity: clampNum(p.intensity ?? DEFAULT_UI_PREFS.particles.intensity, 50, 100),
+    },
+    background: {
+      overlay,
     },
     timestamps: {
       enabled: ts.enabled === undefined ? DEFAULT_UI_PREFS.timestamps.enabled : !!ts.enabled,
@@ -2286,6 +2301,36 @@ const SettingsPanel = ({
               />
             </div>
 
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+              <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Overlay</div>
+              <div style={{ flex: 1 }} />
+              <select
+                value={ui.background?.overlay || 'auto'}
+                onChange={(e) => {
+                  onUiPrefsChange?.((prev) => ({
+                    ...prev,
+                    background: { ...(prev.background || {}), overlay: e.target.value },
+                  }))
+                }}
+                style={{
+                  background: SLATE.elevated,
+                  border: `1px solid ${SLATE.border}`,
+                  color: SLATE.textBright,
+                  padding: '6px 8px',
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: 11,
+                  outline: 'none',
+                  borderRadius: 8,
+                }}
+                title="Background overlay"
+              >
+                <option value="auto">theme default</option>
+                <option value="none">none</option>
+                <option value="grain">grain</option>
+                <option value="scanlines">scanlines</option>
+              </select>
+            </div>
+
             <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2901,6 +2946,22 @@ export default function App() {
     const id = normalizeThemeId(uiPrefs.theme)
     return THEMES[id] || THEMES[DEFAULT_THEME_ID]
   }, [uiPrefs.theme])
+
+  const overlayPref = uiPrefs.background?.overlay || 'auto'
+  const themeOverlay = activeTheme?.background?.overlay || {}
+  const effectiveOverlayKind =
+    overlayPref === 'auto' ? themeOverlay.kind : overlayPref === 'none' ? null : overlayPref
+
+  const effectiveOverlayOpacity =
+    effectiveOverlayKind === 'scanlines'
+      ? overlayPref === 'auto'
+        ? themeOverlay.opacity ?? 0.06
+        : 0.06
+      : effectiveOverlayKind === 'grain'
+        ? overlayPref === 'auto'
+          ? themeOverlay.opacity ?? 0.03
+          : 0.03
+        : 0
 
   const appNameLabel = useMemo(() => {
     const s = (uiPrefs.appName || '').toString().trim()
@@ -4217,10 +4278,10 @@ export default function App() {
           )
         )}
 
-        {activeTheme?.background?.overlay?.kind === 'scanlines' ? (
-          <ScanlinesOverlay opacity={activeTheme?.background?.overlay?.opacity ?? 0.06} />
-        ) : activeTheme?.background?.overlay?.kind === 'grain' ? (
-          <GrainOverlay opacity={activeTheme?.background?.overlay?.opacity ?? 0.03} />
+        {effectiveOverlayKind === 'scanlines' ? (
+          <ScanlinesOverlay opacity={effectiveOverlayOpacity} />
+        ) : effectiveOverlayKind === 'grain' ? (
+          <GrainOverlay opacity={effectiveOverlayOpacity} />
         ) : null}
 
         <div

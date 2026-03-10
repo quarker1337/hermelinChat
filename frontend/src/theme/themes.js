@@ -165,7 +165,7 @@ export const THEMES = {
     },
     background: {
       kind: 'particles',
-      overlay: { kind: 'grain', opacity: 0.03 },
+      overlay: { kind: 'scanlines', opacity: 0.06 },
     },
   },
 }
