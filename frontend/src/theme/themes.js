@@ -6,6 +6,9 @@ import NOUS_ALIGNMENT_RAW from '../assets/nous-alignment.svg?raw'
 import NOUS_MARK_RAW from '../assets/nous-alignment-flipped.svg?raw'
 import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
 
+import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
+import SAMARITAN_FAVICON_URL from '../assets/samaritan-favicon.svg'
+
 export const DEFAULT_THEME_ID = 'hermilin'
 
 export const THEMES = {
@@ -166,6 +169,49 @@ export const THEMES = {
     background: {
       kind: 'nous-crt',
       overlay: { kind: 'grain', opacity: 0.03 },
+    },
+  },
+
+  samaritan: {
+    id: 'samaritan',
+    label: 'Samaritan (light)',
+    AMBER: {
+      // Keep the token name AMBER for compatibility; in this theme it represents the accent scale.
+      300: '#e06666',
+      400: '#cc3333',
+      500: '#aa2020',
+      600: '#881818',
+      700: '#661212',
+      800: '#440c0c',
+      900: '#220606',
+    },
+    SLATE: {
+      bg: '#e8e6e1',
+      surface: '#dddbd6',
+      elevated: '#d2d0cb',
+      border: '#bab8b3',
+      muted: '#7a7872',
+      text: '#3a3835',
+      textBright: '#1a1816',
+      accent: '#cc3333',
+      danger: '#aa2020',
+      success: '#2da565',
+      info: '#60a5fa',
+      purple: '#a78bfa',
+      cyan: '#22d3ee',
+      yellow: '#cc3333',
+    },
+    icons: {
+      faviconHref: SAMARITAN_FAVICON_URL,
+      topbarSvgRaw: SAMARITAN_MARK_RAW,
+      alignmentSvgRaw: SAMARITAN_MARK_RAW,
+      alignmentTitle: 'samaritan',
+      alignmentWhisperText: 'the machine sees you…',
+      alignmentFetchWhisper: false,
+    },
+    background: {
+      kind: 'samaritan',
+      overlay: { kind: 'grain', opacity: 0.02 },
     },
   },
 }
