@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 
 import ArtifactPanel from './components/ArtifactPanel.jsx'
@@ -3011,8 +3012,11 @@ function TerminalPane({
         cursorStyle: 'bar',
         cursorWidth: 1,
         scrollback: 10000,
-        convertEol: true,
+        // PTY already handles newline translation; forcing convertEol can confuse TUIs.
+        convertEol: false,
         allowTransparency: true,
+        // Needed for term.unicode.* (Unicode11Addon)
+        allowProposedApi: true,
         theme: {
           // Transparent terminal so the ParticleField (and grain) can show through.
           // NOTE: allowTransparency must be true for this to work.
@@ -3088,6 +3092,15 @@ function TerminalPane({
 
         return true
       })
+
+      // Better Unicode width handling (fixes misaligned completions for emoji/symbols).
+      try {
+        const unicode11 = new Unicode11Addon()
+        term.loadAddon(unicode11)
+        term.unicode.activeVersion = '11'
+      } catch {
+        // ignore
+      }
 
       const fit = new FitAddon()
       term.loadAddon(fit)
