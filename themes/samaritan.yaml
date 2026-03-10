@@ -34,16 +34,16 @@ ansi:
   muted:  "\x1b[38;2;122;120;114m"   # truecolor #7a7872
 
 branding:
-  product_name:     hermilinChat
+  product_name:     Samaritan
   org_name:         Samaritan
   tagline:          "Samaritan"
   compact_tagline:  "Samaritan"
   compact_symbol:   "▲"
-  compact_label:    hermilinChat
-  panel_title:      hermilinChat
-  response_label:   " ▲ Hermes "
+  compact_label:    Samaritan
+  panel_title:      Samaritan
+  response_label:   " ▲ Samaritan "
   goodbye:          "Goodbye."
-  welcome:          "Welcome to hermilinChat! Type your message or /help for commands."
+  welcome:          "What are your commands?"
 
 pt_styles:
   input-area:                            "#1a1816"
@@ -74,3 +74,11 @@ pt_styles:
   approval-cmd:                          "#7a7872 italic"
   approval-choice:                       "#3a3835"
   approval-selected:                     "#cc3333 bold"
+
+logo_large: |
+  [bold {primary}]==================================================================================[/]
+  [bold {primary}] _______ _______ _______ _______  ______ _____ _______ _______ __   _             [/]
+  [bold {primary}] |______ |_____| |  |  | |_____| |_____/   |      |    |_____| | \  |             [/]
+  [bold {primary}] ______| |     | |  |  | |     | |    \_ __|__    |    |     | |  \_|             [/]
+  [bold {primary}] Autonomous Agent System                                                          [/]
+  [bold {primary}]==================================================================================[/]
