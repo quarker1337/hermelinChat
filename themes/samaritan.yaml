@@ -41,7 +41,7 @@ branding:
   compact_symbol:   "▲"
   compact_label:    Samaritan
   panel_title:      Samaritan
-  response_label:   " ▲ Samaritan "
+  response_label:   " \u001b[38;2;204;51;51m▲\u001b[38;2;122;120;114m Samaritan "
   goodbye:          "Goodbye."
   welcome:          "What are your commands?"
 
@@ -82,3 +82,12 @@ logo_large: |
   [bold {primary}] ______| |     | |  |  | |     | |    \_ __|__    |    |     | |  \_|             [/]
   [bold {primary}] Autonomous Agent System                                                          [/]
   [bold {primary}]==================================================================================[/]
+
+# ─── Caduceus / icon art (left panel in the welcome banner) ──────────
+# Red triangle (braille)
+caduceus: |
+  [{primary}]⠀⠀⠀⠀⠀⢀⣴⣿⣦⡀⠀⠀⠀⠀⠀[/]
+  [{primary}]⠀⠀⠀⠀⣴⣿⣿⣿⣿⣦⠀⠀⠀⠀[/]
+  [{primary}]⠀⠀⣾⣿⣿⣿⣿⣿⣿⣷⠀⠀[/]
+  [{primary}]⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷[/]
+  [{primary}]⠙⠛⠛⠛⠛⠛⠛⠛⠛⠋[/]

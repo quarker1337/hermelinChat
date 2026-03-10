@@ -1015,6 +1015,20 @@ def patch_cli(cli_path: str, theme: dict, hermes_home: Path | None = None, dry_r
     if old_label != new_label:
         changes.append("Patched response box label to use theme branding")
 
+    # ── 13. Response label width: ignore ANSI escapes ───────────────────
+    #
+    # Some themes (e.g. samaritan) embed ANSI escapes in branding.response_label
+    # to colorize just the symbol. The upstream Hermes CLI used len(label), which
+    # counts the escape bytes and breaks the box width.
+    old_fill = 'fill = w - 2 - len(label)  # 2 for ╭ and ╮'
+    if old_fill in text:
+        new_fill = (
+            "import re as _re\n"
+            "                fill = w - 2 - len(_re.sub(chr(27) + r'\\[[0-9;]*m', '', label))  # 2 for ╭ and ╮"
+        )
+        text = text.replace(old_fill, new_fill)
+        changes.append("Patched response box width calculation to ignore ANSI escapes")
+
     # ── Write ──────────────────────────────────────────────────────────
     if not dry_run:
         path.write_text(text, encoding="utf-8")
