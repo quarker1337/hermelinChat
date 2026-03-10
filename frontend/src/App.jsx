@@ -691,12 +691,7 @@ const NousCRTField = ({ intensity = 50 }) => {
       ctx.fillStyle = `rgba(0,0,0,${0.03 * f})`
       ctx.fillRect(0, rollY + 40, W, 20)
 
-      // Random whole-screen flicker
-      if (Math.random() < 0.03 * f) {
-        const a = Math.random() * 0.015 * f
-        ctx.fillStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${a})`
-        ctx.fillRect(0, 0, W, H)
-      }
+      // Whole-screen flicker removed (too distracting)
 
       // Occasional horizontal glitch line
       if (Math.random() < 0.01 * f) {
