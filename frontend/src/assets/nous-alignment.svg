@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 608" width="600" height="608">
-<g fill="#4268ae" fill-rule="evenodd" stroke="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 608" shape-rendering="crispEdges">
+<g fill="#5cc8e6" fill-rule="evenodd" stroke="none">
   <path d="M 154 382 L 151 382 L 151 388 L 153 387 Z"/>
   <path d="M 142 330 L 154 339 L 151 333 Z"/>
   <path d="M 195 280 L 197 283 L 197 280 Z"/>
