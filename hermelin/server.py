@@ -696,6 +696,45 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         except Exception:
             return {}
 
+    def _set_display_skin(skin: str) -> bool:
+        """Best-effort: set display.skin in Hermes' config.yaml.
+
+        Hermes reads the skin at startup; hermilinChat uses this to auto-sync the
+        CLI skin with the UI theme.
+        """
+
+        skin = str(skin or "").strip()
+        if not skin:
+            return False
+
+        cfg_path = config.hermes_home / "config.yaml"
+        data = _read_config_yaml()
+
+        display = data.get("display") if isinstance(data.get("display"), dict) else {}
+        if not isinstance(display, dict):
+            display = {}
+
+        if str(display.get("skin") or "").strip() == skin:
+            return False
+
+        display["skin"] = skin
+        data["display"] = display
+
+        try:
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            cfg_path.write_text(
+                yaml.safe_dump(
+                    data,
+                    sort_keys=False,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                ),
+                encoding="utf-8",
+            )
+            return True
+        except Exception:
+            return False
+
     def _as_bool(v, default: bool = False) -> bool:
         if v is None:
             return default
@@ -1089,38 +1128,35 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         argv = shlex.split(config.hermes_cmd)
 
         # -------------------------------------------------------------
-        # hermilinChat UI theme -> Hermes CLI themefile
+        # hermilinChat UI theme -> Hermes CLI skin (upstream skin system)
         # -------------------------------------------------------------
-        # We only map known UI theme IDs to a bundled Hermes theme YAML.
-        # If there is no mapping (or the file isn't present), Hermes falls back
-        # to its baked-in default / $HERMES_HOME/theme.yaml.
+        # Hermes reads the active skin from ~/.hermes/config.yaml (display.skin).
+        # There is no per-launch CLI flag, so we sync the skin before spawning Hermes.
         ui_theme = ""
         try:
             ui_theme = (websocket.query_params.get("ui_theme") or "").strip()
         except Exception:
             ui_theme = ""
 
-        themefile: str | None = None
+        skin_name: str | None = None
         if ui_theme == "hermilin":
-            themefile = "hermiline.yaml"
+            skin_name = "hermilin"
         elif ui_theme == "matrix":
-            themefile = "matrix-hans.yaml"
+            skin_name = "matrix"
         elif ui_theme == "nous":
-            themefile = "nous.yaml"
+            skin_name = "nous"
         elif ui_theme == "samaritan":
-            themefile = "samaritan.yaml"
+            skin_name = "samaritan"
 
-        # Only append if the caller didn't already specify a theme in the command.
-        if themefile and ("--theme" not in argv and "--themefile" not in argv):
+        try:
+            exe_name = Path(argv[0]).name.lower() if argv else ""
+        except Exception:
+            exe_name = ""
+
+        if skin_name and "hermes" in exe_name:
             try:
-                # If hermes isn't the thing we're spawning, don't inject CLI args.
-                exe_name = Path(argv[0]).name.lower() if argv else ""
-                if "hermes" in exe_name:
-                    candidate = config.hermes_home / "themes" / themefile
-                    if candidate.is_file():
-                        argv += ["--theme", themefile]
+                _set_display_skin(skin_name)
             except Exception:
-                # Best-effort only; fall back to Hermes defaults.
                 pass
 
         if resume:

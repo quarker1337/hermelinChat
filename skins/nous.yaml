@@ -1,0 +1,54 @@
+# nous.yaml — hermilinChat Hermes CLI skin (upstream skin system)
+#
+# Install:
+#   python3 scripts/install_hermes_skins.py --auto
+#
+# Activate:
+#   /skin nous
+#   (or set in ~/.hermes/config.yaml: display.skin: nous)
+
+name: nous
+description: "Nous Research aqua skin (matches UI theme: nous)"
+
+colors:
+  banner_border: "#1a3a44"
+  banner_title: "#5cc8e6"
+  banner_accent: "#5cc8e6"
+  banner_dim: "#4a7a88"
+  banner_text: "#8acade"
+
+  ui_accent: "#5cc8e6"
+  ui_label: "#c0e8f4"
+  ui_ok: "#38c878"
+  ui_error: "#e84057"
+  ui_warn: "#ffa726"
+
+  prompt: "#8acade"
+  input_rule: "#1a3a44"
+  response_border: "#5cc8e6"
+
+  session_label: "#4a7a88"
+  session_border: "#1a3a44"
+
+branding:
+  agent_name: "hermilinChat"
+  welcome: "Welcome to hermilinChat! Type your message or /help for commands."
+  goodbye: "Goodbye! ⚕"
+  response_label: " ⚕ Hermes "
+  prompt_symbol: "❯ "
+  help_header: "(^_^)? Available Commands"
+
+tool_prefix: "│"
+
+banner_logo: |-
+  [bold #5cc8e6]███╗   ██╗ ██████╗ ██╗   ██╗███████╗[/]
+  [bold #3aa8c8]████╗  ██║██╔═══██╗██║   ██║██╔════╝[/]
+  [bold #1e6888]██╔██╗ ██║██║   ██║██║   ██║███████╗[/]
+  [bold #3aa8c8]██║╚██╗██║██║   ██║██║   ██║╚════██║[/]
+  [bold #5cc8e6]██║ ╚████║╚██████╔╝╚██████╔╝███████║[/]
+  [bold #4a7a88]╚═╝  ╚═══╝ ╚═════╝  ╚═════╝ ╚══════╝[/]
+
+banner_hero: |-
+  [bold #5cc8e6]nous[/]
+  [dim #4a7a88]research[/]
+  [#1e6888]aligned[/]

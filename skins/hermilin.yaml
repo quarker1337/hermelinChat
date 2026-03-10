@@ -1,0 +1,60 @@
+# hermilin.yaml — hermilinChat Hermes CLI skin (upstream skin system)
+#
+# Install:
+#   python3 scripts/install_hermes_skins.py --auto
+#
+# Activate:
+#   /skin hermilin
+#   (or set in ~/.hermes/config.yaml: display.skin: hermilin)
+
+name: hermilin
+description: "hermilinChat amber/slate skin (matches UI theme: hermilin)"
+
+colors:
+  banner_border: "#9a6c12"
+  banner_title: "#f5b731"
+  banner_accent: "#f5b731"
+  banner_dim: "#55556a"
+  banner_text: "#b8b8cc"
+
+  ui_accent: "#f5b731"
+  ui_label: "#60a5fa"
+  ui_ok: "#38c878"
+  ui_error: "#e84057"
+  ui_warn: "#e0a020"
+
+  prompt: "#b8b8cc"
+  input_rule: "#232330"
+  response_border: "#f5b731"
+
+  session_label: "#55556a"
+  session_border: "#232330"
+
+branding:
+  agent_name: "hermilinChat"
+  welcome: "Welcome to hermilinChat! Type your message or /help for commands."
+  goodbye: "Goodbye! ⚕"
+  response_label: " ⚕ Hermes "
+  prompt_symbol: "❯ "
+  help_header: "(^_^)? Available Commands"
+
+tool_prefix: "┊"
+
+banner_logo: |-
+  [bold #f5b731]██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗██╗     ██╗███╗   ██╗       █████╗  ██████╗ ███████╗███╗   ██╗████████╗[/]
+  [bold #f5b731]██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██║     ██║████╗  ██║      ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝[/]
+  [bold #f5b731]███████║█████╗  ██████╔╝██╔████╔██║█████╗  ██║     ██║██╔██╗ ██║█████╗███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   [/]
+  [bold #f5b731]██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ██║     ██║██║╚██╗██║╚════╝██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   [/]
+  [bold #f5b731]██║  ██║███████╗██║  ██║██║ ╚═╝ ██║███████╗███████╗██║██║ ╚████║      ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   [/]
+  [bold #f5b731]╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝╚═╝╚═╝  ╚═══╝      ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   [/]
+
+banner_hero: |-
+  [#f5b731]⠀⠀⠀⠀⢀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡀⠀⠀⠀⠀[/]
+  [#f5b731]⠀⠀⢀⣿⠛⠻⢷⣦⣄⢤⣴⣶⣶⣶⣶⣶⣦⣤⣤⣴⣾⠿⠛⢻⣇⠀⠀⠀[/]
+  [#f5b731]⠀⠀⢸⡇⠀⠀⠀⢙⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣅⠀⠀⠀⣿⠀⠀⠀[/]
+  [#f5b731]⠀⠀⠈⣿⡀⣤⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⡄⢠⡟⠀⠀⠀[/]
+  [#f5b731]⠀⠀⠀⠘⣷⣿⣿⣿⠟⠛⠻⣿⣿⣿⣿⣿⣿⡿⠛⠛⢿⣿⣿⣾⠁⠀⠀⠀[/]
+  [#f5b731]⠀⠀⠀⠀⣨⣿⣿⣿⡀⠀⠀⢸⣿⣿⣿⣿⣿⠀⠀⠀⣸⣿⣿⣿⠀⠀⠀⠀[/]
+  [#f5b731]⠀⠀⠀⠀⠹⣿⣿⣿⣿⣿⣿⣿⡿⠟⠛⠻⢿⣿⣿⣿⣿⣿⡿⠃⠀⠀⠀⠀[/]
+  [#f5b731]⠀⠀⠀⠀⠀⠈⠉⢛⣿⣿⣿⣿⣄⠀⠀⠀⣰⣿⣿⣿⣟⠉⠀⠀⠀⠀⠀⠀[/]
+  [#f5b731]⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⠛⠿⠿⠛⠀⠛⠿⠟⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀[/]

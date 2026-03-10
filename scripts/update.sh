@@ -9,7 +9,7 @@ SERVICE="hermelin"
 SKIP_FRONTEND=0
 SKIP_PYTHON=0
 SKIP_HERMES_PATCH=0
-SKIP_HERMES_THEMES=0
+SKIP_HERMES_SKINS=0
 NO_PULL=0
 
 usage() {
@@ -22,7 +22,8 @@ Options:
   --skip-frontend       Skip npm install/build
   --skip-python         Skip pip install -e .
   --skip-hermes-patch   Skip patching the active Hermes installation with artifact tools
-  --skip-hermes-themes  Skip patching Hermes CLI with theme system + installing themes
+  --skip-hermes-skins   Skip installing hermilinChat CLI skins into ~/.hermes/skins/
+  --skip-hermes-themes  (deprecated alias for --skip-hermes-skins)
   --no-pull             Skip git pull
   -h, --help            Show help
 
@@ -58,8 +59,8 @@ while [[ $# -gt 0 ]]; do
       SKIP_HERMES_PATCH=1
       shift
       ;;
-    --skip-hermes-themes)
-      SKIP_HERMES_THEMES=1
+    --skip-hermes-skins|--skip-hermes-themes)
+      SKIP_HERMES_SKINS=1
       shift
       ;;
     --no-pull)
@@ -151,13 +152,13 @@ if [[ "$SKIP_HERMES_PATCH" -eq 0 ]]; then
   python3 scripts/install_hermes_artifact_patch.py
 fi
 
-if [[ "$SKIP_HERMES_THEMES" -eq 0 ]]; then
-  echo "==> patching active Hermes installation for CLI themes + installing theme YAMLs"
+if [[ "$SKIP_HERMES_SKINS" -eq 0 ]]; then
+  echo "==> installing hermilinChat skins into Hermes (~/.hermes/skins/)"
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "ERROR: python3 not found (needed for Hermes theme installer)." >&2
+    echo "ERROR: python3 not found (needed for Hermes skin installer)." >&2
     exit 1
   fi
-  python3 scripts/install_hermes_themes.py --auto --force-theme-install
+  python3 scripts/install_hermes_skins.py --auto --force
 fi
 
 if [[ "$SKIP_FRONTEND" -eq 0 ]]; then

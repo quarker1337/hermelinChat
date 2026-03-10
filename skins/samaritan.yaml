@@ -1,0 +1,56 @@
+# samaritan.yaml — hermilinChat Hermes CLI skin (upstream skin system)
+#
+# Install:
+#   python3 scripts/install_hermes_skins.py --auto
+#
+# Activate:
+#   /skin samaritan
+#   (or set in ~/.hermes/config.yaml: display.skin: samaritan)
+
+name: samaritan
+description: "Samaritan (light) skin (matches UI theme: samaritan)"
+
+colors:
+  banner_border: "#bab8b3"
+  banner_title: "#cc3333"
+  banner_accent: "#cc3333"
+  banner_dim: "#7a7872"
+  banner_text: "#3a3835"
+
+  ui_accent: "#cc3333"
+  ui_label: "#661212"
+  ui_ok: "#2da565"
+  ui_error: "#aa2020"
+  ui_warn: "#cc3333"
+
+  prompt: "#3a3835"
+  input_rule: "#bab8b3"
+  response_border: "#cc3333"
+
+  session_label: "#7a7872"
+  session_border: "#bab8b3"
+
+branding:
+  agent_name: "hermilinChat"
+  welcome: "What are your commands?"
+  goodbye: "Goodbye."
+  response_label: " ▲ Samaritan "
+  prompt_symbol: "❯ "
+  help_header: "[?] Available Commands"
+
+tool_prefix: "┊"
+
+banner_logo: |-
+  [bold #cc3333]==================================================================================[/]
+  [bold #cc3333] _______ _______ _______ _______  ______ _____ _______ _______ __   _             [/]
+  [bold #cc3333] |______ |_____| |  |  | |_____| |_____/   |      |    |_____| | \  |             [/]
+  [bold #cc3333] ______| |     | |  |  | |     | |    \_ __|__    |    |     | |  \_|             [/]
+  [bold #cc3333] Samaritan[/]
+  [bold #cc3333]==================================================================================[/]
+
+banner_hero: |-
+  [#cc3333]⠀⠀⠀⠀⠀⢀⣴⣿⣦⡀⠀⠀⠀⠀⠀[/]
+  [#cc3333]⠀⠀⠀⠀⣴⣿⣿⣿⣿⣦⠀⠀⠀⠀[/]
+  [#cc3333]⠀⠀⣾⣿⣿⣿⣿⣿⣿⣷⠀⠀[/]
+  [#cc3333]⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷[/]
+  [#cc3333]⠙⠛⠛⠛⠛⠛⠛⠛⠛⠋[/]

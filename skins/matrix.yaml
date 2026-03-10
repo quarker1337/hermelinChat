@@ -1,0 +1,65 @@
+# matrix.yaml — hermilinChat Hermes CLI skin (upstream skin system)
+#
+# Install:
+#   python3 scripts/install_hermes_skins.py --auto
+#
+# Activate:
+#   /skin matrix
+#   (or set in ~/.hermes/config.yaml: display.skin: matrix)
+
+name: matrix
+description: "Matrix (rabbit) green skin (matches UI theme: matrix)"
+
+colors:
+  banner_border: "#2a3533"
+  banner_title: "#4dffa1"
+  banner_accent: "#4dffa1"
+  banner_dim: "#5a6f6a"
+  banner_text: "#c8d8d3"
+
+  ui_accent: "#4dffa1"
+  ui_label: "#60a5fa"
+  ui_ok: "#4dffa1"
+  ui_error: "#fb7185"
+  ui_warn: "#f5e642"
+
+  prompt: "#c8d8d3"
+  input_rule: "#2a3533"
+  response_border: "#4dffa1"
+
+  session_label: "#5a6f6a"
+  session_border: "#2a3533"
+
+branding:
+  agent_name: "hermilinChat"
+  welcome: "Welcome to hermilinChat! Type your message or /help for commands."
+  goodbye: "Goodbye! ⚕"
+  response_label: " ⚕ Hermes "
+  prompt_symbol: "❯ "
+  help_header: "(^_^)? Available Commands"
+
+tool_prefix: "│"
+
+banner_logo: |-
+  [bold #4dffa1]==================================================================================[/]
+  [bold #4dffa1]  ##  ##    ####    ##  ##   #####        AUTONOMOUS  AGENT  SYSTEM[/]
+  [bold #4dffa1]  ##  ##   ##  ##   ### ##   ##           ~~~~~~~~~~~~~~~~~~~~~~~~[/]
+  [bold #4dffa1]  ######   ######   ######   #####        HERMES AUTONOMOUS NETWORKED[/]
+  [bold #4dffa1]  ##  ##   ##  ##   ## ###       #        SYSTEM  //  NOUS RESEARCH[/]
+  [bold #4dffa1]  ##  ##   ##  ##   ##  ##   #####        ~~~~~~~~~~~~~~~~~~~~~~~~[/]
+  [bold #4dffa1]==================================================================================[/]
+
+banner_hero: |-
+  [#2da565]⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀[/]
+  [#2da565]⠀⠀⠀⠀⢀⣠⣴⣾⣿⣿⣿⣿⣷⣦⣤⣀⠀⠀⠀⠀[/]
+  [#2da565]⠀⠀⢀⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⠀⠀⠀[/]
+  [#2da565]⠀⠀⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⠀⠀[/]
+  [#2da565]⠀⢰⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣆⠀[/]
+  [#2da565]⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀[/]
+  [#2da565]⠀⢸⣿⡟⠛⠛⠛⢿⣿⣿⣿⣿⣿⠟⠛⠛⠛⣿⣿⠀[/]
+  [#2da565]⠀⢼⣿⣧⡀⠀⠀⠀⣹⣿⣿⣿⡁⠀⠀⠀⣠⣿⣿⠀[/]
+  [#2da565]⠀⠀⢙⣿⣿⣿⣦⣴⣿⠇⠈⣿⣷⣄⣾⣿⣿⡏⠀⠀[/]
+  [#2da565]⠀⠀⠸⢿⣿⣿⣿⣿⣿⡀⢀⣼⣿⣿⣿⣿⣿⠇⠀⠀[/]
+  [#2da565]⠀⠀⠀⠀⠈⠙⣿⣿⣿⣿⣿⣿⣿⣿⠛⠉⠀⠀⠀⠀[/]
+  [#2da565]⠀⠀⠀⠀⠀⠀⠸⣿⣿⣿⣿⣿⣿⠏⠀⠀⠀⠀⠀⠀[/]
+  [#2da565]⠀⠀⠀⠀⠀⠀⠀⠙⠛⠛⠛⠛⠛⠀⠀⠀⠀⠀⠀⠀[/]
