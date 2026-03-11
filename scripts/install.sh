@@ -149,6 +149,22 @@ if command -v hermes >/dev/null 2>&1; then
   DEFAULT_HERMES_EXE="$(command -v hermes)"
 fi
 
+# -------------------------------------------------------------------
+# Hermes install sanity check
+# -------------------------------------------------------------------
+# hermilinChat expects Hermes Agent to be installed for the *current user* so
+# it can read/write ~/.hermes without sudo and so upgrades don't get blocked.
+if [[ "$DEFAULT_HERMES_EXE" == "hermes" ]]; then
+  echo "ERROR: hermes not found in PATH. Install Hermes Agent for this user first." >&2
+  exit 1
+fi
+
+if [[ "$DEFAULT_HERMES_EXE" != "$HOME"/* ]]; then
+  echo "ERROR: hermes executable is not under $HOME: $DEFAULT_HERMES_EXE" >&2
+  echo "Please install Hermes Agent as a per-user install (e.g. ~/.local/bin/hermes) and re-run." >&2
+  exit 1
+fi
+
 if command -v id >/dev/null 2>&1; then
   DEFAULT_USER="$(id -un)"
 else
@@ -171,6 +187,24 @@ if [[ ! -f "$ENV_FILE" ]]; then
   WRITE_ENV=1
 elif [[ "$FORCE_ENV" -eq 1 ]]; then
   WRITE_ENV=1
+fi
+
+# -------------------------------------------------------------------
+# Interactive: offer systemd service install (recommended)
+# -------------------------------------------------------------------
+if [[ "$INSTALL_SERVICE" -eq 0 && "$YES" -eq 0 ]]; then
+  if command -v systemctl >/dev/null 2>&1; then
+    read -r -p "Install and start a systemd service for hermilinChat? [y/N] " _svc
+    if [[ "${_svc,,}" == "y" || "${_svc,,}" == "yes" ]]; then
+      INSTALL_SERVICE=1
+      read -r -p "Install as user service (no sudo) or system service (sudo)? [u/s] (default: u) " _mode
+      if [[ "${_mode,,}" == "s" || "${_mode,,}" == "system" ]]; then
+        SERVICE_MODE="system"
+      else
+        SERVICE_MODE="user"
+      fi
+    fi
+  fi
 fi
 
 echo "==> hermilinChat install"
