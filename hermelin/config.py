@@ -64,6 +64,11 @@ class HermelinConfig:
     # Set to 1 if serving over HTTPS (or behind a TLS-terminating proxy that preserves scheme)
     cookie_secure: bool = _env_bool("HERMELIN_COOKIE_SECURE", "0")
 
+    # Built-in TLS (served directly by uvicorn). If both are set, hermilinChat will
+    # serve HTTPS (not just "behind a reverse proxy").
+    ssl_certfile: str = os.getenv("HERMELIN_SSL_CERTFILE", "").strip()
+    ssl_keyfile: str = os.getenv("HERMELIN_SSL_KEYFILE", "").strip()
+
     @property
     def db_path(self) -> Path:
         return self.hermes_home / "state.db"

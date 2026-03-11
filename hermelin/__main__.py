@@ -18,6 +18,18 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="hermelin", description="hermelinChat web UI for Hermes Agent")
     p.add_argument("--host", default=os.getenv("HERMELIN_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.getenv("HERMELIN_PORT", "3000")))
+
+    # Built-in TLS (served directly by uvicorn)
+    p.add_argument(
+        "--ssl-certfile",
+        default=os.getenv("HERMELIN_SSL_CERTFILE", ""),
+        help="Path to TLS certificate (PEM) to serve HTTPS directly",
+    )
+    p.add_argument(
+        "--ssl-keyfile",
+        default=os.getenv("HERMELIN_SSL_KEYFILE", ""),
+        help="Path to TLS private key (PEM) to serve HTTPS directly",
+    )
     p.add_argument(
         "--hermes-cmd",
         default=os.getenv(
@@ -62,6 +74,14 @@ def main() -> None:
         os.environ["HERMELIN_META_DB_PATH"] = str(args.meta_db)
         os.environ["HERMELIN_ALLOWED_IPS"] = str(args.allowed_ips)
         os.environ["HERMELIN_TRUST_X_FORWARDED_FOR"] = "1" if args.trust_xff else "0"
+        os.environ["HERMELIN_SSL_CERTFILE"] = str(args.ssl_certfile)
+        os.environ["HERMELIN_SSL_KEYFILE"] = str(args.ssl_keyfile)
+
+        ssl_certfile = str(args.ssl_certfile or "").strip() or None
+        ssl_keyfile = str(args.ssl_keyfile or "").strip() or None
+        if not (ssl_certfile and ssl_keyfile):
+            ssl_certfile = None
+            ssl_keyfile = None
 
         uvicorn.run(
             "hermelin.server:create_app",
@@ -70,6 +90,8 @@ def main() -> None:
             port=args.port,
             reload=True,
             log_level="info",
+            ssl_certfile=ssl_certfile,
+            ssl_keyfile=ssl_keyfile,
         )
         return
 
@@ -82,10 +104,26 @@ def main() -> None:
         spawn_cwd=Path(args.spawn_cwd).expanduser(),
         allowed_ips=str(args.allowed_ips),
         trust_x_forwarded_for=bool(args.trust_xff),
+        ssl_certfile=str(args.ssl_certfile).strip(),
+        ssl_keyfile=str(args.ssl_keyfile).strip(),
     )
 
     app = create_app(cfg)
-    uvicorn.run(app, host=cfg.host, port=cfg.port, log_level="info")
+
+    ssl_certfile = cfg.ssl_certfile or None
+    ssl_keyfile = cfg.ssl_keyfile or None
+    if not (ssl_certfile and ssl_keyfile):
+        ssl_certfile = None
+        ssl_keyfile = None
+
+    uvicorn.run(
+        app,
+        host=cfg.host,
+        port=cfg.port,
+        log_level="info",
+        ssl_certfile=ssl_certfile,
+        ssl_keyfile=ssl_keyfile,
+    )
 
 
 if __name__ == "__main__":

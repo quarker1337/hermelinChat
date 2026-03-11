@@ -10,6 +10,10 @@ FORCE_ENV=0
 YES=0
 PULL=0
 
+# By default we generate a self-signed cert and serve HTTPS directly.
+# Disable with: ./scripts/install.sh --no-https
+ENABLE_HTTPS=1
+
 INSTALL_SERVICE=0
 SERVICE_MODE="system"  # system|user
 
@@ -34,6 +38,7 @@ Options:
   --pull                 Run git pull (default: no pull)
   --env-file PATH        Where to write the env file (default: ./.hermelin.env)
   --force-env            Overwrite the env file if it already exists
+  --no-https             Disable built-in HTTPS (do not generate self-signed cert)
 
   --install-service       Install a systemd service (default: system service)
   --user-service          Install a systemd *user* service (no sudo)
@@ -72,6 +77,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --force-env)
       FORCE_ENV=1
+      shift
+      ;;
+
+    --no-https)
+      ENABLE_HTTPS=0
       shift
       ;;
 
@@ -163,6 +173,92 @@ if [[ "$DEFAULT_HERMES_EXE" != "$HOME"/* ]]; then
   echo "ERROR: hermes executable is not under $HOME: $DEFAULT_HERMES_EXE" >&2
   echo "Please install Hermes Agent as a per-user install (e.g. ~/.local/bin/hermes) and re-run." >&2
   exit 1
+fi
+
+# -------------------------------------------------------------------
+# Self-signed TLS (enabled by default)
+# -------------------------------------------------------------------
+SSL_CERTFILE=""
+SSL_KEYFILE=""
+HERMELIN_COOKIE_SECURE_DEFAULT=0
+
+if [[ "$ENABLE_HTTPS" -eq 1 ]]; then
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "ERROR: openssl not found (required for default HTTPS setup)." >&2
+    echo "Install openssl, or re-run with: ./scripts/install.sh --no-https" >&2
+    exit 1
+  fi
+
+  TLS_DIR="${DEFAULT_HERMES_HOME}/hermilin_tls"
+  SSL_CERTFILE="${TLS_DIR}/cert.pem"
+  SSL_KEYFILE="${TLS_DIR}/key.pem"
+  OPENSSL_CNF="${TLS_DIR}/openssl.cnf"
+
+  mkdir -p "$TLS_DIR"
+  chmod 700 "$TLS_DIR" || true
+
+  if [[ ! -f "$SSL_CERTFILE" || ! -f "$SSL_KEYFILE" ]]; then
+    echo "==> generating self-signed TLS certificate in: $TLS_DIR"
+
+    host1="$(hostname 2>/dev/null || true)"
+    host2="$(hostname -f 2>/dev/null || true)"
+    ips="$(hostname -I 2>/dev/null || true)"
+
+    {
+      echo "[req]"
+      echo "default_bits = 2048"
+      echo "prompt = no"
+      echo "default_md = sha256"
+      echo "distinguished_name = dn"
+      echo "x509_extensions = v3_req"
+      echo
+      echo "[dn]"
+      echo "CN = localhost"
+      echo
+      echo "[v3_req]"
+      echo "subjectAltName = @alt_names"
+      echo
+      echo "[alt_names]"
+      echo "DNS.1 = localhost"
+      echo "IP.1 = 127.0.0.1"
+
+      i_dns=2
+      if [[ -n "$host1" && "$host1" != "localhost" ]]; then
+        echo "DNS.${i_dns} = ${host1}"
+        i_dns=$((i_dns + 1))
+      fi
+      if [[ -n "$host2" && "$host2" != "$host1" && "$host2" != "localhost" ]]; then
+        echo "DNS.${i_dns} = ${host2}"
+        i_dns=$((i_dns + 1))
+      fi
+
+      i_ip=2
+      for ip in $ips; do
+        if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ "$ip" != "127.0.0.1" ]]; then
+            echo "IP.${i_ip} = ${ip}"
+            i_ip=$((i_ip + 1))
+          fi
+        fi
+      done
+    } >"$OPENSSL_CNF"
+
+    if ! out=$(openssl req -x509 -new -nodes -days 3650 -newkey rsa:2048 \
+      -keyout "$SSL_KEYFILE" \
+      -out "$SSL_CERTFILE" \
+      -config "$OPENSSL_CNF" 2>&1); then
+      echo "ERROR: openssl failed to generate a self-signed certificate." >&2
+      echo "$out" >&2
+      exit 1
+    fi
+
+    chmod 600 "$SSL_KEYFILE" || true
+    chmod 644 "$SSL_CERTFILE" || true
+  else
+    echo "==> using existing TLS certificate: $SSL_CERTFILE"
+  fi
+
+  HERMELIN_COOKIE_SECURE_DEFAULT=1
 fi
 
 if command -v id >/dev/null 2>&1; then
@@ -284,8 +380,15 @@ HERMELIN_HERMES_CMD="$DEFAULT_HERMES_EXE chat --toolsets \"hermes-cli, artifacts
 # HERMELIN_META_DB_PATH=$DEFAULT_HERMES_HOME/hermilin_meta.db
 # HERMELIN_SPAWN_CWD=$ROOT_DIR
 
-# Reverse proxy / TLS (ONLY set these if applicable)
-HERMELIN_COOKIE_SECURE=0
+# Built-in HTTPS (self-signed by installer)
+# - If both HERMELIN_SSL_CERTFILE and HERMELIN_SSL_KEYFILE are set, hermilinChat
+#   serves HTTPS directly.
+# - Disable by emptying these vars or re-running installer with --no-https.
+HERMELIN_SSL_CERTFILE="$SSL_CERTFILE"
+HERMELIN_SSL_KEYFILE="$SSL_KEYFILE"
+
+# Reverse proxy / TLS
+HERMELIN_COOKIE_SECURE=$HERMELIN_COOKIE_SECURE_DEFAULT
 HERMELIN_TRUST_X_FORWARDED_FOR=0
 EOF
 
@@ -299,6 +402,64 @@ fi
 # If HERMELIN_HERMES_CMD is missing (or set to plain "hermes ..."), PTY spawn
 # fails with: FileNotFoundError: 'hermes'
 if [[ -f "$ENV_FILE" ]]; then
+  # -------------------------------------------------------------------
+  # Ensure env file contains HTTPS settings
+  # -------------------------------------------------------------------
+  echo "==> ensuring HTTPS settings in env file"
+  HERMILIN_ENV_FILE="$ENV_FILE" \
+    HERMILIN_ENABLE_HTTPS="$ENABLE_HTTPS" \
+    HERMILIN_SSL_CERTFILE="$SSL_CERTFILE" \
+    HERMILIN_SSL_KEYFILE="$SSL_KEYFILE" \
+    python3 - <<'PY'
+import os
+import re
+from pathlib import Path
+
+env_file = Path(os.environ["HERMILIN_ENV_FILE"])
+txt = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
+
+def _unquote(s: str) -> str:
+    s = (s or "").strip()
+    if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+        return s[1:-1]
+    return s
+
+def get(key: str):
+    m = re.search(rf"^{re.escape(key)}=(.*)$", txt, flags=re.M)
+    return _unquote(m.group(1)) if m else None
+
+def set_key(key: str, value: str, quote: bool = False):
+    global txt
+    desired = f'{key}="{value}"' if quote else f"{key}={value}"
+    if re.search(rf"^{re.escape(key)}=.*$", txt, flags=re.M):
+        txt = re.sub(rf"^{re.escape(key)}=.*$", desired, txt, flags=re.M)
+    else:
+        txt = txt.rstrip("\n") + "\n" + desired + "\n"
+
+enable = os.environ.get("HERMILIN_ENABLE_HTTPS", "1") == "1"
+default_cert = os.environ.get("HERMILIN_SSL_CERTFILE", "")
+default_key = os.environ.get("HERMILIN_SSL_KEYFILE", "")
+
+if enable:
+    cert = (get("HERMELIN_SSL_CERTFILE") or "").strip()
+    key = (get("HERMELIN_SSL_KEYFILE") or "").strip()
+
+    if not cert:
+        set_key("HERMELIN_SSL_CERTFILE", default_cert, quote=True)
+    if not key:
+        set_key("HERMELIN_SSL_KEYFILE", default_key, quote=True)
+
+    cs = (get("HERMELIN_COOKIE_SECURE") or "").strip()
+    if cs in ("", "0"):
+        set_key("HERMELIN_COOKIE_SECURE", "1")
+else:
+    set_key("HERMELIN_SSL_CERTFILE", "", quote=True)
+    set_key("HERMELIN_SSL_KEYFILE", "", quote=True)
+    set_key("HERMELIN_COOKIE_SECURE", "0")
+
+env_file.write_text(txt, encoding="utf-8")
+PY
+
   if ! grep -q '^HERMES_HOME=' "$ENV_FILE"; then
     {
       echo
