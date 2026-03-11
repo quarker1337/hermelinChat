@@ -157,6 +157,45 @@ function saveArtifactPanelWidth(width) {
   }
 }
 
+function formatModelLabel(raw) {
+  if (raw === null || raw === undefined) return null
+
+  if (typeof raw === 'string') {
+    const s = raw.trim()
+    if (!s) return null
+
+    // Sometimes the backend leaks a dict-ish string here (e.g.
+    // "{'default': 'z-ai/glm-5', 'provider': 'openrouter'}").
+    // Try to extract a real model id for display.
+    const mDefault = s.match(/['"]default['"]\s*:\s*['"]([^'"]+)['"]/)
+    if (mDefault && mDefault[1]) return mDefault[1].trim() || s
+
+    const mModel = s.match(/['"]model['"]\s*:\s*['"]([^'"]+)['"]/)
+    if (mModel && mModel[1]) return mModel[1].trim() || s
+
+    // YAML-ish mapping (no quotes): "{default: z-ai/glm-5, provider: openrouter}"
+    const mYamlDefault = s.match(/\bdefault\s*:\s*([^,}]+)/)
+    if (mYamlDefault && mYamlDefault[1]) {
+      const v = mYamlDefault[1].trim().replace(/^['"]|['"]$/g, '')
+      return v || s
+    }
+
+    return s
+  }
+
+  if (typeof raw === 'object') {
+    const o = raw || {}
+    const v = o.default ?? o.model ?? o.value ?? o.id ?? o.name
+    if (typeof v === 'string') {
+      const s = v.trim()
+      return s || null
+    }
+    return null
+  }
+
+  return String(raw)
+}
+
 // Small inline version for headers
 // Reuses the app favicon (yellow circle + hermelin face)
 const InvertelinSmall = ({ size = 22, href = '/favicon.svg' }) => (
@@ -1356,7 +1395,7 @@ const AlignmentEasterEgg = ({ toast, svgRaw, title, whisperText, fetchFromApi = 
 const PeekDrawer = ({ loading, error, context, hit, onClose, onOpenSession }) => {
   const title = context?.session_title || hit?.session_title || hit?.session_id || 'peek'
   const sid = context?.session_id || hit?.session_id
-  const model = context?.session_model || hit?.session_model
+  const model = formatModelLabel(context?.session_model || hit?.session_model)
   const messages = context?.messages || []
 
   return (
@@ -3754,7 +3793,7 @@ export default function App() {
         groups.set(sid, {
           session_id: sid,
           title: r.session_title || sid,
-          model: r.session_model || null,
+          model: formatModelLabel(r.session_model || null),
           hits: [],
         })
       }
@@ -4216,7 +4255,8 @@ export default function App() {
     return sessions.find((s) => s.id === activeSessionId) || null
   }, [sessions, activeSessionId])
 
-  const currentModel = activeSession?.model || runtimeInfo.default_model || null
+  const currentModelRaw = activeSession?.model || runtimeInfo.default_model || null
+  const currentModel = formatModelLabel(currentModelRaw)
   const currentCwd = runtimeInfo.spawn_cwd || null
 
   const locked = !auth.loading && auth.enabled && !auth.authenticated
@@ -5027,7 +5067,7 @@ export default function App() {
         <SettingsPanel
           onClose={closeSettings}
           locked={locked}
-          defaultModel={runtimeInfo.default_model}
+          defaultModel={formatModelLabel(runtimeInfo.default_model)}
           onModelSaved={(m) => {
             setRuntimeInfo((prev) => ({
               ...prev,
