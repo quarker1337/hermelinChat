@@ -221,6 +221,35 @@ Notes:
 - if your Hermes config uses restricted toolsets, make sure `artifacts` or `all` is enabled
 - example payloads live in `examples/artifacts/payloads.json`
 
+## Runner gateway (iframe runners)
+
+Some artifacts are rendered as sandboxed iframes (kind: `iframe`). More complex artifacts may also start a local "runner" process that serves an HTTP UI.
+
+Problem: if the iframe points to `http://127.0.0.1:PORT/...`, it will only work when the *operator browser* is running on the same machine.
+
+Solution: hermilinChat proxies localhost-bound runners via a same-origin gateway:
+
+- UI mints a short-lived runner token: `POST /api/runners/{tab_id}/token` (requires login when auth is enabled)
+- The iframe `src` is rewritten to: `/r/{tab_id}/_t/{token}/...`
+- hermilinChat proxies both HTTP/SSE and WebSockets to the runner
+- Cookies are NOT forwarded to runners, and runner `Set-Cookie` headers are stripped
+
+Runner discovery:
+- recommended: runner writes a manifest to:
+  - `$HERMES_HOME/artifacts/runners/projects/{tab_id}/runner.json`
+    - `{"scheme": "http", "host": "127.0.0.1", "port": 43123}`
+- fallback: if no manifest exists, hermilinChat may parse the port from the iframe src
+
+Runner authoring tips:
+- bind to `127.0.0.1` (never `0.0.0.0`)
+- use relative URLs (avoid absolute `/assets/...` paths) so the app works behind the `/r/.../_t/...` prefix
+
+Relevant env vars:
+- `HERMELIN_RUNNER_TOKEN_TTL_SECONDS` (default: 1800)
+- `HERMELIN_RUNNER_TOKEN_BIND_IP` (default: 1)
+- `HERMELIN_TRUSTED_PROXY_IPS` (optional; only trust XFF from these proxy IPs)
+- `HERMELIN_CORS_ORIGINS` (optional; enable cross-origin browser access; default disabled)
+
 ## Auto session titles (optional)
 
 hermilinChat can show better session titles using a separate metadata DB:

@@ -118,3 +118,75 @@ def extract_cookie_value(cookie_header: str, name: str) -> Optional[str]:
         return None
 
     return morsel.value
+
+
+# -----------------------------------------------------------------------------
+# Runner (iframe) proxy tokens
+#
+# These are short-lived bearer tokens intended for sandboxed iframes that cannot
+# send hermilinChat's SameSite=Strict session cookie.
+#
+# Token format matches create_session_token():
+#   base64url(json_payload) + '.' + base64url(hmac_sha256(payload_b64))
+# -----------------------------------------------------------------------------
+
+
+def create_runner_token(*, secret: bytes, tab_id: str, ttl_seconds: int, client_ip: str | None = None) -> str:
+    now = int(time.time())
+    payload: dict[str, object] = {
+        "v": 1,
+        "typ": "runner",
+        "tab_id": str(tab_id or "").strip(),
+        "iat": now,
+        "exp": now + int(ttl_seconds),
+    }
+    if client_ip:
+        payload["ip"] = str(client_ip).strip()
+
+    payload_b = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    payload_b64 = _b64url_encode(payload_b)
+
+    sig = hmac.new(secret, payload_b64.encode("utf-8"), hashlib.sha256).digest()
+    sig_b64 = _b64url_encode(sig)
+
+    return f"{payload_b64}.{sig_b64}"
+
+
+def verify_runner_token(*, token: str, secret: bytes, tab_id: str, client_ip: str | None = None) -> bool:
+    if not token:
+        return False
+
+    if "." not in token:
+        return False
+
+    payload_b64, sig_b64 = token.split(".", 1)
+
+    expected_sig = hmac.new(secret, payload_b64.encode("utf-8"), hashlib.sha256).digest()
+    expected_sig_b64 = _b64url_encode(expected_sig)
+
+    if not hmac.compare_digest(expected_sig_b64, sig_b64):
+        return False
+
+    try:
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+    except Exception:
+        return False
+
+    if not isinstance(payload, dict):
+        return False
+
+    if str(payload.get("typ") or "") != "runner":
+        return False
+
+    if str(payload.get("tab_id") or "") != str(tab_id or "").strip():
+        return False
+
+    exp = int(payload.get("exp") or 0)
+    if exp <= int(time.time()):
+        return False
+
+    if client_ip is not None:
+        if str(payload.get("ip") or "") != str(client_ip).strip():
+            return False
+
+    return True

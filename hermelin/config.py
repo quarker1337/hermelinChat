@@ -41,6 +41,11 @@ class HermelinConfig:
     # Override with HERMELIN_SPAWN_CWD if you want a different workspace.
     spawn_cwd: Path = Path(os.getenv("HERMELIN_SPAWN_CWD", str(_DEFAULT_SPAWN_CWD))).expanduser()
 
+    # CORS (optional): comma-separated browser origins allowed for cross-origin requests.
+    # Default is disabled (same-origin UI does not need CORS).
+    # Example: https://chat.example.com,http://localhost:5173
+    cors_origins: str = os.getenv("HERMELIN_CORS_ORIGINS", "").strip()
+
     # Security:
     # Comma-separated allowlist of IPs/CIDRs that can access HTTP + WebSocket.
     # Default is localhost-only.
@@ -59,8 +64,17 @@ class HermelinConfig:
     session_ttl_seconds: int = int(os.getenv("HERMELIN_SESSION_TTL_SECONDS", "43200"))  # 12h
     cookie_name: str = os.getenv("HERMELIN_SESSION_COOKIE", "hermelin_session")
 
+    # Runner gateway tokens (for sandboxed iframes). These tokens are embedded in the
+    # runner proxy URL path so the iframe can authenticate without cookies.
+    runner_token_ttl_seconds: int = int(os.getenv("HERMELIN_RUNNER_TOKEN_TTL_SECONDS", "1800"))  # 30m
+    runner_token_bind_ip: bool = _env_bool("HERMELIN_RUNNER_TOKEN_BIND_IP", "1")
+
     # Only enable this if running behind a trusted reverse proxy.
     trust_x_forwarded_for: bool = _env_bool("HERMELIN_TRUST_X_FORWARDED_FOR", "0")
+
+    # If set, only trust X-Forwarded-For / X-Real-IP when the immediate socket peer
+    # (request.client.host) is inside this allowlist.
+    trusted_proxy_ips: str = os.getenv("HERMELIN_TRUSTED_PROXY_IPS", "").strip()
 
     # Set to 1 if serving over HTTPS (or behind a TLS-terminating proxy that preserves scheme)
     cookie_secure: bool = _env_bool("HERMELIN_COOKIE_SECURE", "0")

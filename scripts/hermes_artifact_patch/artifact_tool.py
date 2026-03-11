@@ -619,6 +619,14 @@ def start_runner(
     - Runner script (optional): ~/.hermes/artifacts/runners/{tab_id}_runner.py
     - PID file (plain text): ~/.hermes/artifacts/pids/{tab_id}.pid
     - Logs: ~/.hermes/artifacts/runners/projects/{tab_id}/runner.log
+    - Runner manifest (recommended): ~/.hermes/artifacts/runners/projects/{tab_id}/runner.json
+      Example:
+        {"scheme": "http", "host": "127.0.0.1", "port": 43123}
+
+    hermilinChat can proxy localhost-bound runners for remote operator browsers.
+    If your iframe artifact points at http://127.0.0.1:PORT/, the UI will rewrite it
+    to a same-origin, authenticated proxy URL so it works even when the operator is
+    on a different machine.
 
     Provide either:
     - runner_code: Python source to write to the runner script (then it is executed), OR

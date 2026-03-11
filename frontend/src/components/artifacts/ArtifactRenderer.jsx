@@ -41,6 +41,76 @@ for (const [name, loader] of HLJS_LANGS) {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Runner gateway helpers
+//
+// Iframe artifacts sometimes point to localhost (127.0.0.1) which breaks when the
+// operator browser is on a different machine. hermilinChat exposes these runners
+// via a same-origin proxy under /r/{tab_id}/_t/{token}/...
+// -----------------------------------------------------------------------------
+
+const RUNNER_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '0.0.0.0', '::1'])
+
+// tab_id -> { token, expiresAt, basePath } OR { pending: Promise<...> }
+const runnerTokenCache = new Map()
+
+function parseLocalRunnerSrc(src) {
+  if (!src || typeof src !== 'string') return null
+  try {
+    const u = new URL(src)
+    const host = String(u.hostname || '').toLowerCase()
+    if (!RUNNER_LOCAL_HOSTS.has(host)) return null
+    return {
+      path: u.pathname || '/',
+      search: u.search || '',
+      hash: u.hash || '',
+    }
+  } catch {
+    return null
+  }
+}
+
+async function mintRunnerToken(tabId) {
+  const now = Date.now() / 1000
+  const cached = runnerTokenCache.get(tabId)
+
+  if (cached && cached.token && cached.expiresAt && cached.basePath) {
+    if (cached.expiresAt - now > 20) {
+      return cached
+    }
+  }
+
+  if (cached && cached.pending) {
+    return await cached.pending
+  }
+
+  const pending = (async () => {
+    const r = await fetch(`/api/runners/${encodeURIComponent(tabId)}/token`, { method: 'POST' })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(data?.detail || `http ${r.status}`)
+
+    const out = {
+      token: String(data?.token || ''),
+      expiresAt: Number(data?.expires_at || 0),
+      basePath: String(data?.base_path || ''),
+    }
+
+    if (!out.token || !out.basePath) throw new Error('invalid runner token response')
+
+    runnerTokenCache.set(tabId, out)
+    return out
+  })()
+
+  runnerTokenCache.set(tabId, { pending })
+
+  try {
+    return await pending
+  } catch (err) {
+    runnerTokenCache.delete(tabId)
+    throw err
+  }
+}
+
 function ArtifactEmpty({ title, detail }) {
   return (
     <div
@@ -422,12 +492,67 @@ function HtmlArtifact({ artifact }) {
 
 function IframeArtifact({ artifact }) {
   const data = artifact?.data || {}
-  const src = typeof data?.src === 'string' ? data.src : ''
+  const rawSrc = typeof data?.src === 'string' ? data.src : ''
   const srcDoc = typeof data?.srcdoc === 'string' ? data.srcdoc : ''
-  if (!src && !srcDoc) {
+  const tabId = typeof artifact?.id === 'string' ? artifact.id : ''
+
+  const isLocalRunner = useMemo(() => parseLocalRunnerSrc(rawSrc), [rawSrc])
+
+  const [resolvedSrc, setResolvedSrc] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    setError('')
+
+    if (!isLocalRunner || !tabId) {
+      setResolvedSrc(rawSrc)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    // Prevent trying to load 127.0.0.1 in the operator's browser.
+    setResolvedSrc('')
+
+    ;(async () => {
+      try {
+        const tok = await mintRunnerToken(tabId)
+        const proxied = `${tok.basePath}${isLocalRunner.path}${isLocalRunner.search}${isLocalRunner.hash}`
+        if (!cancelled) setResolvedSrc(proxied)
+      } catch (err) {
+        const msg = err?.message ? String(err.message) : String(err)
+        if (!cancelled) setError(msg)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [tabId, rawSrc, isLocalRunner])
+
+  if (!rawSrc && !srcDoc) {
     return <ArtifactEmpty title="Invalid iframe artifact" detail="Expected data.src or data.srcdoc." />
   }
-  return <HtmlLikeFrame title={artifact?.title || 'Iframe artifact'} src={src} srcDoc={srcDoc} />
+
+  if (isLocalRunner) {
+    if (error) {
+      return (
+        <ArtifactEmpty
+          title="Runner proxy unavailable"
+          detail={`Failed to mint runner token for ${tabId || 'runner'}: ${error}`}
+        />
+      )
+    }
+
+    if (!resolvedSrc) {
+      return <ArtifactEmpty title="Loading runner..." detail="Preparing secure proxy URL for this iframe runner." />
+    }
+
+    return <HtmlLikeFrame title={artifact?.title || 'Iframe runner'} src={resolvedSrc} srcDoc={srcDoc} />
+  }
+
+  return <HtmlLikeFrame title={artifact?.title || 'Iframe artifact'} src={rawSrc} srcDoc={srcDoc} />
 }
 
 function LogsArtifact({ artifact }) {

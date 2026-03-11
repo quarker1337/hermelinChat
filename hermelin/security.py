@@ -52,13 +52,27 @@ def ip_allowed(ip: str, spec: str) -> bool:
     return any(addr in n for n in nets)
 
 
-def extract_client_ip(*, client_host: str, headers: Mapping[str, str], trust_xff: bool) -> str:
+def extract_client_ip(
+    *,
+    client_host: str,
+    headers: Mapping[str, str],
+    trust_xff: bool,
+    trusted_proxy_spec: str = "",
+) -> str:
     """Return the best-effort client IP.
 
-    If trust_xff=True, uses X-Forwarded-For / X-Real-IP (ONLY safe behind a trusted proxy).
+    If trust_xff=True, uses X-Forwarded-For / X-Real-IP, but ONLY if:
+      - trusted_proxy_spec is empty (legacy behavior), OR
+      - the socket peer (request.client.host) is inside trusted_proxy_spec.
+
     Otherwise uses the socket peer (request.client.host).
     """
+
     if trust_xff:
+        if trusted_proxy_spec:
+            if not ip_allowed((client_host or "").strip(), trusted_proxy_spec):
+                return client_host
+
         xff = headers.get("x-forwarded-for")
         if xff:
             return xff.split(",")[0].strip()

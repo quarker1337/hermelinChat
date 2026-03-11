@@ -15,9 +15,13 @@ from typing import Optional
 
 import yaml
 
+import httpx
+import websockets
+from urllib.parse import urlparse
+
 from fastapi import Body, FastAPI, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from .artifacts import (
     cleanup_session_artifacts,
@@ -27,10 +31,12 @@ from .artifacts import (
     list_artifacts,
 )
 from .auth import (
+    create_runner_token,
     create_session_token,
     extract_cookie_value,
     generate_secret_bytes,
     verify_login_password,
+    verify_runner_token,
     verify_session_token,
 )
 from .config import HermelinConfig
@@ -38,6 +44,7 @@ from .meta_db import ensure_meta_db, get_random_whisper, get_titles_map
 from .pty_handler import PtyProcess
 from .security import extract_client_ip, ip_allowed
 from .state_reader import get_message_context, list_sessions, search_messages
+from .runners import discover_runner_upstream
 
 
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
@@ -51,15 +58,18 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         pass
 
     app = FastAPI(title="hermelinChat", version="0.12", docs_url="/api/docs", redoc_url=None)
-
-    # Dev-friendly; production should lock this down.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS: disabled by default (same-origin UI does not need it).
+    # To enable (e.g. behind a separate UI origin), set HERMELIN_CORS_ORIGINS to a
+    # comma-separated list of origins. Wildcard '*' is intentionally not supported.
+    cors_origins = [o.strip() for o in (getattr(config, 'cors_origins', '') or '').split(',') if o.strip() and o.strip() != '*']
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=True,
+            allow_methods=['*'],
+            allow_headers=['*'],
+        )
 
     # ---------------------------------------------------------------------
     # Security: IP allowlist + password session cookie
@@ -67,18 +77,18 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     allowed_spec = (config.allowed_ips or "").strip()
     trust_xff = bool(config.trust_x_forwarded_for)
 
-    auth_password_hash = (config.auth_password_hash or "").strip()
-    auth_enabled = bool(auth_password_hash)
+    auth_password_hash=(confi...hash or "").strip()
+    auth_enabled=bool(a...ash)
 
     # Basic brute-force protection (per-IP failed login rate limit)
     try:
-        auth_max_fails = int(os.getenv("HERMELIN_AUTH_MAX_FAILS", "8"))
+        auth_max_fails=int(os...LS", "8"))
     except ValueError:
-        auth_max_fails = 8
+        auth_max_fails=***
     try:
-        auth_fail_window_seconds = int(os.getenv("HERMELIN_AUTH_FAIL_WINDOW_SECONDS", "60"))
+        auth_fail_window_seconds=int(os...DS", "60"))
     except ValueError:
-        auth_fail_window_seconds = 60
+        auth_fail_window_seconds=***
 
     _auth_failures: dict[str, deque[float]] = defaultdict(deque)
 
@@ -120,8 +130,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     ttl_seconds = int(config.session_ttl_seconds or 0) or 43200
     cookie_secure = bool(config.cookie_secure)
 
-    cookie_secret_raw = (config.cookie_secret or "").strip()
-    cookie_secret = cookie_secret_raw.encode("utf-8") if cookie_secret_raw else generate_secret_bytes()
+    cookie_secret_raw=(confi...cret or "").strip()
+    cookie_secret=cookie...-8") if cookie_secret_raw else generate_secret_bytes()
 
     def _check_allowed(client_ip: str) -> bool:
         return ip_allowed(client_ip, allowed_spec)
@@ -131,7 +141,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return True
         if not token:
             return False
-        return verify_session_token(token=token, secret=cookie_secret)
+        return verify_session_token(token=*** secret=***
 
     def _is_public_path(path: str) -> bool:
         # SPA + static: public. Guard /api (except /api/auth/*).
@@ -147,12 +157,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             client_host=request.client.host if request.client else "",
             headers=request.headers,
             trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
         )
         if not _check_allowed(client_ip):
             return JSONResponse({"detail": "forbidden"}, status_code=403)
 
         if auth_enabled and not _is_public_path(request.url.path):
-            token = request.cookies.get(cookie_name)
+            token=reques...ame)
             if not _is_authenticated(token):
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
@@ -210,6 +221,337 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     @app.get("/api/artifacts/latest")
     async def api_artifacts_latest():
         return latest_artifact(config.artifact_dir)
+
+    # ---------------------------------------------------------------------
+    # Runner gateway (iframe runners)
+    # ---------------------------------------------------------------------
+
+    @app.post("/api/runners/{tab_id}/token")
+    async def api_runner_token(request: Request, tab_id: str):
+        """Mint a short-lived runner token for a sandboxed iframe.
+
+        This endpoint is protected by the normal /api guard (IP allowlist +
+        session cookie auth when enabled).
+
+        The token is embedded into the runner proxy URL path so the iframe can
+        authenticate without cookies.
+        """
+
+        if not is_valid_artifact_id(tab_id):
+            return JSONResponse({"detail": "invalid tab id"}, status_code=400)
+
+        ttl = int(getattr(config, "runner_token_ttl_seconds", 1800) or 1800)
+        if ttl < 30:
+            ttl = 30
+
+        client_ip = extract_client_ip(
+            client_host=request.client.host if request.client else "",
+            headers=request.headers,
+            trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
+        )
+
+        bind_ip = bool(getattr(config, "runner_token_bind_ip", True))
+
+        token=create...ken(
+            secret=***
+            tab_id=tab_id,
+            ttl_seconds=ttl,
+            client_ip=client_ip if bind_ip else None,
+        )
+
+        expires_at = int(time.time()) + ttl
+        base_path = f"/r/{tab_id}/_t/{token}"
+        return {
+            "ok": True,
+            "tab_id": tab_id,
+            "token": token,
+            "expires_at": expires_at,
+            "base_path": base_path,
+        }
+
+    _RUNNER_HOP_BY_HOP_HEADERS = {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    }
+
+    _RUNNER_STRIP_REQUEST_HEADERS = {
+        # Never forward hermilinChat session material to runners.
+        "cookie",
+        "authorization",
+    }
+
+    _RUNNER_STRIP_RESPONSE_HEADERS = {
+        # Runner must never be able to set cookies on hermilinChat origin.
+        "set-cookie",
+    }
+
+    def _runner_proxy_prefix(tab_id: str, token: str) -> str:
+        return f"/r/{tab_id}/_t/{token}"
+
+    def _runner_rewrite_location(value: str, *, tab_id: str, token: str, upstream_port: int) -> str:
+        """Rewrite Location headers so redirects stay inside the runner proxy."""
+
+        loc = (value or "").strip()
+        if not loc:
+            return value
+
+        prefix = _runner_proxy_prefix(tab_id, token)
+
+        # Already rewritten.
+        if loc.startswith(prefix):
+            return loc
+
+        # Absolute path redirect (common): /login
+        if loc.startswith("/"):
+            return f"{prefix}{loc}"
+
+        # Full URL redirect: http://127.0.0.1:1234/login
+        try:
+            parsed = urlparse(loc)
+        except Exception:
+            return loc
+
+        host = (parsed.hostname or "").strip().lower()
+        port = parsed.port
+        if host in {"127.0.0.1", "localhost", "0.0.0.0", "::1"} and port == upstream_port:
+            path = parsed.path or "/"
+            out = f"{prefix}{path}"
+            if parsed.query:
+                out += f"?{parsed.query}"
+            if parsed.fragment:
+                out += f"#{parsed.fragment}"
+            return out
+
+        return loc
+
+    def _runner_filter_request_headers(request: Request) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for k, v in request.headers.items():
+            lk = k.lower()
+            if lk in _RUNNER_HOP_BY_HOP_HEADERS:
+                continue
+            if lk in _RUNNER_STRIP_REQUEST_HEADERS:
+                continue
+            if lk == "host":
+                continue
+            out[k] = v
+        return out
+
+    def _runner_filter_response_headers(
+        headers: httpx.Headers,
+        *,
+        tab_id: str,
+        token: str,
+        upstream_port: int,
+    ) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for k, v in headers.items():
+            lk = k.lower()
+            if lk in _RUNNER_HOP_BY_HOP_HEADERS:
+                continue
+            if lk in _RUNNER_STRIP_RESPONSE_HEADERS:
+                continue
+            if lk == "content-length":
+                # Avoid mismatches when streaming.
+                continue
+            if lk == "location":
+                v = _runner_rewrite_location(v, tab_id=tab_id, token=*** upstream_port=upstream_port)
+            out[k] = v
+        return out
+
+    _RUNNER_PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+
+    @app.api_route("/r/{tab_id}/_t/{token}", methods=_RUNNER_PROXY_METHODS)
+    @app.api_route("/r/{tab_id}/_t/{token}/{path:path}", methods=_RUNNER_PROXY_METHODS)
+    async def runner_proxy(request: Request, tab_id: str, token: str, path: str = ""):
+        if not is_valid_artifact_id(tab_id):
+            return JSONResponse({"detail": "invalid tab id"}, status_code=400)
+
+        client_ip = extract_client_ip(
+            client_host=request.client.host if request.client else "",
+            headers=request.headers,
+            trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
+        )
+        bind_ip = bool(getattr(config, "runner_token_bind_ip", True))
+        if not verify_runner_token(
+            token=***
+            secret=***
+            tab_id=tab_id,
+            client_ip=client_ip if bind_ip else None,
+        ):
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
+        upstream = discover_runner_upstream(config.artifact_dir, tab_id)
+        if not upstream:
+            return JSONResponse({"detail": "runner_not_found"}, status_code=404)
+
+        scheme, host, port = upstream
+        upstream_path = f"/{path}" if path else "/"
+        upstream_url = f"{scheme}://{host}:{port}{upstream_path}"
+        if request.url.query:
+            upstream_url += f"?{request.url.query}"
+
+        if request.method == "OPTIONS":
+            # Same-origin by default; keep this simple.
+            return Response(status_code=204)
+
+        req_headers = _runner_filter_request_headers(request)
+        body = b""
+        try:
+            body = await request.body()
+        except Exception:
+            body = b""
+
+        timeout = httpx.Timeout(connect=5.0, read=None, write=60.0, pool=5.0)
+        client = httpx.AsyncClient(timeout=timeout, follow_redirects=False)
+
+        try:
+            req = client.build_request(
+                method=request.method,
+                url=upstream_url,
+                headers=req_headers,
+                content=body,
+            )
+            upstream_resp = await client.send(req, stream=True)
+        except Exception as exc:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+            return JSONResponse({"detail": f"runner_proxy_error: {exc}"}, status_code=502)
+
+        resp_headers = _runner_filter_response_headers(
+            upstream_resp.headers,
+            tab_id=tab_id,
+            token=***
+            upstream_port=port,
+        )
+
+        async def _iter_bytes():
+            try:
+                async for chunk in upstream_resp.aiter_bytes():
+                    yield chunk
+            finally:
+                try:
+                    await upstream_resp.aclose()
+                except Exception:
+                    pass
+                try:
+                    await client.aclose()
+                except Exception:
+                    pass
+
+        return StreamingResponse(
+            _iter_bytes(),
+            status_code=upstream_resp.status_code,
+            headers=resp_headers,
+        )
+
+    @app.websocket("/r/{tab_id}/_t/{token}")
+    @app.websocket("/r/{tab_id}/_t/{token}/{path:path}")
+    async def ws_runner_proxy(websocket: WebSocket, tab_id: str, token: str, path: str = ""):
+        client_ip = extract_client_ip(
+            client_host=websocket.client.host if websocket.client else "",
+            headers=websocket.headers,
+            trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
+        )
+
+        # Accept first so we can send close frames consistently.
+        await websocket.accept()
+
+        if not _check_allowed(client_ip):
+            await websocket.close(code=1008)
+            return
+
+        if not is_valid_artifact_id(tab_id):
+            await websocket.close(code=1008)
+            return
+
+        bind_ip = bool(getattr(config, "runner_token_bind_ip", True))
+        if not verify_runner_token(
+            token=***
+            secret=***
+            tab_id=tab_id,
+            client_ip=client_ip if bind_ip else None,
+        ):
+            await websocket.close(code=1008)
+            return
+
+        upstream = discover_runner_upstream(config.artifact_dir, tab_id)
+        if not upstream:
+            await websocket.close(code=1011)
+            return
+
+        scheme, host, port = upstream
+        ws_scheme = "wss" if scheme == "https" else "ws"
+        upstream_path = f"/{path}" if path else "/"
+
+        qs = websocket.scope.get("query_string", b"")
+        try:
+            qs_s = qs.decode("utf-8") if isinstance(qs, (bytes, bytearray)) else str(qs)
+        except Exception:
+            qs_s = ""
+
+        upstream_url = f"{ws_scheme}://{host}:{port}{upstream_path}"
+        if qs_s:
+            upstream_url += f"?{qs_s}"
+
+        subp_header = websocket.headers.get("sec-websocket-protocol")
+        subprotocols = [p.strip() for p in subp_header.split(",") if p.strip()] if subp_header else None
+
+        try:
+            async with websockets.connect(upstream_url, subprotocols=subprotocols) as upstream_ws:
+
+                async def _client_to_upstream():
+                    while True:
+                        msg = await websocket.receive()
+                        mt = msg.get("type")
+                        if mt == "websocket.disconnect":
+                            try:
+                                await upstream_ws.close()
+                            except Exception:
+                                pass
+                            break
+                        if mt != "websocket.receive":
+                            continue
+
+                        if msg.get("text") is not None:
+                            await upstream_ws.send(msg["text"])
+                        elif msg.get("bytes") is not None:
+                            await upstream_ws.send(msg["bytes"])
+
+                async def _upstream_to_client():
+                    async for message in upstream_ws:
+                        if isinstance(message, (bytes, bytearray)):
+                            await websocket.send_bytes(bytes(message))
+                        else:
+                            await websocket.send_text(str(message))
+
+                t1 = asyncio.create_task(_client_to_upstream())
+                t2 = asyncio.create_task(_upstream_to_client())
+                done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+                for t in pending:
+                    t.cancel()
+        except Exception:
+            try:
+                await websocket.close(code=1011)
+            except Exception:
+                pass
+            return
+
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
     @app.delete("/api/artifacts/{artifact_id}")
     async def api_delete_artifact(artifact_id: str):
@@ -620,7 +962,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return out
         return out
 
-    _SUPPORTED_API_KEYS = {
+    _SUPPORTED_API_KEYS=***
         # Model provider
         "OPENROUTER_API_KEY",
         # Tools
@@ -1036,7 +1378,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     @app.get("/api/auth/me")
     async def auth_me(request: Request):
-        token = request.cookies.get(cookie_name)
+        token=reques...ame)
         return {
             "auth_enabled": auth_enabled,
             "authenticated": _is_authenticated(token),
@@ -1051,6 +1393,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             client_host=request.client.host if request.client else "",
             headers=request.headers,
             trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
         )
 
         retry_after = _auth_retry_after(client_ip)
@@ -1061,14 +1404,14 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 headers={"Retry-After": str(retry_after)},
             )
 
-        password = str(payload.get("password") or "")
+        password=str(pa...rd") or "")
         if not verify_login_password(password, auth_password_hash):
             _auth_record_failure(client_ip)
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
         _auth_clear_failures(client_ip)
 
-        token = create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
+        token=create...ret, ttl_seconds=ttl_seconds)
         resp = JSONResponse({"ok": True, "auth_enabled": True})
         resp.set_cookie(
             key=cookie_name,
@@ -1178,6 +1521,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             client_host=websocket.client.host if websocket.client else "",
             headers=websocket.headers,
             trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
         )
 
         await websocket.accept()
@@ -1186,7 +1530,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return
 
         if auth_enabled:
-            token = extract_cookie_value(websocket.headers.get("cookie", ""), cookie_name)
+            token=extrac...ie", ""), cookie_name)
             if not _is_authenticated(token):
                 await websocket.close(code=1008)
                 return
