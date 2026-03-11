@@ -581,8 +581,16 @@ function LogsArtifact({ artifact }) {
   const filters = ['all', 'error', 'warn', 'info', 'debug']
 
   return (
-    <div style={{ padding: '12px 14px' }}>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+    <div
+      style={{
+        padding: '12px 14px',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+      }}
+    >
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center', flexShrink: 0 }}>
         {filters.map((name) => {
           const active = filter === name
           return (
@@ -617,7 +625,8 @@ function LogsArtifact({ artifact }) {
           border: `1px solid ${SLATE.border}`,
           borderRadius: 6,
           overflow: 'auto',
-          maxHeight: 420,
+          flex: 1,
+          minHeight: 0,
           background: `${SLATE.surface}cc`,
         }}
       >
