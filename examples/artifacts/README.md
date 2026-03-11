@@ -31,3 +31,24 @@ Two ways to create artifacts:
 ```
 
 Payload examples for each artifact type live in `payloads.json`.
+
+Live runner note
+
+If you use `start_runner(tab_id=...)` to run a background updater, the runner must write the FULL artifact envelope (id/type/title/data/...) to:
+- `~/.hermes/artifacts/session/{tab_id}.json` (or `persistent/` if you chose persistent=true)
+
+Common mistake: writing only the payload (e.g. `{ "lines": [...] }`) instead of wrapping it under `data`.
+
+Minimal live artifact JSON file shape:
+
+```json
+{
+  "id": "demo_logs",
+  "type": "logs",
+  "title": "Demo logs",
+  "data": { "lines": [] },
+  "live": true,
+  "refresh_seconds": 2,
+  "timestamp": 0
+}
+```
