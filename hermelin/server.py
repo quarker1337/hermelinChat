@@ -4,6 +4,8 @@ import asyncio
 import hmac
 import json
 import os
+import time
+from collections import defaultdict, deque
 import shlex
 import shutil
 import signal
@@ -67,6 +69,52 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     auth_password_hash = (config.auth_password_hash or "").strip()
     auth_enabled = bool(auth_password_hash)
+
+    # Basic brute-force protection (per-IP failed login rate limit)
+    try:
+        auth_max_fails = int(os.getenv("HERMELIN_AUTH_MAX_FAILS", "8"))
+    except ValueError:
+        auth_max_fails = 8
+    try:
+        auth_fail_window_seconds = int(os.getenv("HERMELIN_AUTH_FAIL_WINDOW_SECONDS", "60"))
+    except ValueError:
+        auth_fail_window_seconds = 60
+
+    _auth_failures: dict[str, deque[float]] = defaultdict(deque)
+
+    def _auth_prune(dq: deque[float], now: float) -> None:
+        if auth_fail_window_seconds <= 0:
+            dq.clear()
+            return
+        while dq and (now - dq[0]) > auth_fail_window_seconds:
+            dq.popleft()
+
+    def _auth_retry_after(ip: str) -> int:
+        if auth_max_fails <= 0 or auth_fail_window_seconds <= 0:
+            return 0
+        now = time.monotonic()
+        dq = _auth_failures[ip]
+        _auth_prune(dq, now)
+        if len(dq) < auth_max_fails:
+            return 0
+        retry_after = int(auth_fail_window_seconds - (now - dq[0]))
+        if retry_after < 1:
+            retry_after = 1
+        return retry_after
+
+    def _auth_record_failure(ip: str) -> None:
+        if auth_max_fails <= 0 or auth_fail_window_seconds <= 0:
+            return
+        now = time.monotonic()
+        dq = _auth_failures[ip]
+        _auth_prune(dq, now)
+        dq.append(now)
+        max_keep = max(auth_max_fails * 2, 32)
+        while len(dq) > max_keep:
+            dq.popleft()
+
+    def _auth_clear_failures(ip: str) -> None:
+        _auth_failures.pop(ip, None)
 
     cookie_name = (config.cookie_name or "hermelin_session").strip() or "hermelin_session"
     ttl_seconds = int(config.session_ttl_seconds or 0) or 43200
@@ -995,13 +1043,30 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         }
 
     @app.post("/api/auth/login")
-    async def auth_login(payload: dict = Body(...)):
+    async def auth_login(request: Request, payload: dict = Body(...)):
         if not auth_enabled:
             return {"ok": True, "auth_enabled": False}
 
+        client_ip = extract_client_ip(
+            client_host=request.client.host if request.client else "",
+            headers=request.headers,
+            trust_xff=trust_xff,
+        )
+
+        retry_after = _auth_retry_after(client_ip)
+        if retry_after:
+            return JSONResponse(
+                {"detail": "rate_limited"},
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+
         password = str(payload.get("password") or "")
         if not verify_login_password(password, auth_password_hash):
+            _auth_record_failure(client_ip)
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
+        _auth_clear_failures(client_ip)
 
         token = create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
         resp = JSONResponse({"ok": True, "auth_enabled": True})

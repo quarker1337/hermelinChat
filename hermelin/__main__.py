@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 from pathlib import Path
 
@@ -12,6 +13,16 @@ from .server import create_app
 
 def _env_bool(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _is_loopback_host(host: str) -> bool:
+    h = (host or "").strip().lower()
+    if h in {"localhost"}:
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
 
 
 def main() -> None:
@@ -29,6 +40,12 @@ def main() -> None:
         "--ssl-keyfile",
         default=os.getenv("HERMELIN_SSL_KEYFILE", ""),
         help="Path to TLS private key (PEM) to serve HTTPS directly",
+    )
+    p.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        default=_env_bool("HERMELIN_ALLOW_INSECURE_HTTP", "0"),
+        help="Allow serving HTTP without TLS on non-localhost (NOT recommended)",
     )
     p.add_argument(
         "--hermes-cmd",
@@ -76,12 +93,18 @@ def main() -> None:
         os.environ["HERMELIN_TRUST_X_FORWARDED_FOR"] = "1" if args.trust_xff else "0"
         os.environ["HERMELIN_SSL_CERTFILE"] = str(args.ssl_certfile)
         os.environ["HERMELIN_SSL_KEYFILE"] = str(args.ssl_keyfile)
+        os.environ["HERMELIN_ALLOW_INSECURE_HTTP"] = "1" if args.allow_insecure_http else "0"
 
         ssl_certfile = str(args.ssl_certfile or "").strip() or None
         ssl_keyfile = str(args.ssl_keyfile or "").strip() or None
         if not (ssl_certfile and ssl_keyfile):
             ssl_certfile = None
             ssl_keyfile = None
+
+        if ssl_certfile is None and ssl_keyfile is None and not args.allow_insecure_http and not _is_loopback_host(str(args.host)):
+            print("ERROR: refusing to serve insecure HTTP on non-localhost without TLS")
+            print("Hint: configure HERMELIN_SSL_CERTFILE/HERMELIN_SSL_KEYFILE (default), or set HERMELIN_ALLOW_INSECURE_HTTP=1")
+            raise SystemExit(1)
 
         uvicorn.run(
             "hermelin.server:create_app",
@@ -108,13 +131,18 @@ def main() -> None:
         ssl_keyfile=str(args.ssl_keyfile).strip(),
     )
 
-    app = create_app(cfg)
-
     ssl_certfile = cfg.ssl_certfile or None
     ssl_keyfile = cfg.ssl_keyfile or None
     if not (ssl_certfile and ssl_keyfile):
         ssl_certfile = None
         ssl_keyfile = None
+
+    if ssl_certfile is None and ssl_keyfile is None and not args.allow_insecure_http and not _is_loopback_host(cfg.host):
+        print("ERROR: refusing to serve insecure HTTP on non-localhost without TLS")
+        print("Hint: configure HERMELIN_SSL_CERTFILE/HERMELIN_SSL_KEYFILE (default), or set HERMELIN_ALLOW_INSECURE_HTTP=1")
+        raise SystemExit(1)
+
+    app = create_app(cfg)
 
     uvicorn.run(
         app,

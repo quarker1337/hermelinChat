@@ -181,6 +181,7 @@ fi
 SSL_CERTFILE=""
 SSL_KEYFILE=""
 HERMELIN_COOKIE_SECURE_DEFAULT=0
+HERMELIN_ALLOW_INSECURE_HTTP_DEFAULT=0
 
 if [[ "$ENABLE_HTTPS" -eq 1 ]]; then
   if ! command -v openssl >/dev/null 2>&1; then
@@ -259,6 +260,10 @@ if [[ "$ENABLE_HTTPS" -eq 1 ]]; then
   fi
 
   HERMELIN_COOKIE_SECURE_DEFAULT=1
+else
+  # If the user explicitly disables HTTPS, we allow insecure HTTP even on non-localhost.
+  # (The server refuses this unless HERMELIN_ALLOW_INSECURE_HTTP=1.)
+  HERMELIN_ALLOW_INSECURE_HTTP_DEFAULT=1
 fi
 
 if command -v id >/dev/null 2>&1; then
@@ -387,6 +392,9 @@ HERMELIN_HERMES_CMD="$DEFAULT_HERMES_EXE chat --toolsets \"hermes-cli, artifacts
 HERMELIN_SSL_CERTFILE="$SSL_CERTFILE"
 HERMELIN_SSL_KEYFILE="$SSL_KEYFILE"
 
+# Allow insecure HTTP on non-localhost (NOT recommended). Set by installer when using --no-https.
+HERMELIN_ALLOW_INSECURE_HTTP=$HERMELIN_ALLOW_INSECURE_HTTP_DEFAULT
+
 # Reverse proxy / TLS
 HERMELIN_COOKIE_SECURE=$HERMELIN_COOKIE_SECURE_DEFAULT
 HERMELIN_TRUST_X_FORWARDED_FOR=0
@@ -456,10 +464,13 @@ if enable:
     cs = (get("HERMELIN_COOKIE_SECURE") or "").strip()
     if cs in ("", "0"):
         set_key("HERMELIN_COOKIE_SECURE", "1")
+
+    set_key("HERMELIN_ALLOW_INSECURE_HTTP", "0")
 else:
     set_key("HERMELIN_SSL_CERTFILE", "", quote=True)
     set_key("HERMELIN_SSL_KEYFILE", "", quote=True)
     set_key("HERMELIN_COOKIE_SECURE", "0")
+    set_key("HERMELIN_ALLOW_INSECURE_HTTP", "1")
 
 env_file.write_text(txt, encoding="utf-8")
 PY
@@ -657,6 +668,7 @@ Type=simple
 User=$service_user
 WorkingDirectory=$workdir
 EnvironmentFile=$ENV_FILE
+UMask=0077
 ExecStart=$workdir/.venv/bin/hermelin
 Restart=on-failure
 
@@ -691,6 +703,7 @@ After=network.target
 Type=simple
 WorkingDirectory=$ROOT_DIR
 EnvironmentFile=$ENV_FILE
+UMask=0077
 ExecStart=$ROOT_DIR/.venv/bin/hermelin
 Restart=on-failure
 
