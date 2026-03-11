@@ -18,16 +18,28 @@ This runner demonstrates:
   - GET /events  : Server-Sent Events (SSE) stream
   - WS  /ws      : Minimal WebSocket echo + broadcast (implemented in stdlib)
 
-Notes for runner authors
+Notes for runner authors (and for the model generating runners)
 - Avoid absolute URLs like src="/assets/app.js". Use relative URLs so the app
   continues working behind /r/.../_t/... path prefixes.
 - For WebSockets, construct URLs from location:
     const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${wsProto}//${location.host}${location.pathname.replace(/\/$/, '')}/ws`
 
+Runner manifest vs artifact JSON (common source of model mistakes)
+- runner.json is ONLY for runner discovery (gateway needs the port):
+    $HERMES_ARTIFACT_PROJECT_DIR/runner.json
+  Minimal shape:
+    {"scheme":"http","host":"127.0.0.1","port":1234,"tab_id":"...","started_at":...}
+- Live artifact updates are DIFFERENT: if a runner writes artifacts directly, it must write the FULL
+  artifact envelope to:
+    $HERMES_ARTIFACTS_HOME/session/{tab_id}.json
+  (payload goes under top-level "data"; do NOT write only the payload object).
+  See: examples/artifacts/live_logs_runner_template.py
+
 Environment variables (set by Hermes artifact_tool.start_runner)
 - HERMES_ARTIFACT_TAB_ID
 - HERMES_ARTIFACT_PROJECT_DIR
+- HERMES_ARTIFACTS_HOME
 
 This file is an example; Hermes can inline it into start_runner(runner_code=...).
 """
