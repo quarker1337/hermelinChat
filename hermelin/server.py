@@ -77,18 +77,18 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     allowed_spec = (config.allowed_ips or "").strip()
     trust_xff = bool(config.trust_x_forwarded_for)
 
-    auth_password_hash=(confi...hash or "").strip()
-    auth_enabled=bool(a...ash)
+    auth_password_hash = (config.auth_password_hash or "").strip()
+    auth_enabled = bool(auth_password_hash)
 
     # Basic brute-force protection (per-IP failed login rate limit)
     try:
-        auth_max_fails=int(os...LS", "8"))
+        auth_max_fails = int(os.getenv("HERMELIN_AUTH_MAX_FAILS", "8"))
     except ValueError:
-        auth_max_fails=***
+        auth_max_fails = 8
     try:
-        auth_fail_window_seconds=int(os...DS", "60"))
+        auth_fail_window_seconds = int(os.getenv("HERMELIN_AUTH_FAIL_WINDOW_SECONDS", "60"))
     except ValueError:
-        auth_fail_window_seconds=***
+        auth_fail_window_seconds = 60
 
     _auth_failures: dict[str, deque[float]] = defaultdict(deque)
 
@@ -130,8 +130,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     ttl_seconds = int(config.session_ttl_seconds or 0) or 43200
     cookie_secure = bool(config.cookie_secure)
 
-    cookie_secret_raw=(confi...cret or "").strip()
-    cookie_secret=cookie...-8") if cookie_secret_raw else generate_secret_bytes()
+    cookie_secret_raw = (config.cookie_secret or "").strip()
+    cookie_secret = cookie_secret_raw.encode("utf-8") if cookie_secret_raw else generate_secret_bytes()
 
     def _check_allowed(client_ip: str) -> bool:
         return ip_allowed(client_ip, allowed_spec)
@@ -141,7 +141,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return True
         if not token:
             return False
-        return verify_session_token(token=*** secret=***
+        return verify_session_token(token=token, secret=cookie_secret)
 
     def _is_public_path(path: str) -> bool:
         # SPA + static: public. Guard /api (except /api/auth/*).
@@ -163,7 +163,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return JSONResponse({"detail": "forbidden"}, status_code=403)
 
         if auth_enabled and not _is_public_path(request.url.path):
-            token=reques...ame)
+            token = request.cookies.get(cookie_name)
             if not _is_authenticated(token):
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
@@ -253,8 +253,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         bind_ip = bool(getattr(config, "runner_token_bind_ip", True))
 
-        token=create...ken(
-            secret=***
+        token = create_runner_token(
+            secret=cookie_secret,
             tab_id=tab_id,
             ttl_seconds=ttl,
             client_ip=client_ip if bind_ip else None,
@@ -362,7 +362,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 # Avoid mismatches when streaming.
                 continue
             if lk == "location":
-                v = _runner_rewrite_location(v, tab_id=tab_id, token=*** upstream_port=upstream_port)
+                v = _runner_rewrite_location(v, tab_id=tab_id, token=token, upstream_port=upstream_port)
             out[k] = v
         return out
 
@@ -382,8 +382,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         )
         bind_ip = bool(getattr(config, "runner_token_bind_ip", True))
         if not verify_runner_token(
-            token=***
-            secret=***
+            token=token,
+            secret=cookie_secret,
             tab_id=tab_id,
             client_ip=client_ip if bind_ip else None,
         ):
@@ -431,7 +431,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         resp_headers = _runner_filter_response_headers(
             upstream_resp.headers,
             tab_id=tab_id,
-            token=***
+            token=token,
             upstream_port=port,
         )
 
@@ -478,8 +478,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         bind_ip = bool(getattr(config, "runner_token_bind_ip", True))
         if not verify_runner_token(
-            token=***
-            secret=***
+            token=token,
+            secret=cookie_secret,
             tab_id=tab_id,
             client_ip=client_ip if bind_ip else None,
         ):
@@ -962,7 +962,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return out
         return out
 
-    _SUPPORTED_API_KEYS=***
+    _SUPPORTED_API_KEYS = {
         # Model provider
         "OPENROUTER_API_KEY",
         # Tools
@@ -1378,7 +1378,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     @app.get("/api/auth/me")
     async def auth_me(request: Request):
-        token=reques...ame)
+        token = request.cookies.get(cookie_name)
         return {
             "auth_enabled": auth_enabled,
             "authenticated": _is_authenticated(token),
@@ -1404,14 +1404,14 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 headers={"Retry-After": str(retry_after)},
             )
 
-        password=str(pa...rd") or "")
+        password = str(payload.get("password") or "")
         if not verify_login_password(password, auth_password_hash):
             _auth_record_failure(client_ip)
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
         _auth_clear_failures(client_ip)
 
-        token=create...ret, ttl_seconds=ttl_seconds)
+        token = create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
         resp = JSONResponse({"ok": True, "auth_enabled": True})
         resp.set_cookie(
             key=cookie_name,
@@ -1530,7 +1530,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return
 
         if auth_enabled:
-            token=extrac...ie", ""), cookie_name)
+            token = extract_cookie_value(websocket.headers.get("cookie", ""), cookie_name)
             if not _is_authenticated(token):
                 await websocket.close(code=1008)
                 return
