@@ -12,6 +12,7 @@ dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
   "aiofiles>=23.2.1",
+  "argon2-cffi>=23.1.0",
 ]
 
 [project.scripts]

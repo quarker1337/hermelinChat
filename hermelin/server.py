@@ -28,6 +28,7 @@ from .auth import (
     create_session_token,
     extract_cookie_value,
     generate_secret_bytes,
+    verify_login_password,
     verify_session_token,
 )
 from .config import HermelinConfig
@@ -64,8 +65,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     allowed_spec = (config.allowed_ips or "").strip()
     trust_xff = bool(config.trust_x_forwarded_for)
 
-    auth_password = (config.auth_password or "").strip()
-    auth_enabled = bool(auth_password)
+    auth_password_hash = (config.auth_password_hash or "").strip()
+    auth_enabled = bool(auth_password_hash)
 
     cookie_name = (config.cookie_name or "hermelin_session").strip() or "hermelin_session"
     ttl_seconds = int(config.session_ttl_seconds or 0) or 43200
@@ -999,7 +1000,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return {"ok": True, "auth_enabled": False}
 
         password = str(payload.get("password") or "")
-        if not hmac.compare_digest(password, auth_password):
+        if not verify_login_password(password, auth_password_hash):
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
         token = create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)

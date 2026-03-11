@@ -9,9 +9,45 @@ import time
 from http.cookies import SimpleCookie
 from typing import Optional
 
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+
 
 def generate_secret_bytes() -> bytes:
     return secrets.token_bytes(32)
+
+
+# Argon2id password hashing for UI login
+_PH = PasswordHasher(
+    time_cost=3,
+    memory_cost=65536,  # 64 MiB
+    parallelism=2,
+    hash_len=32,
+    salt_len=16,
+)
+
+
+def hash_login_password(password: str) -> str:
+    password = str(password or "")
+    if not password:
+        raise ValueError("password required")
+    return _PH.hash(password)
+
+
+def verify_login_password(password: str, password_hash: str) -> bool:
+    password = str(password or "")
+    password_hash = str(password_hash or "")
+    if not password_hash:
+        return False
+    if not password:
+        return False
+
+    try:
+        return bool(_PH.verify(password_hash, password))
+    except VerifyMismatchError:
+        return False
+    except Exception:
+        return False
 
 
 def _b64url_encode(data: bytes) -> str:

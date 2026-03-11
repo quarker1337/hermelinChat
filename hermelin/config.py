@@ -48,8 +48,9 @@ class HermelinConfig:
     allowed_ips: str = os.getenv("HERMELIN_ALLOWED_IPS", "127.0.0.1,::1")
 
     # App password auth (recommended if not localhost-only). If not set, auth is disabled.
-    # NOTE: Without TLS, this password can be sniffed on the network.
-    auth_password: str = os.getenv("HERMELIN_PASSWORD", "")
+    # Store only a hash in env (HERMELIN_PASSWORD_HASH). Without TLS, the password can
+    # still be sniffed on the network during login.
+    auth_password_hash: str = os.getenv("HERMELIN_PASSWORD_HASH", "")
 
     # Session cookie signing secret (optional). If unset, a random secret is generated at boot
     # which invalidates sessions on restart.
