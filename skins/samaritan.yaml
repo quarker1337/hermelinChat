@@ -31,12 +31,12 @@ colors:
   session_border: "#bab8b3"
 
 branding:
-  agent_name: "hermilinChat"
+  agent_name: "Samaritan"
   welcome: "What are your commands?"
   goodbye: "Goodbye."
   response_label: " ▲ Samaritan "
   prompt_symbol: "❯ "
-  help_header: "[?] Available Commands"
+  help_header: "(▲) Available Commands"
 
 tool_prefix: "┊"
 

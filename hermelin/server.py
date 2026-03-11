@@ -1164,6 +1164,45 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         elif cont:
             argv += ["--continue"]
 
+
+        # -------------------------------------------------------------
+        # Hermes tool addons (Artifact Panel) — no Hermes installation patching
+        # -------------------------------------------------------------
+        # hermilinChat used to patch files inside ~/.hermes/hermes-agent to add
+        # artifact-panel tools. That breaks Hermes updates.
+        #
+        # New approach: wrap the hermes launcher with a small Python entrypoint
+        # that registers our addon tools at runtime.
+        try:
+            wrapper = Path(config.spawn_cwd) / "scripts" / "hermes_with_addons.py"
+            if wrapper.is_file() and argv:
+                exe_path = argv[0]
+                if not os.path.isabs(exe_path):
+                    try:
+                        resolved = shutil.which(exe_path)
+                        if resolved:
+                            exe_path = resolved
+                    except Exception:
+                        pass
+
+                py = ""
+                try:
+                    first = Path(exe_path).read_text(encoding="utf-8").splitlines()[0].strip()
+                    if first.startswith("#!"):
+                        parts = first[2:].strip().split()
+                        if parts:
+                            if Path(parts[0]).name == "env" and len(parts) >= 2:
+                                py = shutil.which(parts[1]) or parts[1]
+                            else:
+                                py = parts[0]
+                except Exception:
+                    py = ""
+
+                if py:
+                    argv = [py, str(wrapper)] + argv[1:]
+        except Exception:
+            pass
+
         env = os.environ.copy()
         env.setdefault("TERM", "xterm-256color")
         env.setdefault("COLORTERM", "truecolor")

@@ -21,7 +21,7 @@ Options:
   --service NAME       systemd service name to restart (default: hermelin)
   --skip-frontend       Skip npm install/build
   --skip-python         Skip pip install -e .
-  --skip-hermes-patch   Skip patching the active Hermes installation with artifact tools
+  --skip-hermes-patch   (deprecated) Previously patched Hermes with artifact tools. No-op now (addons load at runtime).
   --skip-hermes-skins   Skip installing hermilinChat CLI skins into ~/.hermes/skins/
   --skip-hermes-themes  (deprecated alias for --skip-hermes-skins)
   --no-pull             Skip git pull
@@ -144,12 +144,7 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
 fi
 
 if [[ "$SKIP_HERMES_PATCH" -eq 0 ]]; then
-  echo "==> patching active Hermes installation for artifact tools"
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "ERROR: python3 not found (needed for Hermes artifact patch installer)." >&2
-    exit 1
-  fi
-  python3 scripts/install_hermes_artifact_patch.py
+  echo "==> Hermes artifacts addon: no patching required (loaded at runtime by hermilinChat)"
 fi
 
 if [[ "$SKIP_HERMES_SKINS" -eq 0 ]]; then

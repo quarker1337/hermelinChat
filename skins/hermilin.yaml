@@ -31,10 +31,10 @@ colors:
   session_border: "#232330"
 
 branding:
-  agent_name: "hermilinChat"
-  welcome: "Welcome to hermilinChat! Type your message or /help for commands."
+  agent_name: "Hermiline"
+  welcome: "Welcome to Hermiline! Type your message or /help for commands."
   goodbye: "Goodbye! ⚕"
-  response_label: " ⚕ Hermes "
+  response_label: " ⚕ Hermiline "
   prompt_symbol: "❯ "
   help_header: "(^_^)? Available Commands"
 
