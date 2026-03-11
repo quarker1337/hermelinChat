@@ -31,8 +31,8 @@ colors:
   session_border: "#1a3a44"
 
 branding:
-  agent_name: "Hermes"
-  welcome: "Welcome to Hermes! Type your message or /help for commands."
+  agent_name: "hermilinChat"
+  welcome: "Welcome to hermilinChat! Type your message or /help for commands."
   goodbye: "Goodbye! ⚕"
   response_label: " ⚕ Hermes "
   prompt_symbol: "❯ "

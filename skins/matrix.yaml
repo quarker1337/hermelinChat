@@ -31,12 +31,12 @@ colors:
   session_border: "#2a3533"
 
 branding:
-  agent_name: "Hans"
-  welcome: "Welcome to Hans! Type your message or /help for commands."
-  goodbye: "Goodbye."
-  response_label: " Hans "
+  agent_name: "hermilinChat"
+  welcome: "Welcome to hermilinChat! Type your message or /help for commands."
+  goodbye: "Goodbye! ⚕"
+  response_label: " ⚕ Hermes "
   prompt_symbol: "❯ "
-  help_header: "(Hans) Available Commands"
+  help_header: "(^_^)? Available Commands"
 
 tool_prefix: "│"
 
