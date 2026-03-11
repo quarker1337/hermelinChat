@@ -292,6 +292,51 @@ EOF
   echo "    wrote: $ENV_FILE"
 fi
 
+# -------------------------------------------------------------------
+# Ensure env file contains systemd-friendly Hermes command
+# -------------------------------------------------------------------
+# Under systemd, PATH does not include ~/.local/bin by default (no bashrc).
+# If HERMELIN_HERMES_CMD is missing (or set to plain "hermes ..."), PTY spawn
+# fails with: FileNotFoundError: 'hermes'
+if [[ -f "$ENV_FILE" ]]; then
+  if ! grep -q '^HERMES_HOME=' "$ENV_FILE"; then
+    {
+      echo
+      echo "# Hermes integration (added by installer)"
+      echo "HERMES_HOME=$DEFAULT_HERMES_HOME"
+    } >>"$ENV_FILE"
+  fi
+
+  if grep -q '^HERMELIN_HERMES_CMD=' "$ENV_FILE"; then
+    if grep -Eq "^HERMELIN_HERMES_CMD=[\"']?hermes([[:space:]]|$)" "$ENV_FILE"; then
+      echo "==> updating HERMELIN_HERMES_CMD to absolute path (systemd-safe)"
+      HERMILIN_ENV_FILE="$ENV_FILE" HERMILIN_HERMES_EXE="$DEFAULT_HERMES_EXE" python3 - <<'PY'
+import os
+import re
+from pathlib import Path
+
+p = Path(os.environ["HERMILIN_ENV_FILE"])
+exe = os.environ["HERMILIN_HERMES_EXE"]
+
+txt = p.read_text(encoding="utf-8")
+desired = f'HERMELIN_HERMES_CMD="{exe} chat --toolsets hermes-cli,artifacts"'
+
+txt2, n = re.subn(r'^HERMELIN_HERMES_CMD=.*$', desired, txt, flags=re.M)
+if n == 0:
+    txt2 = txt.rstrip("\n") + "\n" + desired + "\n"
+
+p.write_text(txt2, encoding="utf-8")
+PY
+    fi
+  else
+    {
+      echo
+      echo "# Hermes integration (added by installer)"
+      echo "HERMELIN_HERMES_CMD=\"$DEFAULT_HERMES_EXE chat --toolsets hermes-cli,artifacts\""
+    } >>"$ENV_FILE"
+  fi
+fi
+
 # Build everything
 UPDATE_ARGS=()
 if [[ "$PULL" -eq 0 ]]; then
