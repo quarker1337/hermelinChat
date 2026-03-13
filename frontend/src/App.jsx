@@ -5,6 +5,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 
 import ArtifactPanel from './components/ArtifactPanel.jsx'
+import VideoFxOverlay from './components/VideoFxOverlay.jsx'
 
 import { AMBER, SLATE, DEFAULT_THEME_ID, THEME_OPTIONS, THEMES, normalizeThemeId, setActiveThemeId, hexToRgb } from './theme/index.js'
 
@@ -41,6 +42,14 @@ const DEFAULT_UI_PREFS = {
     cursorStyle: 'bar',
     cursorBlink: true,
   },
+  // Extra post-processing effects intended for screen recordings.
+  // These are local-only (saved in browser localStorage).
+  videoFx: {
+    enabled: false,
+    // 0..100
+    intensity: 65,
+    glitchPulses: true,
+  },
 }
 
 function clampNum(n, min, max) {
@@ -55,6 +64,7 @@ function normalizeUiPrefs(raw) {
   const bg = r.background && typeof r.background === 'object' ? r.background : {}
   const ts = r.timestamps && typeof r.timestamps === 'object' ? r.timestamps : {}
   const term = r.terminal && typeof r.terminal === 'object' ? r.terminal : {}
+  const vx = r.videoFx && typeof r.videoFx === 'object' ? r.videoFx : {}
 
   const cursorStyleRaw = term.cursorStyle ?? DEFAULT_UI_PREFS.terminal.cursorStyle
   const cursorStyleStr = String(cursorStyleRaw || '').toLowerCase()
@@ -93,6 +103,11 @@ function normalizeUiPrefs(raw) {
     terminal: {
       cursorStyle,
       cursorBlink: term.cursorBlink === undefined ? DEFAULT_UI_PREFS.terminal.cursorBlink : !!term.cursorBlink,
+    },
+    videoFx: {
+      enabled: vx.enabled === undefined ? DEFAULT_UI_PREFS.videoFx.enabled : !!vx.enabled,
+      intensity: clampNum(vx.intensity ?? DEFAULT_UI_PREFS.videoFx.intensity, 0, 100),
+      glitchPulses: vx.glitchPulses === undefined ? DEFAULT_UI_PREFS.videoFx.glitchPulses : !!vx.glitchPulses,
     },
   }
 }
@@ -2917,6 +2932,101 @@ const SettingsPanel = ({
               </div>
             </div>
           </CollapsiblePanel>
+
+          <CollapsiblePanel
+            title="Video FX (recording)"
+            open={openPanel === 'videoFx'}
+            onToggle={() => togglePanel('videoFx')}
+          >
+            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
+              Extra CRT/glitch post-processing that sits on top of the <span style={{ color: AMBER[500] }}>whole interface</span>.
+              Stored locally in your browser (useful for OBS browser sources).
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Enable</div>
+              <div style={{ flex: 1 }} />
+              <input
+                type="checkbox"
+                checked={!!ui.videoFx.enabled}
+                onChange={(e) => {
+                  onUiPrefsChange?.((prev) => ({
+                    ...prev,
+                    videoFx: { ...(prev.videoFx || {}), enabled: e.target.checked },
+                  }))
+                }}
+                style={{ accentColor: AMBER[400] }}
+              />
+            </div>
+
+            <div
+              style={{
+                marginTop: 10,
+                opacity: ui.videoFx.enabled ? 1 : 0.45,
+                pointerEvents: ui.videoFx.enabled ? 'auto' : 'none',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Intensity</div>
+                <div style={{ flex: 1 }} />
+                <div style={{ fontSize: 11, color: AMBER[500] }}>{ui.videoFx.intensity}%</div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={ui.videoFx.intensity}
+                onChange={(e) => {
+                  onUiPrefsChange?.((prev) => ({
+                    ...prev,
+                    videoFx: { ...(prev.videoFx || {}), intensity: Number(e.target.value) },
+                  }))
+                }}
+                style={{ width: '100%' }}
+              />
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Glitch pulses</div>
+                <div style={{ flex: 1 }} />
+                <input
+                  type="checkbox"
+                  checked={!!ui.videoFx.glitchPulses}
+                  onChange={(e) => {
+                    onUiPrefsChange?.((prev) => ({
+                      ...prev,
+                      videoFx: { ...(prev.videoFx || {}), glitchPulses: e.target.checked },
+                    }))
+                  }}
+                  style={{ accentColor: AMBER[400] }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                <div
+                  onClick={() =>
+                    onUiPrefsChange?.((prev) => ({
+                      ...prev,
+                      videoFx: { ...DEFAULT_UI_PREFS.videoFx },
+                    }))
+                  }
+                  style={{
+                    padding: '8px 10px',
+                    border: `1px solid ${SLATE.border}`,
+                    background: SLATE.elevated,
+                    color: SLATE.muted,
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    borderRadius: 8,
+                    userSelect: 'none',
+                  }}
+                  title="Reset Video FX settings"
+                >
+                  reset video fx
+                </div>
+              </div>
+            </div>
+          </CollapsiblePanel>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -3453,6 +3563,15 @@ export default function App() {
   const themeBgKind = (activeTheme?.background?.kind || 'particles').toString()
   const effectiveBgKind = bgEffectPref === 'auto' ? themeBgKind : bgEffectPref
 
+  const videoFxPrefs = uiPrefs.videoFx || DEFAULT_UI_PREFS.videoFx
+  const videoFxIntensity = clampNum(videoFxPrefs.intensity ?? DEFAULT_UI_PREFS.videoFx.intensity, 0, 100)
+  const videoFxEnabled = !!videoFxPrefs.enabled && videoFxIntensity > 0
+  const videoFxFactor = videoFxEnabled ? videoFxIntensity / 100 : 0
+  const videoFxGlitchPulses = videoFxEnabled && !!videoFxPrefs.glitchPulses
+
+  const [videoFxGlitchNow, setVideoFxGlitchNow] = useState(false)
+  const [videoFxGlitchSeed, setVideoFxGlitchSeed] = useState(0)
+
   const appNameLabel = useMemo(() => {
     const s = (uiPrefs.appName || '').toString().trim()
     return s || DEFAULT_UI_PREFS.appName
@@ -3530,6 +3649,54 @@ export default function App() {
     saveUiPrefs(uiPrefs)
   }, [uiPrefs])
 
+  // Optional "pulse" glitches (brief jitters) used for screen recordings.
+  useEffect(() => {
+    if (!videoFxGlitchPulses) {
+      setVideoFxGlitchNow(false)
+      return
+    }
+
+    let cancelled = false
+    let timer = null
+    let offTimer = null
+
+    const schedule = () => {
+      if (cancelled) return
+
+      // Higher intensity => slightly more frequent pulses.
+      const minDelay = Math.max(650, 2200 - 1200 * videoFxFactor)
+      const maxDelay = Math.max(minDelay + 250, 4600 - 2600 * videoFxFactor)
+      const delay = minDelay + Math.random() * (maxDelay - minDelay)
+
+      timer = setTimeout(() => {
+        if (cancelled) return
+
+        if (offTimer) {
+          clearTimeout(offTimer)
+          offTimer = null
+        }
+
+        setVideoFxGlitchSeed(Math.random() * 10000)
+        setVideoFxGlitchNow(true)
+
+        const dur = 60 + Math.random() * (120 + 140 * videoFxFactor)
+        offTimer = setTimeout(() => {
+          if (!cancelled) setVideoFxGlitchNow(false)
+        }, dur)
+
+        schedule()
+      }, delay)
+    }
+
+    schedule()
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      if (offTimer) clearTimeout(offTimer)
+      setVideoFxGlitchNow(false)
+    }
+  }, [videoFxGlitchPulses, videoFxFactor])
 
 
   // Terminal connection mode:
@@ -4261,13 +4428,54 @@ export default function App() {
 
   const locked = !auth.loading && auth.enabled && !auth.authenticated
 
+  const videoFxFilter = useMemo(() => {
+    if (!videoFxEnabled || videoFxFactor <= 0) return 'none'
+
+    const f = videoFxFactor
+    const contrast = 1 + 0.16 * f + (videoFxGlitchNow ? 0.08 * f : 0)
+    const saturate = 1 + 0.22 * f + (videoFxGlitchNow ? 0.14 * f : 0)
+    const brightness = 1 + 0.06 * f
+
+    const dx = 0.6 + 1.1 * f
+    const a1 = 0.06 + 0.10 * f
+    const a2 = 0.05 + 0.08 * f
+
+    let s = `contrast(${contrast.toFixed(3)}) saturate(${saturate.toFixed(3)}) brightness(${brightness.toFixed(3)})`
+    s += ` drop-shadow(${dx.toFixed(2)}px 0 0 rgba(255,50,120,${a1.toFixed(3)}))`
+    s += ` drop-shadow(${(-dx).toFixed(2)}px 0 0 rgba(0,220,255,${a2.toFixed(3)}))`
+
+    if (videoFxGlitchNow) {
+      s += ` hue-rotate(${(3 + 7 * f).toFixed(1)}deg)`
+    }
+
+    return s
+  }, [videoFxEnabled, videoFxFactor, videoFxGlitchNow])
+
+  const videoFxTransform = useMemo(() => {
+    if (!videoFxEnabled || videoFxFactor <= 0) return 'none'
+    if (!videoFxGlitchNow) return 'translateZ(0)'
+
+    const seed = Number(videoFxGlitchSeed || 0)
+    const frac = (x) => x - Math.floor(x)
+
+    const r1 = frac(seed * 1.37 + 0.11)
+    const r2 = frac(seed * 2.11 + 0.31)
+    const r3 = frac(seed * 3.93 + 0.71)
+
+    const jx = Math.round((r1 - 0.5) * 10 * videoFxFactor)
+    const jy = Math.round((r2 - 0.5) * 6 * videoFxFactor)
+    const skew = (r3 - 0.5) * 0.9 * videoFxFactor
+
+    return `translate3d(${jx}px, ${jy}px, 0) skewX(${skew}deg)`
+  }, [videoFxEnabled, videoFxFactor, videoFxGlitchNow, videoFxGlitchSeed])
+
   return (
     <div
       style={{
         width: '100vw',
         height: '100vh',
         background: SLATE.bg,
-        display: 'flex',
+        position: 'relative',
         fontFamily: "'JetBrains Mono','Fira Code',monospace",
         color: SLATE.textBright,
         overflow: 'hidden',
@@ -4293,6 +4501,17 @@ export default function App() {
           background: transparent !important;
         }
       `}</style>
+
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          filter: videoFxFilter,
+          transform: videoFxTransform,
+          willChange: videoFxEnabled ? 'filter, transform' : undefined,
+        }}
+      >
 
       {/* Sidebar */}
       <div
@@ -5080,6 +5299,14 @@ export default function App() {
           onSaved={() => showEggToast('settings saved')}
         />
       )}
+      </div>
+
+      <VideoFxOverlay
+        enabled={videoFxEnabled}
+        intensity={videoFxIntensity}
+        glitchNow={videoFxGlitchNow}
+        glitchSeed={videoFxGlitchSeed}
+      />
     </div>
   )
 }

@@ -498,49 +498,51 @@ function IframeArtifact({ artifact }) {
 
   const isLocalRunner = useMemo(() => parseLocalRunnerSrc(rawSrc), [rawSrc])
 
-  const [resolvedSrc, setResolvedSrc] = useState('')
-  const [error, setError] = useState('')
+  const [resolved, setResolved] = useState({ key: '', src: '' })
+  const [error, setError] = useState({ key: '', msg: '' })
+
+  const runnerKey = `${tabId || ''}:${rawSrc || ''}`
+  const resolvedSrc = resolved?.key === runnerKey ? resolved.src : ''
+  const errorMsg = error?.key === runnerKey ? error.msg : ''
 
   useEffect(() => {
     let cancelled = false
-    setError('')
 
     if (!isLocalRunner || !tabId) {
-      setResolvedSrc(rawSrc)
       return () => {
         cancelled = true
       }
     }
 
-    // Prevent trying to load 127.0.0.1 in the operator's browser.
-    setResolvedSrc('')
-
     ;(async () => {
       try {
         const tok = await mintRunnerToken(tabId)
         const proxied = `${tok.basePath}${isLocalRunner.path}${isLocalRunner.search}${isLocalRunner.hash}`
-        if (!cancelled) setResolvedSrc(proxied)
+        if (!cancelled) {
+          setResolved({ key: runnerKey, src: proxied })
+          setError({ key: runnerKey, msg: '' })
+        }
       } catch (err) {
         const msg = err?.message ? String(err.message) : String(err)
-        if (!cancelled) setError(msg)
+        if (!cancelled) setError({ key: runnerKey, msg })
       }
     })()
 
     return () => {
       cancelled = true
     }
-  }, [tabId, rawSrc, isLocalRunner])
+  }, [tabId, rawSrc, isLocalRunner, runnerKey])
 
   if (!rawSrc && !srcDoc) {
     return <ArtifactEmpty title="Invalid iframe artifact" detail="Expected data.src or data.srcdoc." />
   }
 
   if (isLocalRunner) {
-    if (error) {
+    if (errorMsg) {
       return (
         <ArtifactEmpty
           title="Runner proxy unavailable"
-          detail={`Failed to mint runner token for ${tabId || 'runner'}: ${error}`}
+          detail={`Failed to mint runner token for ${tabId || 'runner'}: ${errorMsg}`}
         />
       )
     }
