@@ -106,20 +106,42 @@ fi
 if [[ "$SKIP_PYTHON" -eq 0 ]]; then
   echo "==> python: install/update backend deps"
 
-  if [[ ! -x .venv/bin/python ]]; then
+  VENV_DIR=".venv"
+  VENV_PY="${VENV_DIR}/bin/python"
+  VENV_ACTIVATE="${VENV_DIR}/bin/activate"
+
+  # If a previous venv creation failed (common when python3-venv/ensurepip is missing),
+  # Debian can leave a partial .venv behind that has bin/python but no activate/pip.
+  # Detect that and recreate automatically.
+  if [[ -d "$VENV_DIR" ]]; then
+    if [[ ! -x "$VENV_PY" || ! -f "$VENV_ACTIVATE" ]]; then
+      echo "WARNING: $VENV_DIR exists but looks incomplete (missing python/activate). Recreating venv."
+      rm -rf "$VENV_DIR"
+    fi
+  fi
+
+  if [[ ! -x "$VENV_PY" ]]; then
     if ! command -v python3 >/dev/null 2>&1; then
       echo "ERROR: python3 not found (needed to create .venv)." >&2
       exit 1
     fi
-    echo "==> creating venv: .venv"
-    python3 -m venv .venv || {
+    echo "==> creating venv: $VENV_DIR"
+    python3 -m venv "$VENV_DIR" || {
+      rm -rf "$VENV_DIR" || true
       echo "ERROR: failed to create venv. On Debian/Ubuntu you may need: sudo apt install python3-venv" >&2
       exit 1
     }
   fi
 
+  if [[ ! -f "$VENV_ACTIVATE" ]]; then
+    echo "ERROR: $VENV_ACTIVATE not found. The venv appears corrupted." >&2
+    echo "Try: rm -rf $VENV_DIR" >&2
+    echo "On Debian/Ubuntu also ensure: sudo apt install python3-venv (or python3.X-venv)" >&2
+    exit 1
+  fi
+
   # shellcheck disable=SC1091
-  source .venv/bin/activate
+  source "$VENV_ACTIVATE"
 
   # Some environments (notably uv-created venvs) may not include pip.
   if ! python -m pip --version >/dev/null 2>&1; then
