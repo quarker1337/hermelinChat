@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GPU Telemetry</title>
+    <style>
+      :root {
+        --bg: #07070b;
+        --panel: rgba(18, 18, 28, 0.78);
+        --panel2: rgba(24, 24, 38, 0.9);
+        --border: rgba(110, 255, 210, 0.16);
+        --text: rgba(235, 245, 255, 0.92);
+        --muted: rgba(210, 220, 235, 0.55);
+        --accent: #46ffd2;
+        --accent2: #f5b731;
+        --danger: #e84057;
+        --ok: #38c878;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(1100px 700px at 15% 12%, rgba(70,255,210,0.12), transparent 55%),
+                    radial-gradient(900px 600px at 85% 15%, rgba(245,183,49,0.09), transparent 52%),
+                    radial-gradient(1000px 900px at 65% 80%, rgba(232,64,87,0.07), transparent 60%),
+                    var(--bg);
+        color: var(--text);
+        font-family: var(--mono);
+        overflow: hidden;
+      }
+
+      .scanline {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background: repeating-linear-gradient(
+          to bottom,
+          rgba(255,255,255,0.03) 0px,
+          rgba(255,255,255,0.03) 1px,
+          rgba(0,0,0,0) 2px,
+          rgba(0,0,0,0) 5px
+        );
+        mix-blend-mode: overlay;
+        opacity: 0.22;
+      }
+
+      .wrap {
+        height: 100vh;
+        padding: 16px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 12px;
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(18,18,28,0.75), rgba(10,10,16,0.55));
+        border-radius: 10px;
+      }
+
+      .brand {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .title {
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      .subtitle {
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .right {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .pill {
+        border: 1px solid var(--border);
+        background: rgba(18,18,28,0.6);
+        padding: 6px 10px;
+        border-radius: 999px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 0.95fr 1.05fr;
+        gap: 12px;
+        min-height: 0;
+      }
+
+      .panel {
+        border: 1px solid var(--border);
+        background: var(--panel);
+        border-radius: 10px;
+        overflow: hidden;
+        min-height: 0;
+      }
+
+      .panelHeader {
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(110,255,210,0.12);
+        background: rgba(24,24,38,0.65);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .panelHeader .h {
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: rgba(235,245,255,0.82);
+      }
+
+      .panelBody {
+        padding: 12px;
+        min-height: 0;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .stat {
+        border: 1px solid rgba(110,255,210,0.14);
+        background: rgba(10,10,16,0.35);
+        border-radius: 10px;
+        padding: 10px 10px 9px;
+      }
+
+      .stat .k {
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+        margin-bottom: 7px;
+      }
+
+      .stat .v {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .stat .num {
+        font-size: 22px;
+        line-height: 1;
+        font-weight: 700;
+        color: var(--text);
+      }
+
+      .stat .unit {
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .meter {
+        margin-top: 8px;
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(235,245,255,0.06);
+        overflow: hidden;
+      }
+
+      .meter > div {
+        height: 100%;
+        width: 30%;
+        background: linear-gradient(90deg, rgba(70,255,210,0.9), rgba(245,183,49,0.85));
+        border-radius: 999px;
+        box-shadow: 0 0 18px rgba(70,255,210,0.22);
+      }
+
+      .bars {
+        display: grid;
+        grid-template-columns: repeat(60, 1fr);
+        gap: 2px;
+        align-items: end;
+        height: 140px;
+        padding: 10px 10px 12px;
+        border: 1px solid rgba(110,255,210,0.14);
+        border-radius: 10px;
+        background: rgba(10,10,16,0.35);
+      }
+
+      .bar {
+        width: 100%;
+        height: 20px;
+        border-radius: 2px;
+        background: rgba(70,255,210,0.08);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .bar::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 50%;
+        background: linear-gradient(180deg, rgba(70,255,210,0.0), rgba(70,255,210,0.5));
+        opacity: 0.0;
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+        font-size: 10px;
+      }
+
+      .table th,
+      .table td {
+        padding: 8px 8px;
+        border-bottom: 1px solid rgba(110,255,210,0.08);
+        text-align: left;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 1px;
+      }
+
+      .table th {
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.11em;
+        color: var(--muted);
+        background: rgba(24,24,38,0.55);
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(110,255,210,0.18);
+        background: rgba(10,10,16,0.4);
+        color: rgba(235,245,255,0.86);
+      }
+
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--ok);
+        box-shadow: 0 0 12px rgba(56,200,120,0.35);
+      }
+
+      .warn { background: var(--accent2); box-shadow: 0 0 12px rgba(245,183,49,0.35); }
+      .bad { background: var(--danger); box-shadow: 0 0 12px rgba(232,64,87,0.35); }
+
+      .small {
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .footer {
+        margin-top: 10px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        color: rgba(210,220,235,0.6);
+        font-size: 10px;
+      }
+
+      .spark {
+        width: 140px;
+        height: 34px;
+        border: 1px solid rgba(110,255,210,0.14);
+        background: rgba(10,10,16,0.35);
+        border-radius: 10px;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .spark canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="scanline"></div>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <div class="title">NEON DECK / GPU TELEMETRY</div>
+          <div class="subtitle">bus scan • thermals • power envelope • utilization trace</div>
+        </div>
+        <div class="right">
+          <div class="pill" id="clock">--:--:--</div>
+          <div class="pill"><span class="tag"><span class="dot" id="linkDot"></span>link</span></div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <div class="panelHeader">
+            <div class="h">Live counters</div>
+            <div class="small" id="gpuName">GPU 0 • RTX-class</div>
+          </div>
+          <div class="panelBody">
+            <div class="stats">
+              <div class="stat">
+                <div class="k">Utilization</div>
+                <div class="v"><div class="num" id="util">0</div><div class="unit">%</div></div>
+                <div class="meter"><div id="utilBar"></div></div>
+              </div>
+              <div class="stat">
+                <div class="k">Memory</div>
+                <div class="v"><div class="num" id="mem">0</div><div class="unit">GB</div></div>
+                <div class="meter"><div id="memBar"></div></div>
+              </div>
+              <div class="stat">
+                <div class="k">Temperature</div>
+                <div class="v"><div class="num" id="temp">0</div><div class="unit">°C</div></div>
+                <div class="meter"><div id="tempBar"></div></div>
+              </div>
+              <div class="stat">
+                <div class="k">Power</div>
+                <div class="v"><div class="num" id="pwr">0</div><div class="unit">W</div></div>
+                <div class="meter"><div id="pwrBar"></div></div>
+              </div>
+            </div>
+
+            <div style="height: 10px"></div>
+            <div class="bars" id="bars"></div>
+
+            <div class="footer">
+              <div>trace: last 60s</div>
+              <div class="spark"><canvas id="spark" width="280" height="68"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panelHeader">
+            <div class="h">Workloads</div>
+            <div class="small">nvidia-smi (sim)</div>
+          </div>
+          <div class="panelBody" style="overflow: hidden;">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th style="width: 30%">process</th>
+                  <th style="width: 18%">type</th>
+                  <th style="width: 18%">mem</th>
+                  <th style="width: 18%">sm</th>
+                  <th style="width: 16%">state</th>
+                </tr>
+              </thead>
+              <tbody id="proc"></tbody>
+            </table>
+
+            <div style="height: 10px"></div>
+            <div class="panel" style="border-radius: 10px; background: rgba(10,10,16,0.35);">
+              <div class="panelHeader" style="background: transparent; border-bottom: 1px solid rgba(110,255,210,0.08)">
+                <div class="h">Fault monitor</div>
+                <div class="small" id="faultText">nominal</div>
+              </div>
+              <div class="panelBody" style="padding: 10px 12px;">
+                <div class="tag"><span class="dot" id="faultDot"></span><span id="faultMsg">no faults</span></div>
+              </div>
+            </div>
+
+            <div style="height: 10px"></div>
+            <div class="small">note: this dashboard is a static video-pack template (no GPU access required).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
+      const lerp = (a, b, t) => a + (b - a) * t
+      const fmt2 = (n) => (Math.round(n * 100) / 100).toFixed(2)
+
+      const barsEl = document.getElementById('bars')
+      const utilEl = document.getElementById('util')
+      const memEl = document.getElementById('mem')
+      const tempEl = document.getElementById('temp')
+      const pwrEl = document.getElementById('pwr')
+
+      const utilBar = document.getElementById('utilBar')
+      const memBar = document.getElementById('memBar')
+      const tempBar = document.getElementById('tempBar')
+      const pwrBar = document.getElementById('pwrBar')
+
+      const clockEl = document.getElementById('clock')
+      const faultDot = document.getElementById('faultDot')
+      const faultMsg = document.getElementById('faultMsg')
+      const faultText = document.getElementById('faultText')
+      const linkDot = document.getElementById('linkDot')
+
+      const gpuNames = [
+        'GPU 0 • RTX 4090 (sim)',
+        'GPU 0 • A100 80GB (sim)',
+        'GPU 0 • H100 SXM (sim)',
+        'GPU 0 • RTX 6000 Ada (sim)',
+      ]
+      document.getElementById('gpuName').textContent = gpuNames[Math.floor(Math.random() * gpuNames.length)]
+
+      const hist = Array.from({ length: 60 }, () => 12 + Math.random() * 8)
+      const bars = []
+      for (let i = 0; i < hist.length; i++) {
+        const b = document.createElement('div')
+        b.className = 'bar'
+        barsEl.appendChild(b)
+        bars.push(b)
+      }
+
+      const procs = [
+        { name: 'hans_renderer', type: 'C', mem: 3.2, sm: 44 },
+        { name: 'shaderd', type: 'C', mem: 1.8, sm: 21 },
+        { name: 'cuda_worker', type: 'C', mem: 4.5, sm: 63 },
+        { name: 'obs', type: 'G', mem: 1.1, sm: 8 },
+        { name: 'chrome', type: 'G', mem: 0.9, sm: 6 },
+      ]
+
+      const procBody = document.getElementById('proc')
+      const renderProcs = () => {
+        procBody.innerHTML = ''
+        for (const p of procs) {
+          const tr = document.createElement('tr')
+          const state = p.sm > 80 ? 'hot' : p.sm > 55 ? 'load' : 'idle'
+          const dotClass = state === 'hot' ? 'dot bad' : state === 'load' ? 'dot warn' : 'dot'
+          tr.innerHTML = `
+            <td title="${p.name}">${p.name}</td>
+            <td>${p.type}</td>
+            <td>${fmt2(p.mem)} GB</td>
+            <td>${Math.round(p.sm)}%</td>
+            <td><span class="tag"><span class="${dotClass}"></span>${state}</span></td>
+          `.trim()
+          procBody.appendChild(tr)
+        }
+      }
+      renderProcs()
+
+      let util = 18 + Math.random() * 10
+      let mem = 8 + Math.random() * 4
+      let temp = 48 + Math.random() * 4
+      let pwr = 120 + Math.random() * 20
+
+      const spark = document.getElementById('spark')
+      const ctx = spark.getContext('2d')
+      const sparkHist = Array.from({ length: 64 }, () => 0.4 + Math.random() * 0.25)
+
+      const tickClock = () => {
+        const d = new Date()
+        const hh = String(d.getHours()).padStart(2, '0')
+        const mm = String(d.getMinutes()).padStart(2, '0')
+        const ss = String(d.getSeconds()).padStart(2, '0')
+        clockEl.textContent = `${hh}:${mm}:${ss}`
+      }
+      setInterval(tickClock, 250)
+      tickClock()
+
+      let faultMode = 0
+      const randomFault = () => {
+        const r = Math.random()
+        if (r < 0.86) return 0
+        if (r < 0.94) return 1
+        return 2
+      }
+
+      const update = () => {
+        // Smooth-ish random walk
+        util = clamp(util + (Math.random() - 0.48) * 9.0, 3, 99)
+        mem = clamp(mem + (Math.random() - 0.5) * 0.5 + util / 200, 2, 23)
+        temp = clamp(temp + (util - 30) / 120 + (Math.random() - 0.5) * 0.8, 36, 92)
+        pwr = clamp(pwr + (util - 35) * 0.55 + (Math.random() - 0.5) * 6.0, 60, 420)
+
+        hist.push(util)
+        hist.shift()
+
+        utilEl.textContent = String(Math.round(util))
+        memEl.textContent = String((Math.round(mem * 10) / 10).toFixed(1))
+        tempEl.textContent = String(Math.round(temp))
+        pwrEl.textContent = String(Math.round(pwr))
+
+        utilBar.style.width = `${util}%`
+        memBar.style.width = `${(mem / 24) * 100}%`
+        tempBar.style.width = `${((temp - 30) / 70) * 100}%`
+        pwrBar.style.width = `${(pwr / 420) * 100}%`
+
+        // Bars
+        for (let i = 0; i < bars.length; i++) {
+          const u = clamp(hist[i] / 100, 0, 1)
+          const h = 10 + u * 110
+          bars[i].style.height = `${h}px`
+          const glow = u > 0.78 ? 0.9 : u > 0.55 ? 0.55 : 0.15
+          bars[i].style.background = `rgba(70,255,210,${0.10 + u * 0.25})`
+          bars[i].style.boxShadow = `0 0 ${8 + u * 24}px rgba(70,255,210,${glow * 0.22})`
+          bars[i].style.border = `1px solid rgba(110,255,210,${0.05 + u * 0.12})`
+        }
+
+        // Sparkline
+        sparkHist.push(util / 100)
+        sparkHist.shift()
+        ctx.clearRect(0, 0, spark.width, spark.height)
+        ctx.globalAlpha = 1
+        ctx.strokeStyle = 'rgba(70,255,210,0.85)'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        for (let i = 0; i < sparkHist.length; i++) {
+          const x = (i / (sparkHist.length - 1)) * spark.width
+          const y = (1 - sparkHist[i]) * (spark.height - 8) + 4
+          if (i === 0) ctx.moveTo(x, y)
+          else ctx.lineTo(x, y)
+        }
+        ctx.stroke()
+
+        // Occasionally perturb proc sm/mem to look alive
+        for (const p of procs) {
+          const drift = (Math.random() - 0.5) * 7
+          p.sm = clamp(p.sm + drift + (p.name === 'cuda_worker' ? (util - 40) / 12 : 0), 1, 99)
+          p.mem = clamp(p.mem + (Math.random() - 0.5) * 0.12 + (p.type === 'C' ? util / 1000 : 0), 0.2, 18)
+        }
+        renderProcs()
+
+        // Fault monitor
+        if (Math.random() < 0.08) faultMode = randomFault()
+        linkDot.className = 'dot'
+        faultDot.className = 'dot'
+        if (faultMode === 0) {
+          faultText.textContent = 'nominal'
+          faultMsg.textContent = 'no faults'
+        } else if (faultMode === 1) {
+          linkDot.className = 'dot warn'
+          faultDot.className = 'dot warn'
+          faultText.textContent = 'degraded'
+          faultMsg.textContent = 'pcie retrain spike (sim)'
+        } else {
+          linkDot.className = 'dot bad'
+          faultDot.className = 'dot bad'
+          faultText.textContent = 'alert'
+          faultMsg.textContent = 'thermal throttle edge (sim)'
+        }
+      }
+
+      setInterval(update, 420)
+      update()
+    </script>
+  </body>
+</html>

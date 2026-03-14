@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Builder Timeline</title>
+    <style>
+      :root {
+        --bg: #07070b;
+        --panel: rgba(18, 18, 28, 0.78);
+        --panel2: rgba(24, 24, 38, 0.9);
+        --border: rgba(110, 255, 210, 0.16);
+        --text: rgba(235, 245, 255, 0.92);
+        --muted: rgba(210, 220, 235, 0.55);
+        --accent: #46ffd2;
+        --accent2: #f5b731;
+        --danger: #e84057;
+        --ok: #38c878;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: radial-gradient(1000px 700px at 18% 18%, rgba(70,255,210,0.12), transparent 55%),
+                    radial-gradient(800px 600px at 80% 18%, rgba(245,183,49,0.10), transparent 52%),
+                    radial-gradient(900px 800px at 60% 88%, rgba(56,200,120,0.09), transparent 60%),
+                    var(--bg);
+        color: var(--text);
+        font-family: var(--mono);
+        overflow: hidden;
+      }
+
+      .wrap {
+        height: 100vh;
+        padding: 16px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 12px;
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(18,18,28,0.75), rgba(10,10,16,0.55));
+        border-radius: 10px;
+      }
+
+      .brand { display: flex; flex-direction: column; gap: 4px; }
+      .title {
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .subtitle { font-size: 10px; color: var(--muted); }
+
+      .right {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .pill {
+        border: 1px solid var(--border);
+        background: rgba(18,18,28,0.6);
+        padding: 6px 10px;
+        border-radius: 999px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 12px;
+        min-height: 0;
+      }
+
+      .panel {
+        border: 1px solid var(--border);
+        background: var(--panel);
+        border-radius: 10px;
+        overflow: hidden;
+        min-height: 0;
+      }
+
+      .panelHeader {
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(110,255,210,0.12);
+        background: rgba(24,24,38,0.65);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .panelHeader .h {
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: rgba(235,245,255,0.82);
+      }
+
+      .panelBody { padding: 12px; min-height: 0; }
+
+      .preview {
+        height: 235px;
+        border-radius: 10px;
+        border: 1px solid rgba(110,255,210,0.14);
+        background: linear-gradient(135deg, rgba(70,255,210,0.10), rgba(245,183,49,0.06)),
+                    rgba(10,10,16,0.35);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .preview::before {
+        content: "";
+        position: absolute;
+        inset: -40px;
+        background: conic-gradient(from 180deg at 50% 50%, rgba(70,255,210,0.12), rgba(245,183,49,0.08), rgba(232,64,87,0.07), rgba(70,255,210,0.12));
+        filter: blur(16px);
+        animation: spin 12s linear infinite;
+        opacity: 0.9;
+      }
+
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+
+      .previewInner {
+        position: absolute;
+        inset: 0;
+        padding: 12px;
+        display: grid;
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr auto;
+        gap: 10px;
+      }
+
+      .hudRow {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 10px;
+        color: rgba(235,245,255,0.82);
+      }
+
+      .hudTag {
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(110,255,210,0.18);
+        background: rgba(10,10,16,0.42);
+        color: rgba(235,245,255,0.86);
+      }
+
+      .centerText {
+        display: grid;
+        place-items: center;
+        text-align: center;
+        color: rgba(235,245,255,0.90);
+        text-shadow: 0 0 22px rgba(70,255,210,0.24);
+      }
+
+      .centerText .big {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: 0.10em;
+        text-transform: uppercase;
+      }
+
+      .centerText .small { font-size: 10px; color: rgba(210,220,235,0.7); margin-top: 8px; }
+
+      .timeline {
+        margin-top: 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(110,255,210,0.14);
+        background: rgba(10,10,16,0.35);
+        overflow: hidden;
+      }
+
+      .tracks {
+        display: grid;
+        grid-template-columns: 90px 1fr;
+      }
+
+      .trackLabel {
+        border-right: 1px solid rgba(110,255,210,0.10);
+        padding: 8px 10px;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: rgba(210,220,235,0.7);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .led {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: rgba(56,200,120,1);
+        box-shadow: 0 0 16px rgba(56,200,120,0.30);
+      }
+
+      .trackLane {
+        position: relative;
+        height: 34px;
+        border-bottom: 1px solid rgba(110,255,210,0.06);
+      }
+
+      .clip {
+        position: absolute;
+        top: 6px;
+        bottom: 6px;
+        border-radius: 8px;
+        border: 1px solid rgba(110,255,210,0.14);
+        background: linear-gradient(90deg, rgba(70,255,210,0.22), rgba(245,183,49,0.10));
+        overflow: hidden;
+      }
+
+      .clip::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(90deg, rgba(235,245,255,0.10) 0px, rgba(235,245,255,0.10) 1px, rgba(0,0,0,0) 2px, rgba(0,0,0,0) 7px);
+        opacity: 0.14;
+      }
+
+      .playhead {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: rgba(245,183,49,0.95);
+        box-shadow: 0 0 18px rgba(245,183,49,0.35);
+        pointer-events: none;
+      }
+
+      .timeRuler {
+        height: 26px;
+        border-bottom: 1px solid rgba(110,255,210,0.08);
+        display: grid;
+        grid-template-columns: 90px 1fr;
+        align-items: center;
+      }
+
+      .rulerLeft {
+        padding: 0 10px;
+        font-size: 9px;
+        color: rgba(210,220,235,0.55);
+      }
+
+      .rulerTicks {
+        position: relative;
+        height: 100%;
+      }
+
+      .tick {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: rgba(110,255,210,0.10);
+      }
+
+      .tickLabel {
+        position: absolute;
+        top: 6px;
+        transform: translateX(-50%);
+        font-size: 9px;
+        color: rgba(210,220,235,0.55);
+      }
+
+      .queue {
+        display: grid;
+        gap: 10px;
+      }
+
+      .card {
+        border: 1px solid rgba(110,255,210,0.14);
+        background: rgba(10,10,16,0.35);
+        border-radius: 10px;
+        padding: 10px 10px;
+      }
+
+      .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; color: rgba(210,220,235,0.72); }
+      .kv b { color: rgba(235,245,255,0.90); font-weight: 700; }
+
+      .progress {
+        height: 6px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(235,245,255,0.06);
+        margin-top: 10px;
+      }
+
+      .progress > div {
+        height: 100%;
+        width: 30%;
+        background: linear-gradient(90deg, rgba(245,183,49,0.95), rgba(70,255,210,0.75));
+        box-shadow: 0 0 18px rgba(245,183,49,0.22);
+      }
+
+      .log {
+        font-size: 10px;
+        color: rgba(210,220,235,0.62);
+        line-height: 1.45;
+        margin-top: 10px;
+      }
+
+      .log div { padding: 2px 0; }
+      .ok { color: rgba(56,200,120,0.95); }
+      .warn { color: rgba(245,183,49,0.95); }
+      .bad { color: rgba(232,64,87,0.95); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <div class="title">NEON DECK / BUILDER</div>
+          <div class="subtitle">timeline compositor • intro/outro stitching • render queue</div>
+        </div>
+        <div class="right">
+          <div class="pill" id="mode">mode: composite</div>
+          <div class="pill" id="fps">fps: --</div>
+          <div class="pill" id="time">--:--:--</div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <div class="panelHeader">
+            <div class="h">Viewport</div>
+            <div class="subtitle" id="shot">SHOT A-12 • LAYER STACK</div>
+          </div>
+          <div class="panelBody">
+            <div class="preview">
+              <div class="previewInner">
+                <div class="hudRow">
+                  <div class="hudTag">CAM: 03</div>
+                  <div class="hudTag" id="stateTag">LOCKED</div>
+                  <div class="hudTag">SYNC: OK</div>
+                </div>
+                <div class="centerText">
+                  <div class="big" id="caption">ASSEMBLING INTRO</div>
+                  <div class="small">shader graph + timeline alignment (sim)</div>
+                </div>
+                <div class="hudRow">
+                  <div class="hudTag">codec: prores</div>
+                  <div class="hudTag" id="lat">latency: 12ms</div>
+                  <div class="hudTag">audio: -18 LUFS</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="timeline">
+              <div class="timeRuler">
+                <div class="rulerLeft">TIMELINE</div>
+                <div class="rulerTicks" id="ticks"></div>
+              </div>
+              <div style="position: relative" id="lanes">
+                <div class="playhead" id="playhead"></div>
+                <div class="tracks" id="tracks"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panelHeader">
+            <div class="h">Render queue</div>
+            <div class="subtitle" id="qStatus">armed</div>
+          </div>
+          <div class="panelBody">
+            <div class="queue">
+              <div class="card">
+                <div class="kv"><span>job</span><b id="job">intro_v3</b></div>
+                <div class="kv"><span>target</span><b>1080p60</b></div>
+                <div class="kv"><span>eta</span><b id="eta">00:00:12</b></div>
+                <div class="progress"><div id="prog"></div></div>
+                <div class="log" id="log"></div>
+              </div>
+
+              <div class="card">
+                <div class="kv"><span>outro</span><b>queued</b></div>
+                <div class="kv"><span>assets</span><b id="assets">synced</b></div>
+                <div class="kv"><span>hash</span><b>7f2c…b9a</b></div>
+              </div>
+
+              <div class="card">
+                <div class="kv"><span>director</span><b>HANS</b></div>
+                <div class="kv"><span>protocol</span><b>quiet</b></div>
+                <div class="kv"><span>notes</span><b>no exposition</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
+
+      const timeEl = document.getElementById('time')
+      const fpsEl = document.getElementById('fps')
+      const modeEl = document.getElementById('mode')
+      const captionEl = document.getElementById('caption')
+      const stateTag = document.getElementById('stateTag')
+      const latEl = document.getElementById('lat')
+      const etaEl = document.getElementById('eta')
+      const progEl = document.getElementById('prog')
+      const logEl = document.getElementById('log')
+      const qStatus = document.getElementById('qStatus')
+      const ticks = document.getElementById('ticks')
+      const tracks = document.getElementById('tracks')
+      const playhead = document.getElementById('playhead')
+
+      const tickClock = () => {
+        const d = new Date()
+        const hh = String(d.getHours()).padStart(2, '0')
+        const mm = String(d.getMinutes()).padStart(2, '0')
+        const ss = String(d.getSeconds()).padStart(2, '0')
+        timeEl.textContent = `${hh}:${mm}:${ss}`
+      }
+      setInterval(tickClock, 250)
+      tickClock()
+
+      const captions = ['ASSEMBLING INTRO', 'ALIGNING TIMELINE', 'COMPOSITING LAYERS', 'LOCKING COLOR', 'ARMING OUTRO']
+      const modes = ['mode: composite', 'mode: splice', 'mode: grade', 'mode: mixdown']
+
+      // Ruler ticks
+      const tickCount = 10
+      for (let i = 0; i <= tickCount; i++) {
+        const x = (i / tickCount) * 100
+        const t = document.createElement('div')
+        t.className = 'tick'
+        t.style.left = `${x}%`
+        ticks.appendChild(t)
+        const lbl = document.createElement('div')
+        lbl.className = 'tickLabel'
+        lbl.style.left = `${x}%`
+        lbl.textContent = `${i * 3}s`
+        ticks.appendChild(lbl)
+      }
+
+      const lanes = [
+        { name: 'VIDEO 1', clips: [[2, 6], [11, 10], [28, 8]] },
+        { name: 'VIDEO 2', clips: [[6, 4], [18, 7], [37, 6]] },
+        { name: 'FX', clips: [[4, 2], [14, 4], [27, 3], [34, 5]] },
+        { name: 'AUDIO', clips: [[0, 18], [20, 22]] },
+      ]
+
+      const buildTracks = () => {
+        tracks.innerHTML = ''
+        for (const lane of lanes) {
+          const label = document.createElement('div')
+          label.className = 'trackLabel'
+          label.innerHTML = `<span class="led"></span>${lane.name}`
+          tracks.appendChild(label)
+
+          const laneEl = document.createElement('div')
+          laneEl.className = 'trackLane'
+
+          for (const [start, len] of lane.clips) {
+            const c = document.createElement('div')
+            c.className = 'clip'
+            c.style.left = `${(start / 45) * 100}%`
+            c.style.width = `${(len / 45) * 100}%`
+            laneEl.appendChild(c)
+          }
+
+          tracks.appendChild(laneEl)
+        }
+      }
+      buildTracks()
+
+      let t = 0
+      let renderProgress = 0
+      let phase = 0
+
+      const lines = []
+      const pushLog = (s, cls) => {
+        lines.push({ s, cls })
+        while (lines.length > 10) lines.shift()
+        logEl.innerHTML = lines.map((l) => `<div class="${l.cls || ''}">${l.s}</div>`).join('')
+      }
+
+      pushLog('[builder] graph warmup...', 'ok')
+      pushLog('[builder] sync assets...', 'ok')
+
+      const loop = () => {
+        t += 0.016
+
+        // playhead
+        const x = (Math.sin(t * 0.55) * 0.5 + 0.5) * 100
+        playhead.style.left = `calc(90px + ${x}%)`
+
+        // fake fps/latency
+        const fps = Math.round(58 + Math.sin(t * 1.7) * 2 + Math.random() * 1)
+        fpsEl.textContent = `fps: ${fps}`
+        latEl.textContent = `latency: ${Math.round(10 + Math.sin(t * 1.1) * 4)}ms`
+
+        // phase changes
+        if (Math.random() < 0.02) {
+          phase = (phase + 1) % captions.length
+          captionEl.textContent = captions[phase]
+          modeEl.textContent = modes[Math.floor(Math.random() * modes.length)]
+          stateTag.textContent = Math.random() < 0.85 ? 'LOCKED' : 'LIVE'
+        }
+
+        // render progress
+        renderProgress = clamp(renderProgress + 0.003 + Math.random() * 0.004, 0, 1)
+        progEl.style.width = `${renderProgress * 100}%`
+        const eta = Math.max(0, Math.round((1 - renderProgress) * 12))
+        etaEl.textContent = `00:00:${String(eta).padStart(2, '0')}`
+
+        if (Math.random() < 0.06) {
+          const r = Math.random()
+          if (r < 0.7) pushLog('[builder] compiling segment...', 'ok')
+          else if (r < 0.9) pushLog('[builder] cache miss, re-index...', 'warn')
+          else pushLog('[builder] frame spike, smoothing...', 'bad')
+        }
+
+        if (renderProgress >= 1) {
+          qStatus.textContent = 'complete'
+          pushLog('[builder] job complete: intro_v3', 'ok')
+          renderProgress = 0
+        }
+
+        requestAnimationFrame(loop)
+      }
+      requestAnimationFrame(loop)
+    </script>
+  </body>
+</html>

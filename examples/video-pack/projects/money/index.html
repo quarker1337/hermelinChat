@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Money Deck</title>
+    <style>
+      :root {
+        --bg: #07070b;
+        --panel: rgba(18, 18, 28, 0.78);
+        --border: rgba(110, 255, 210, 0.16);
+        --text: rgba(235, 245, 255, 0.92);
+        --muted: rgba(210, 220, 235, 0.55);
+        --accent: #46ffd2;
+        --accent2: #f5b731;
+        --danger: #e84057;
+        --ok: #38c878;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: radial-gradient(1000px 700px at 18% 18%, rgba(70,255,210,0.12), transparent 55%),
+                    radial-gradient(850px 650px at 82% 20%, rgba(245,183,49,0.10), transparent 52%),
+                    radial-gradient(900px 900px at 60% 85%, rgba(56,200,120,0.08), transparent 60%),
+                    var(--bg);
+        color: var(--text);
+        font-family: var(--mono);
+        overflow: hidden;
+      }
+
+      .wrap {
+        height: 100vh;
+        padding: 16px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 12px;
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(18,18,28,0.75), rgba(10,10,16,0.55));
+        border-radius: 10px;
+      }
+
+      .brand { display: flex; flex-direction: column; gap: 4px; }
+      .title {
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .subtitle { font-size: 10px; color: var(--muted); }
+
+      .right {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .pill {
+        border: 1px solid var(--border);
+        background: rgba(18,18,28,0.6);
+        padding: 6px 10px;
+        border-radius: 999px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 12px;
+        min-height: 0;
+      }
+
+      .panel {
+        border: 1px solid var(--border);
+        background: var(--panel);
+        border-radius: 10px;
+        overflow: hidden;
+        min-height: 0;
+      }
+
+      .panelHeader {
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(110,255,210,0.12);
+        background: rgba(24,24,38,0.65);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .panelHeader .h {
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: rgba(235,245,255,0.82);
+      }
+
+      .panelBody { padding: 12px; min-height: 0; }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .card {
+        border: 1px solid rgba(110,255,210,0.14);
+        background: rgba(10,10,16,0.35);
+        border-radius: 10px;
+        padding: 10px 10px 9px;
+      }
+
+      .k {
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: rgba(210,220,235,0.62);
+        margin-bottom: 7px;
+      }
+
+      .v {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .num {
+        font-size: 22px;
+        line-height: 1;
+        font-weight: 800;
+      }
+
+      .unit { font-size: 10px; color: rgba(210,220,235,0.62); }
+
+      .meter {
+        margin-top: 8px;
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(235,245,255,0.06);
+        overflow: hidden;
+      }
+
+      .meter > div {
+        height: 100%;
+        width: 30%;
+        background: linear-gradient(90deg, rgba(70,255,210,0.95), rgba(245,183,49,0.75));
+        box-shadow: 0 0 18px rgba(70,255,210,0.20);
+      }
+
+      .chart {
+        margin-top: 10px;
+        border: 1px solid rgba(110,255,210,0.14);
+        background: rgba(10,10,16,0.35);
+        border-radius: 10px;
+        overflow: hidden;
+        height: 250px;
+        position: relative;
+      }
+
+      .chart canvas { width: 100%; height: 100%; display: block; }
+
+      .chartLabel {
+        position: absolute;
+        left: 12px;
+        top: 10px;
+        font-size: 10px;
+        color: rgba(210,220,235,0.70);
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 10px;
+      }
+
+      .table th,
+      .table td {
+        padding: 8px 8px;
+        border-bottom: 1px solid rgba(110,255,210,0.08);
+        text-align: left;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 1px;
+      }
+
+      .table th {
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.11em;
+        color: rgba(210,220,235,0.62);
+        background: rgba(24,24,38,0.55);
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(110,255,210,0.18);
+        background: rgba(10,10,16,0.40);
+        color: rgba(235,245,255,0.86);
+      }
+
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: rgba(56,200,120,1);
+        box-shadow: 0 0 16px rgba(56,200,120,0.30);
+      }
+
+      .warn { background: rgba(245,183,49,1); box-shadow: 0 0 16px rgba(245,183,49,0.30); }
+      .bad { background: rgba(232,64,87,1); box-shadow: 0 0 16px rgba(232,64,87,0.30); }
+
+      .note {
+        margin-top: 10px;
+        font-size: 10px;
+        color: rgba(210,220,235,0.62);
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <div class="title">NEON DECK / MONEY</div>
+          <div class="subtitle">pipeline finance • burn control • runway visibility</div>
+        </div>
+        <div class="right">
+          <div class="pill" id="clock">--:--:--</div>
+          <div class="pill" id="market">market: open</div>
+          <div class="pill" id="risk">risk: low</div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <div class="panelHeader">
+            <div class="h">Deck metrics</div>
+            <div class="subtitle" id="asof">as-of now</div>
+          </div>
+          <div class="panelBody">
+            <div class="cards">
+              <div class="card">
+                <div class="k">MRR</div>
+                <div class="v"><div class="num" id="mrr">0</div><div class="unit">$k</div></div>
+                <div class="meter"><div id="mrrBar"></div></div>
+              </div>
+              <div class="card">
+                <div class="k">ARR</div>
+                <div class="v"><div class="num" id="arr">0</div><div class="unit">$m</div></div>
+                <div class="meter"><div id="arrBar"></div></div>
+              </div>
+              <div class="card">
+                <div class="k">Burn</div>
+                <div class="v"><div class="num" id="burn">0</div><div class="unit">$k/mo</div></div>
+                <div class="meter"><div id="burnBar"></div></div>
+              </div>
+              <div class="card">
+                <div class="k">Runway</div>
+                <div class="v"><div class="num" id="runway">0</div><div class="unit">months</div></div>
+                <div class="meter"><div id="runwayBar"></div></div>
+              </div>
+            </div>
+
+            <div class="chart">
+              <div class="chartLabel">Revenue curve (sim)</div>
+              <canvas id="chart" width="1200" height="500"></canvas>
+            </div>
+
+            <div class="note">note: this dashboard is a static video-pack template (no financial APIs required).</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panelHeader">
+            <div class="h">Deals + alerts</div>
+            <div class="subtitle" id="pulse">pulse: green</div>
+          </div>
+          <div class="panelBody" style="overflow: hidden;">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th style="width: 34%">account</th>
+                  <th style="width: 20%">stage</th>
+                  <th style="width: 20%">value</th>
+                  <th style="width: 26%">signal</th>
+                </tr>
+              </thead>
+              <tbody id="deals"></tbody>
+            </table>
+
+            <div style="height: 10px"></div>
+            <div class="card">
+              <div class="k">Alert feed</div>
+              <div class="note" id="alerts"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
+      const lerp = (a, b, t) => a + (b - a) * t
+
+      const clock = document.getElementById('clock')
+      const asof = document.getElementById('asof')
+      const market = document.getElementById('market')
+      const risk = document.getElementById('risk')
+      const pulse = document.getElementById('pulse')
+
+      const mrrEl = document.getElementById('mrr')
+      const arrEl = document.getElementById('arr')
+      const burnEl = document.getElementById('burn')
+      const runwayEl = document.getElementById('runway')
+
+      const mrrBar = document.getElementById('mrrBar')
+      const arrBar = document.getElementById('arrBar')
+      const burnBar = document.getElementById('burnBar')
+      const runwayBar = document.getElementById('runwayBar')
+
+      const tickClock = () => {
+        const d = new Date()
+        const hh = String(d.getHours()).padStart(2, '0')
+        const mm = String(d.getMinutes()).padStart(2, '0')
+        const ss = String(d.getSeconds()).padStart(2, '0')
+        clock.textContent = `${hh}:${mm}:${ss}`
+        asof.textContent = `as-of ${hh}:${mm}:${ss}`
+      }
+      setInterval(tickClock, 250)
+      tickClock()
+
+      const dealsEl = document.getElementById('deals')
+      const alertsEl = document.getElementById('alerts')
+
+      const dealNames = ['Kestrel Labs', 'Arcadia', 'Helios', 'Vanta', 'Orbit', 'Ganymede', 'Atlas', 'Saffron']
+      const stages = ['intro', 'trial', 'negotiation', 'commit']
+
+      const deals = Array.from({ length: 6 }, () => ({
+        name: dealNames[Math.floor(Math.random() * dealNames.length)],
+        stage: stages[Math.floor(Math.random() * stages.length)],
+        value: 40 + Math.random() * 260,
+        heat: Math.random(),
+      }))
+
+      const renderDeals = () => {
+        dealsEl.innerHTML = ''
+        for (const d of deals) {
+          const tr = document.createElement('tr')
+          const sig = d.heat > 0.82 ? 'hot' : d.heat > 0.55 ? 'warm' : 'cold'
+          const dot = d.heat > 0.82 ? 'dot bad' : d.heat > 0.55 ? 'dot warn' : 'dot'
+          tr.innerHTML = `
+            <td title="${d.name}">${d.name}</td>
+            <td>${d.stage}</td>
+            <td>$${Math.round(d.value)}k</td>
+            <td><span class="tag"><span class="${dot}"></span>${sig}</span></td>
+          `.trim()
+          dealsEl.appendChild(tr)
+        }
+      }
+      renderDeals()
+
+      const alerts = []
+      const pushAlert = (s) => {
+        alerts.push(s)
+        while (alerts.length > 7) alerts.shift()
+        alertsEl.innerHTML = alerts.map((x) => `<div>${x}</div>`).join('')
+      }
+
+      pushAlert('[money] pipeline synced')
+      pushAlert('[money] burn envelope stable')
+
+      // Metrics
+      let mrr = 180 + Math.random() * 40
+      let burn = 120 + Math.random() * 35
+      let runway = 14 + Math.random() * 8
+
+      // Chart
+      const canvas = document.getElementById('chart')
+      const ctx = canvas.getContext('2d')
+      const W = canvas.width
+      const H = canvas.height
+
+      const series = Array.from({ length: 64 }, (_, i) => 0.42 + i * 0.004 + Math.random() * 0.02)
+      const draw = () => {
+        ctx.clearRect(0, 0, W, H)
+
+        // grid
+        ctx.lineWidth = 1
+        for (let i = 0; i <= 6; i++) {
+          const y = (i / 6) * H
+          ctx.strokeStyle = 'rgba(110,255,210,0.08)'
+          ctx.beginPath()
+          ctx.moveTo(0, y)
+          ctx.lineTo(W, y)
+          ctx.stroke()
+        }
+
+        // area
+        ctx.beginPath()
+        for (let i = 0; i < series.length; i++) {
+          const x = (i / (series.length - 1)) * W
+          const y = (1 - series[i]) * (H - 40) + 20
+          if (i === 0) ctx.moveTo(x, y)
+          else ctx.lineTo(x, y)
+        }
+        ctx.lineTo(W, H)
+        ctx.lineTo(0, H)
+        ctx.closePath()
+        ctx.fillStyle = 'rgba(70,255,210,0.10)'
+        ctx.fill()
+
+        // line
+        ctx.beginPath()
+        for (let i = 0; i < series.length; i++) {
+          const x = (i / (series.length - 1)) * W
+          const y = (1 - series[i]) * (H - 40) + 20
+          if (i === 0) ctx.moveTo(x, y)
+          else ctx.lineTo(x, y)
+        }
+        ctx.strokeStyle = 'rgba(70,255,210,0.85)'
+        ctx.lineWidth = 2
+        ctx.stroke()
+
+        // highlight point
+        const idx = series.length - 1
+        const x = (idx / (series.length - 1)) * W
+        const y = (1 - series[idx]) * (H - 40) + 20
+        ctx.fillStyle = 'rgba(245,183,49,0.95)'
+        ctx.beginPath()
+        ctx.arc(x, y, 4, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      let t = 0
+      const loop = () => {
+        t += 0.016
+
+        // drift metrics
+        mrr = clamp(mrr + (Math.random() - 0.48) * 1.6 + Math.sin(t * 0.35) * 0.3, 120, 320)
+        burn = clamp(burn + (Math.random() - 0.52) * 1.3 + Math.sin(t * 0.22) * 0.25, 80, 220)
+        runway = clamp((mrr * 1.2) / (burn * 0.85) * 10, 6, 30)
+
+        const arr = (mrr * 12) / 1000
+
+        mrrEl.textContent = Math.round(mrr)
+        arrEl.textContent = arr.toFixed(2)
+        burnEl.textContent = Math.round(burn)
+        runwayEl.textContent = Math.round(runway)
+
+        mrrBar.style.width = `${(mrr / 320) * 100}%`
+        arrBar.style.width = `${(arr / 4.0) * 100}%`
+        burnBar.style.width = `${(burn / 220) * 100}%`
+        runwayBar.style.width = `${(runway / 30) * 100}%`
+
+        // chart series update
+        const last = series[series.length - 1]
+        const next = clamp(last + (Math.random() - 0.48) * 0.008 + (mrr - 200) / 40000, 0.18, 0.94)
+        series.push(next)
+        series.shift()
+
+        // deal heat
+        for (const d of deals) {
+          d.heat = clamp(d.heat + (Math.random() - 0.5) * 0.05 + (mrr - 200) / 10000, 0, 1)
+          d.value = clamp(d.value + (Math.random() - 0.48) * 2.2, 20, 420)
+          if (Math.random() < 0.01) d.stage = stages[Math.floor(Math.random() * stages.length)]
+        }
+        renderDeals()
+
+        // pulse
+        const r = (Math.random() < 0.015) ? 'risk: medium' : 'risk: low'
+        risk.textContent = r
+        market.textContent = Math.random() < 0.95 ? 'market: open' : 'market: halt'
+        pulse.textContent = r.includes('medium') ? 'pulse: yellow' : 'pulse: green'
+
+        if (Math.random() < 0.05) {
+          const pick = Math.random()
+          if (pick < 0.6) pushAlert('[money] deal signal update: warm')
+          else if (pick < 0.9) pushAlert('[money] cash delta: +$' + Math.round(mrr / 10) + 'k (sim)')
+          else pushAlert('[money] anomaly: spend spike (sim)')
+        }
+
+        draw()
+        requestAnimationFrame(loop)
+      }
+      draw()
+      requestAnimationFrame(loop)
+    </script>
+  </body>
+</html>
