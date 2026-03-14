@@ -42,20 +42,30 @@ REPO_ROOT = SCRIPT_DIR.parent
 
 DEFAULT_TITLES = [
     "Locate Teknium",
+    "Create the White Rabbit",
     "Teknium Signal Intercept",
     "NVLink Cathedral",
+    "InfiniBand Whisper Route",
     "Black ICE on the NVLink Fabric",
     "DGX Fabric Wake Sequence",
+    "Rack 7 Cold Boot",
+    "Kernel Panic in Neon Rain",
     "B300 Telemetry Mirage",
     "NCCL Handshake at Midnight",
+    "Slurm Queue Prophecy",
     "Ghost Pods on the Compute Mesh",
     "The Swarm Wakes (Scheduler Online)",
+    "Shadow Budget Allocation",
     "Strudel: Acid Bassline Protocol",
+    "Strudel: Quantize the Chaos",
+    "Modulate the Neon Choir",
     "Bitcrush the Simulation",
     "Sidechain the Sentinels",
     "Reverb in the Back Alley",
     "Timeline Splice in the Construct",
+    "Keyframe the Nightmare",
     "Render Farm After Midnight",
+    "Encode at Dawn",
     "CRT Bloom Calibration",
     "Glitch Pass: VHS Ghosting",
     "Neon Ledger Reconciliation",
@@ -69,6 +79,7 @@ DEFAULT_WHISPERS = [
     "STRUDEL",
     "MONEY",
     "Locate Teknium",
+    "Create the White Rabbit",
     "Show NVLink fabric map",
     "Run a telemetry sweep",
     "Rebuild the timeline",
@@ -548,13 +559,31 @@ def main() -> int:
         user_line = title
 
         t = title.lower()
-        if any(k in t for k in ["nvlink", "dgx", "b300", "nccl", "compute", "scheduler", "swarm", "telemetry", "fabric"]):
+        if any(
+            k in t
+            for k in [
+                "nvlink",
+                "infiniband",
+                "dgx",
+                "b300",
+                "nccl",
+                "slurm",
+                "rack",
+                "kernel",
+                "panic",
+                "compute",
+                "scheduler",
+                "swarm",
+                "telemetry",
+                "fabric",
+            ]
+        ):
             assistant_line = "Acknowledged. Pulling telemetry."
-        elif any(k in t for k in ["strudel", "bitcrush", "sidechain", "reverb", "bassline", "synth"]):
+        elif any(k in t for k in ["strudel", "bitcrush", "sidechain", "reverb", "bassline", "quantize", "modulate", "synth"]):
             assistant_line = "Acknowledged. Warming the synth."
-        elif any(k in t for k in ["timeline", "render", "crt", "glitch", "vhs", "bloom"]):
+        elif any(k in t for k in ["timeline", "keyframe", "encode", "render", "crt", "glitch", "vhs", "bloom"]):
             assistant_line = "Acknowledged. Splicing the timeline."
-        elif any(k in t for k in ["ledger", "reconciliation", "money"]):
+        elif any(k in t for k in ["ledger", "reconciliation", "budget", "allocation", "money"]):
             assistant_line = "Acknowledged. Balancing the ledger."
         else:
             assistant_line = "Acknowledged. Running the sweep."
