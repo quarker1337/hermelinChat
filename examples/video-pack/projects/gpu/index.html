@@ -462,7 +462,7 @@
       <div class="top">
         <div class="brand">
           <div class="title">NEON DECK / DGX FLEET GPU OVERVIEW</div>
-          <div class="subtitle">collector: nvidia-smi • fabric: nvlink • profile: hgx-class</div>
+          <div class="subtitle">collector: nvidia-smi • driver 590.48.01 • CUDA 13.1 • sku: B300</div>
         </div>
         <div class="meta">
           <div class="pill"><span class="dot" id="fleetDot"></span><span id="fleetState">nominal</span></div>
@@ -506,7 +506,7 @@
             <div class="detailTop">
               <div class="detailTitle">
                 <div class="detailHost" id="detailHost">dgx01</div>
-                <div class="detailSub" id="detailSub">HGX H100 8x80GB • driver 550.54 • CUDA 12.4</div>
+                <div class="detailSub" id="detailSub">NVIDIA B300 SXM6 AC • driver 590.48.01 • CUDA 13.1</div>
               </div>
               <div class="toggle" id="toggleAuto"><span class="dot" id="autoDot"></span><span>rotate:</span> <b id="autoLabel">ON</b></div>
             </div>
@@ -585,9 +585,7 @@
       const autoLabelEl = document.getElementById('autoLabel')
 
       const modelLines = [
-        'HGX H100 8x80GB • driver 550.54 • CUDA 12.4',
-        'DGX A100 8x80GB • driver 535.161 • CUDA 12.2',
-        'DGX H100 8x80GB • driver 550.54 • CUDA 12.4',
+        'NVIDIA B300 SXM6 AC • driver 590.48.01 • CUDA 13.1',
       ]
 
       const BAR_FILL = '█'
@@ -642,17 +640,17 @@
         // Make PIDs look like a real DGX box (stable for the session).
         const basePid = Math.floor(rnd(3600000, 3699999)) + nodeIdx * 100
 
-        // Memory footprint (MiB) similar to your real example (stable, slow drift).
-        const baseMem = 25740 + Math.floor(rnd(-160, 160))
+        // Memory footprint (MiB) similar to a B300 box with weights resident.
+        const baseMem = 257500 + Math.floor(rnd(-600, 600))
 
         for (let gpu = 0; gpu < GPU_COUNT; gpu++) {
           const dp = Math.floor(gpu / 4)
           const tp = gpu % 4
 
           const memMiB = clamp(
-            baseMem + Math.floor(rnd(-60, 60)) + Math.floor(randn() * 12),
+            baseMem + Math.floor(rnd(-220, 220)) + Math.floor(randn() * 40),
             1800,
-            78000
+            275040
           )
 
           out.push({
@@ -692,10 +690,10 @@
             rnd(8, 16)
 
           const nodeMemRatio =
-            profile === 'training' ? rnd(0.80, 0.95) :
-            profile === 'inference' ? rnd(0.55, 0.80) :
-            profile === 'idle' ? rnd(0.10, 0.35) :
-            rnd(0.45, 0.75)
+            profile === 'training' ? rnd(0.934, 0.946) :
+            profile === 'inference' ? rnd(0.930, 0.944) :
+            profile === 'idle' ? rnd(0.926, 0.940) :
+            rnd(0.928, 0.945)
 
           const gpus = []
           for (let g = 0; g < GPU_COUNT; g++) {
@@ -707,12 +705,12 @@
               (i === 1 && g === 7) ? 1 :
               0
 
-            const memTotal = 80
+            const memTotal = 275040
 
             const varUtil = profile === 'training' ? 2.5 : profile === 'idle' ? 4.5 : 6.0
             const utilMean = clamp(nodeUtilMean + rnd(-varUtil, varUtil) + (g === 3 ? 3 : 0), 0, 100)
             const utilAmp = clamp(nodeUtilAmp + rnd(-2.0, 2.0), 0, 28)
-            const memRatio = clamp(nodeMemRatio + rnd(-0.05, 0.05), 0.05, 0.98)
+            const memRatio = clamp(nodeMemRatio + rnd(-0.004, 0.004), 0.80, 0.98)
 
             const period =
               profile === 'training' ? rnd(55, 130) :
@@ -728,9 +726,12 @@
               inertiaU: profile === 'training' ? rnd(0.16, 0.28) : rnd(0.20, 0.34),
 
               memRatio,
-              memBase: profile === 'idle' ? rnd(0.5, 4.0) : rnd(1.2, 7.0),
-              noiseM: profile === 'training' ? rnd(0.25, 0.65) : rnd(0.35, 0.95),
-              inertiaM: rnd(0.12, 0.24),
+              memMean: memTotal * memRatio + rnd(-420, 420),
+              memAmp: rnd(18, 95),
+              memOmega: (2 * Math.PI) / rnd(180, 540),
+              memPhase: rnd(0, 2 * Math.PI),
+              noiseM: rnd(8, 28),
+              inertiaM: rnd(0.16, 0.30),
 
               tempIdle: profile === 'idle' ? rnd(30, 36) : rnd(32, 38),
               tempPerU: rnd(0.40, 0.52),
@@ -746,14 +747,14 @@
             if (health === 2) {
               sim.tempIdle += 6
               sim.tempPerU *= 1.07
-              sim.memRatio = clamp(sim.memRatio + 0.10, 0.05, 0.98)
+              sim.memMean = clamp(sim.memMean + 1200, 0, memTotal)
             } else if (health === 1) {
               sim.tempIdle += 2
-              sim.memRatio = clamp(sim.memRatio + 0.04, 0.05, 0.98)
+              sim.memMean = clamp(sim.memMean + 450, 0, memTotal)
             }
 
             const util = clamp(sim.utilMean + sim.utilAmp * Math.sin(sim.phase) + randn() * sim.noiseU, 0, 100)
-            const memUsed = clamp(sim.memBase + (util / 100) * memTotal * sim.memRatio + randn() * sim.noiseM, 0, memTotal)
+            const memUsed = clamp(sim.memMean + sim.memAmp * Math.sin(sim.memPhase) + randn() * sim.noiseM, 0, memTotal)
             const temp = clamp(sim.tempIdle + util * sim.tempPerU + randn() * sim.noiseT, 30, 92)
             const pwr = clamp(sim.pwrIdle + util * sim.pwrPerU + randn() * sim.noiseP, 60, 720)
 
@@ -761,6 +762,10 @@
           }
 
           const procs = makeProcPool(i)
+          for (const p of procs) {
+            p.memMiB = Math.round(gpus[p.gpu].memUsed)
+            p.memBase = p.memMiB
+          }
 
           out.push({
             name,
@@ -867,7 +872,8 @@
             const targetU = clamp(s.utilMean + wave + randn() * s.noiseU, 0, 100)
             gpu.util = clamp(gpu.util + (targetU - gpu.util) * s.inertiaU, 0, 100)
 
-            const targetM = clamp(s.memBase + (gpu.util / 100) * gpu.memTotal * s.memRatio + randn() * s.noiseM, 0, gpu.memTotal)
+            const memWave = s.memAmp * Math.sin(simSeconds * s.memOmega + s.memPhase)
+            const targetM = clamp(s.memMean + memWave + randn() * s.noiseM, 0, gpu.memTotal)
             gpu.memUsed = clamp(gpu.memUsed + (targetM - gpu.memUsed) * s.inertiaM, 0, gpu.memTotal)
 
             const targetT = clamp(s.tempIdle + gpu.util * s.tempPerU + randn() * s.noiseT, 30, 92)
@@ -877,14 +883,10 @@
             gpu.pwr = clamp(gpu.pwr + (targetP - gpu.pwr) * s.inertiaP, 60, 720)
           }
 
-          // process drift (very slow; keep stable mapping)
+          // process table mirrors resident allocations
           for (const p of node.procs) {
-            const pull = (p.memBase - p.memMiB) * 0.06
-            p.memMiB = clamp(
-              Math.round(p.memMiB + pull + randn() * p.memDrift),
-              1800,
-              78000
-            )
+            p.memMiB = Math.round(node.gpus[p.gpu].memUsed)
+            p.memBase = p.memMiB
           }
         }
       }
@@ -932,13 +934,14 @@
 
         const avg = Math.round(st.avgUtil)
         const tmax = Math.round(st.tempMax)
-        const memU = Math.round(st.memUsedSum)
-        const memT = Math.round(st.memTotalSum)
+        const memU = Math.round(st.memUsedSum / node.gpus.length)
+        const memT = Math.round(st.memTotalSum / node.gpus.length)
         const pwr = st.pwrSum
 
         el.avgUtil.textContent = `${avg}%`
         el.maxTemp.textContent = `${tmax}C`
-        el.mem.textContent = `${memU}/${memT}G`
+        el.mem.textContent = `${memU}/${memT}`
+        el.mem.title = `${memU}MiB / ${memT}MiB (avg per GPU)`
         el.pwr.textContent = fmtKW(pwr)
 
         const rowLvl = st.alerts > 0 ? 2 : st.warns > 0 ? 1 : 0
@@ -966,7 +969,7 @@
 
           micro.m.className = `micro ${mcls === 'ok' ? '' : mcls}`.trim()
           micro.fill.style.width = `${clamp(gpu.util, 0, 100)}%`
-          micro.m.title = `${node.name} GPU${g} • util ${Math.round(gpu.util)}% • mem ${gpu.memUsed.toFixed(1)}/${gpu.memTotal}G • ${Math.round(gpu.temp)}C • ${Math.round(gpu.pwr)}W`
+          micro.m.title = `${node.name} GPU${g} • util ${Math.round(gpu.util)}% • mem ${Math.round(gpu.memUsed)}MiB/${Math.round(gpu.memTotal)}MiB • ${Math.round(gpu.temp)}C • ${Math.round(gpu.pwr)}W`
         }
 
         el.row.classList.toggle('active', i === selected)
@@ -981,7 +984,7 @@
         detailHostEl.textContent = node.name
         detailSubEl.textContent = node.model
 
-        nodeStatsEl.textContent = `avg ${Math.round(st.avgUtil)}% • max ${Math.round(st.tempMax)}C • mem ${Math.round(st.memUsedSum)}/${Math.round(st.memTotalSum)}G • power ${fmtKW(st.pwrSum)}`
+        nodeStatsEl.textContent = `avg ${Math.round(st.avgUtil)}% • max ${Math.round(st.tempMax)}C • mem ${Math.round(st.memUsedSum / node.gpus.length)}/${Math.round(st.memTotalSum / node.gpus.length)}MiB • power ${fmtKW(st.pwrSum)}`
 
         // GPU lines
         gpuLinesEl.innerHTML = ''
@@ -996,8 +999,8 @@
           const memBar = bar(memPct, 10)
 
           const utilPct = Math.round(gpu.util)
-          const memUsed = gpu.memUsed.toFixed(0)
-          const memTotal = gpu.memTotal.toFixed(0)
+          const memUsed = String(Math.round(gpu.memUsed)).padStart(6, ' ')
+          const memTotal = String(Math.round(gpu.memTotal)).padStart(6, ' ')
           const temp = Math.round(gpu.temp)
           const pwr = Math.round(gpu.pwr)
 
@@ -1010,7 +1013,7 @@
             `<span class="k">U:</span><span class="bar ${cls}">${utilBar}</span> ` +
             `<span class="num">${String(utilPct).padStart(3, ' ')}%</span> ` +
             `<span class="k">M:</span><span class="bar ${hcls}">${memBar}</span> ` +
-            `<span class="num">${memUsed}/${memTotal}G</span> ` +
+            `<span class="num">${memUsed}/${memTotal}MiB</span> ` +
             `<span class="num temp ${tempCls}">${String(temp).padStart(2, ' ')}C</span> ` +
             `<span class="num">${String(pwr).padStart(3, ' ')}W</span>`
 
@@ -1023,7 +1026,7 @@
         procs.sort((a, b) => a.gpu - b.gpu)
         for (const p of procs) {
           const tr = document.createElement('tr')
-          const mem = String(Math.round(p.memMiB)).padStart(5, ' ')
+          const mem = String(Math.round(p.memMiB)).padStart(6, ' ')
           tr.innerHTML = `
             <td>${p.pid}</td>
             <td>${p.gpu}</td>
