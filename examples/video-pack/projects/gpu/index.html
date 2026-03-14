@@ -266,6 +266,7 @@
         width: 0%;
         background: rgba(77,255,161,0.85);
         box-shadow: 0 0 14px rgba(77,255,161,0.18);
+        transition: width 900ms linear;
       }
 
       .micro.warn > div { background: rgba(245,230,66,0.90); box-shadow: 0 0 14px rgba(245,230,66,0.12); }
@@ -538,9 +539,31 @@
     <script>
       const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
       const rnd = (a, b) => a + Math.random() * (b - a)
+      const randn = () => {
+        // Box–Muller transform (roughly normal noise; looks more like real telemetry)
+        let u = 0
+        let v = 0
+        while (u === 0) u = Math.random()
+        while (v === 0) v = Math.random()
+        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v)
+      }
 
+      const SIM_TICK_MS = 1000
       const GPU_COUNT = 8
       const NODE_COUNT = 8
+      const HOT_NODE = 2
+
+      function alignedEvery(fn, ms) {
+        const run = () => {
+          fn()
+          const now = Date.now()
+          const delay = ms - (now % ms) + 2
+          setTimeout(run, delay)
+        }
+        const now = Date.now()
+        const delay = ms - (now % ms) + 2
+        setTimeout(run, delay)
+      }
 
       const fleetRowsEl = document.getElementById('fleetRows')
       const gpuLinesEl = document.getElementById('gpuLines')
@@ -608,8 +631,8 @@
         const ss = pad2(d.getSeconds())
         clockEl.textContent = `${hh}:${mm}:${ss}`
       }
-      setInterval(tickClock, 250)
       tickClock()
+      alignedEvery(tickClock, 1000)
 
       function makeProcPool() {
         return [
@@ -626,28 +649,90 @@
         const out = []
         for (let i = 0; i < NODE_COUNT; i++) {
           const name = `dgx${pad2(i + 1)}`
+
+          // Stable per-node workload profile (keeps telemetry believable across ticks).
+          let profile = 'mixed'
+          if (i === HOT_NODE || i === 4) profile = 'training'
+          else if (i === 6) profile = 'idle'
+          else if (i === 1 || i === 7) profile = 'inference'
+
+          const nodeUtilMean =
+            profile === 'training' ? rnd(84, 95) :
+            profile === 'inference' ? rnd(60, 78) :
+            profile === 'idle' ? rnd(12, 34) :
+            rnd(40, 66)
+
+          const nodeUtilAmp =
+            profile === 'training' ? rnd(3, 7) :
+            profile === 'inference' ? rnd(6, 12) :
+            profile === 'idle' ? rnd(4, 10) :
+            rnd(8, 16)
+
+          const nodeMemRatio =
+            profile === 'training' ? rnd(0.80, 0.95) :
+            profile === 'inference' ? rnd(0.55, 0.80) :
+            profile === 'idle' ? rnd(0.10, 0.35) :
+            rnd(0.45, 0.75)
+
           const gpus = []
           for (let g = 0; g < GPU_COUNT; g++) {
-            const base = rnd(18, 72) + (i === 2 ? 18 : 0) + (g === 3 ? 8 : 0)
-            const util = clamp(base + rnd(-6, 6), 0, 100)
             const memTotal = 80
-            const memUsed = clamp((util / 100) * memTotal * rnd(0.45, 0.75) + rnd(1.2, 6.0), 0, memTotal)
-            const temp = clamp(36 + util * rnd(0.38, 0.52) + rnd(-2, 4), 32, 92)
-            const pwr = clamp(90 + util * rnd(5.2, 7.0) + rnd(-20, 30), 60, 720)
-            gpus.push({ util, memUsed, memTotal, temp, pwr })
+
+            const varUtil = profile === 'training' ? 2.5 : profile === 'idle' ? 4.5 : 6.0
+            const utilMean = clamp(nodeUtilMean + rnd(-varUtil, varUtil) + (g === 3 ? 3 : 0), 0, 100)
+            const utilAmp = clamp(nodeUtilAmp + rnd(-2.0, 2.0), 0, 28)
+            const memRatio = clamp(nodeMemRatio + rnd(-0.05, 0.05), 0.05, 0.98)
+
+            const period =
+              profile === 'training' ? rnd(55, 130) :
+              profile === 'idle' ? rnd(22, 80) :
+              rnd(28, 95)
+
+            const sim = {
+              utilMean,
+              utilAmp,
+              omega: (2 * Math.PI) / period,
+              phase: rnd(0, 2 * Math.PI),
+              noiseU: profile === 'training' ? rnd(0.4, 1.2) : rnd(0.8, 2.0),
+              inertiaU: profile === 'training' ? rnd(0.16, 0.28) : rnd(0.20, 0.34),
+
+              memRatio,
+              memBase: profile === 'idle' ? rnd(0.5, 4.0) : rnd(1.2, 7.0),
+              noiseM: profile === 'training' ? rnd(0.25, 0.65) : rnd(0.35, 0.95),
+              inertiaM: rnd(0.12, 0.24),
+
+              tempIdle: profile === 'idle' ? rnd(30, 36) : rnd(32, 38),
+              tempPerU: rnd(0.40, 0.52),
+              noiseT: rnd(0.4, 1.1),
+              inertiaT: rnd(0.16, 0.30),
+
+              pwrIdle: profile === 'idle' ? rnd(70, 110) : rnd(85, 140),
+              pwrPerU: rnd(5.4, 7.1),
+              noiseP: rnd(4.0, 12.0),
+              inertiaP: rnd(0.18, 0.34),
+            }
+
+            const util = clamp(sim.utilMean + sim.utilAmp * Math.sin(sim.phase) + randn() * sim.noiseU, 0, 100)
+            const memUsed = clamp(sim.memBase + (util / 100) * memTotal * sim.memRatio + randn() * sim.noiseM, 0, memTotal)
+            const temp = clamp(sim.tempIdle + util * sim.tempPerU + randn() * sim.noiseT, 30, 92)
+            const pwr = clamp(sim.pwrIdle + util * sim.pwrPerU + randn() * sim.noiseP, 60, 720)
+
+            gpus.push({ util, memUsed, memTotal, temp, pwr, sim })
           }
+
           const procs = makeProcPool().slice(0, 5).map((p, idx) => ({
             pid: Math.floor(rnd(1200, 64000)),
             gpu: idx % GPU_COUNT,
             mem: p.mem,
             cmd: p.cmd,
           }))
+
           out.push({
             name,
             model: modelLines[Math.floor(Math.random() * modelLines.length)],
             gpus,
             procs,
-            t: rnd(0, 1000),
+            profile,
           })
         }
         return out
@@ -732,40 +817,38 @@
         updateAutoUI()
       })
 
-      function updateFleet(dt) {
-        const hotIdx = 2
-        const wave = Math.sin(Date.now() / 1200)
+      let simSeconds = 0
+      function updateFleetTick() {
+        simSeconds += 1
 
         for (let i = 0; i < fleet.length; i++) {
           const node = fleet[i]
-          node.t += dt
 
           for (let g = 0; g < node.gpus.length; g++) {
             const gpu = node.gpus[g]
+            const s = gpu.sim
 
-            // Slight host bias to keep the dashboard interesting.
-            const bias = (i === hotIdx ? 10 : 0) + (g === 0 ? 2 : 0) + (g === 7 ? -2 : 0)
-            const target = 42 + bias + (wave * 8) + rnd(-6, 6)
+            const wave = s.utilAmp * Math.sin(simSeconds * s.omega + s.phase)
+            const targetU = clamp(s.utilMean + wave + randn() * s.noiseU, 0, 100)
+            gpu.util = clamp(gpu.util + (targetU - gpu.util) * s.inertiaU, 0, 100)
 
-            gpu.util = clamp(gpu.util + (target - gpu.util) * 0.06 + rnd(-2.2, 2.2), 0, 100)
+            const targetM = clamp(s.memBase + (gpu.util / 100) * gpu.memTotal * s.memRatio + randn() * s.noiseM, 0, gpu.memTotal)
+            gpu.memUsed = clamp(gpu.memUsed + (targetM - gpu.memUsed) * s.inertiaM, 0, gpu.memTotal)
 
-            const memTarget = clamp((gpu.util / 100) * gpu.memTotal * rnd(0.42, 0.78) + rnd(0, 3), 0, gpu.memTotal)
-            gpu.memUsed = clamp(gpu.memUsed + (memTarget - gpu.memUsed) * 0.04 + rnd(-0.25, 0.25), 0, gpu.memTotal)
+            const targetT = clamp(s.tempIdle + gpu.util * s.tempPerU + randn() * s.noiseT, 30, 92)
+            gpu.temp = clamp(gpu.temp + (targetT - gpu.temp) * s.inertiaT, 30, 92)
 
-            const tempTarget = 34 + gpu.util * rnd(0.40, 0.54) + rnd(-2.0, 3.0)
-            gpu.temp = clamp(gpu.temp + (tempTarget - gpu.temp) * 0.05 + rnd(-0.25, 0.35), 30, 92)
-
-            const pwrTarget = 85 + gpu.util * rnd(5.3, 7.3) + rnd(-10, 18)
-            gpu.pwr = clamp(gpu.pwr + (pwrTarget - gpu.pwr) * 0.06 + rnd(-2.0, 2.0), 60, 720)
+            const targetP = clamp(s.pwrIdle + gpu.util * s.pwrPerU + randn() * s.noiseP, 60, 720)
+            gpu.pwr = clamp(gpu.pwr + (targetP - gpu.pwr) * s.inertiaP, 60, 720)
           }
 
-          // process drift
+          // process drift (slow)
           for (const p of node.procs) {
-            p.mem = clamp(p.mem + rnd(-0.15, 0.22), 0.2, 32)
-            if (Math.random() < 0.01) p.gpu = Math.floor(Math.random() * GPU_COUNT)
+            p.mem = clamp(p.mem + rnd(-0.08, 0.10), 0.2, 32)
+            if (Math.random() < 0.005) p.gpu = Math.floor(Math.random() * GPU_COUNT)
           }
 
-          if (Math.random() < 0.02) {
+          if (Math.random() < 0.03) {
             // occasional new pid to look alive
             const which = Math.floor(Math.random() * node.procs.length)
             node.procs[which].pid = Math.floor(rnd(1200, 64000))
@@ -943,13 +1026,8 @@
         tickInfoEl.textContent = `sweep: ${(t1 - t0).toFixed(1)}ms`
       }
 
-      let last = performance.now()
-      function loop() {
-        const now = performance.now()
-        const dt = clamp(now - last, 0, 120)
-        last = now
-
-        updateFleet(dt)
+      function videoTick() {
+        updateFleetTick()
 
         // auto rotate selection
         if (!pinned) {
@@ -967,12 +1045,10 @@
         }
 
         renderAll()
-        requestAnimationFrame(loop)
       }
 
-      updateAutoUI()
       renderAll()
-      requestAnimationFrame(loop)
+      alignedEvery(videoTick, SIM_TICK_MS)
     </script>
   </body>
 </html>
