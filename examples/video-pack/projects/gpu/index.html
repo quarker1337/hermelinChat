@@ -634,15 +634,38 @@
       tickClock()
       alignedEvery(tickClock, 1000)
 
-      function makeProcPool() {
-        return [
-          { cmd: 'python llm_worker.py', mem: rnd(4, 22) },
-          { cmd: 'python dataloader.py', mem: rnd(2, 10) },
-          { cmd: 'cuda_graphd', mem: rnd(1.2, 4.5) },
-          { cmd: 'triton_server', mem: rnd(6, 18) },
-          { cmd: 'obs', mem: rnd(0.8, 2.0) },
-          { cmd: 'chrome --type=gpu-process', mem: rnd(0.6, 1.6) },
-        ]
+      function makeProcPool(nodeIdx) {
+        // Mimic a real nvidia-smi process list: 1 scheduler process per GPU.
+        // DP=2, TP=4 => GPU0..3 = DP0/TP0..3, GPU4..7 = DP1/TP0..3
+        const out = []
+
+        // Make PIDs look like a real DGX box (stable for the session).
+        const basePid = Math.floor(rnd(3600000, 3699999)) + nodeIdx * 100
+
+        // Memory footprint (MiB) similar to your real example (stable, slow drift).
+        const baseMem = 25740 + Math.floor(rnd(-160, 160))
+
+        for (let gpu = 0; gpu < GPU_COUNT; gpu++) {
+          const dp = Math.floor(gpu / 4)
+          const tp = gpu % 4
+
+          const memMiB = clamp(
+            baseMem + Math.floor(rnd(-60, 60)) + Math.floor(randn() * 12),
+            1800,
+            78000
+          )
+
+          out.push({
+            pid: basePid + gpu,
+            gpu,
+            memMiB: Math.round(memMiB),
+            memBase: Math.round(memMiB),
+            memDrift: rnd(4, 18),
+            cmd: `sglang::scheduler_DP${dp}_TP${tp}`,
+          })
+        }
+
+        return out
       }
 
       function initFleet() {
@@ -737,12 +760,7 @@
             gpus.push({ util, memUsed, memTotal, temp, pwr, sim, health })
           }
 
-          const procs = makeProcPool().slice(0, 5).map((p, idx) => ({
-            pid: Math.floor(rnd(1200, 64000)),
-            gpu: idx % GPU_COUNT,
-            mem: p.mem,
-            cmd: p.cmd,
-          }))
+          const procs = makeProcPool(i)
 
           out.push({
             name,
@@ -859,16 +877,14 @@
             gpu.pwr = clamp(gpu.pwr + (targetP - gpu.pwr) * s.inertiaP, 60, 720)
           }
 
-          // process drift (slow)
+          // process drift (very slow; keep stable mapping)
           for (const p of node.procs) {
-            p.mem = clamp(p.mem + rnd(-0.08, 0.10), 0.2, 32)
-            if (Math.random() < 0.005) p.gpu = Math.floor(Math.random() * GPU_COUNT)
-          }
-
-          if (Math.random() < 0.03) {
-            // occasional new pid to look alive
-            const which = Math.floor(Math.random() * node.procs.length)
-            node.procs[which].pid = Math.floor(rnd(1200, 64000))
+            const pull = (p.memBase - p.memMiB) * 0.06
+            p.memMiB = clamp(
+              Math.round(p.memMiB + pull + randn() * p.memDrift),
+              1800,
+              78000
+            )
           }
         }
       }
@@ -1001,16 +1017,17 @@
           gpuLinesEl.appendChild(line)
         }
 
-        // Procs
+        // Procs (match nvidia-smi vibe; stable + ordered by GPU)
         procBodyEl.innerHTML = ''
         const procs = [...node.procs]
-        procs.sort((a, b) => b.mem - a.mem)
+        procs.sort((a, b) => a.gpu - b.gpu)
         for (const p of procs) {
           const tr = document.createElement('tr')
+          const mem = String(Math.round(p.memMiB)).padStart(5, ' ')
           tr.innerHTML = `
             <td>${p.pid}</td>
             <td>${p.gpu}</td>
-            <td>${p.mem.toFixed(1)}G</td>
+            <td>${mem}MiB</td>
             <td class="cmd" title="${p.cmd}">${p.cmd}</td>
           `.trim()
           procBodyEl.appendChild(tr)
