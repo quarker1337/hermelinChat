@@ -3,275 +3,419 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>HANS / STRUDEL</title>
+    <title>STRUDEL // HANS</title>
     <style>
       :root {
-        /* hermilinChat matrix palette */
-        --bg: #0c0f0e;
-        --surface: #111514;
-        --elev: #1a201f;
-        --border: #2a3533;
-        --muted: #5a6f6a;
-        --text: #c8d8d3;
-        --bright: #e8f0ec;
-
-        --accent: #4dffa1;
-        --warn: #f5e642;
-        --danger: #fb7185;
-        --cyan: #22d3ee;
-
-        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-
-        /* Strudel / CodeMirror theme vars (fallbacks seen on strudel.cc) */
-        --background: var(--bg);
-        --lineBackground: rgba(17, 21, 20, 0.70);
-        --foreground: var(--text);
-        --caret: var(--accent);
-        --selection: rgba(77, 255, 161, 0.22);
-        --selectionMatch: rgba(34, 211, 238, 0.18);
-        --lineHighlight: rgba(77, 255, 161, 0.08);
-        --gutterBackground: transparent;
-        --gutterForeground: rgba(90, 111, 106, 0.88);
-
-        --font-family: var(--mono);
-        --font-size: 13px;
-      }
-
-      * {
-        box-sizing: border-box;
+        --bg0: #000000;
+        --bg1: #030a05;
+        --panel: rgba(0, 0, 0, 0.38);
+        --green: #39ff14;
+        --green2: #00ff88;
+        --text: #caffc0;
+        --muted: #7cff7c;
+        --border: rgba(57, 255, 20, 0.25);
+        --border-strong: rgba(0, 255, 136, 0.55);
+        --danger: rgba(255, 59, 59, 0.75);
       }
 
       html,
       body {
         height: 100%;
+        margin: 0;
+        background: radial-gradient(circle at 20% 10%, rgba(0, 255, 136, 0.09), transparent 42%),
+          linear-gradient(180deg, var(--bg0), var(--bg1));
+        color: var(--text);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+          monospace;
       }
 
-      body {
-        margin: 0;
-        font-family: var(--mono);
-        color: var(--text);
-        background:
-          radial-gradient(1100px 700px at 20% 10%, rgba(77, 255, 161, 0.10), transparent 55%),
-          radial-gradient(900px 650px at 85% 20%, rgba(34, 211, 238, 0.07), transparent 52%),
-          radial-gradient(1100px 900px at 70% 85%, rgba(251, 113, 133, 0.06), transparent 60%),
-          var(--bg);
+      #app {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.32);
+        position: relative;
         overflow: hidden;
       }
 
-      .fx {
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-      }
-
-      .fx .scanlines {
+      header:before {
+        content: "";
         position: absolute;
         inset: 0;
-        background: repeating-linear-gradient(
-          to bottom,
-          rgba(255, 255, 255, 0.035) 0px,
-          rgba(255, 255, 255, 0.035) 1px,
-          rgba(0, 0, 0, 0) 2px,
-          rgba(0, 0, 0, 0) 6px
-        );
-        opacity: 0.18;
-        mix-blend-mode: overlay;
+        background: linear-gradient(90deg, transparent, rgba(57, 255, 20, 0.08), transparent);
+        animation: scan 4s linear infinite;
+        transform: translateX(-60%);
       }
 
-      .fx .vignette {
-        position: absolute;
-        inset: -30px;
-        background: radial-gradient(closest-side at 50% 50%, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.55));
-        opacity: 0.55;
+      @keyframes scan {
+        0% {
+          transform: translateX(-60%);
+        }
+        100% {
+          transform: translateX(60%);
+        }
       }
 
-      .wrap {
-        height: 100%;
-        padding: 14px;
-        display: grid;
-        grid-template-rows: auto 1fr;
-        gap: 12px;
+      h1 {
+        margin: 0;
+        font-size: 16px;
+        letter-spacing: 0.12em;
+        color: var(--green2);
         position: relative;
         z-index: 1;
       }
 
-      .top {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 11px 12px;
-        border: 1px solid rgba(77, 255, 161, 0.18);
-        background: linear-gradient(180deg, rgba(26, 32, 31, 0.75), rgba(17, 21, 20, 0.55));
-        border-radius: 10px;
-        min-width: 0;
-      }
-
-      .brand {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 0;
-      }
-
-      .title {
-        color: var(--accent);
+      header .sub {
+        margin-top: 6px;
         font-size: 12px;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        color: var(--muted);
+        position: relative;
+        z-index: 1;
       }
 
-      .subtitle {
-        font-size: 10px;
-        color: rgba(200, 216, 211, 0.62);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+      main {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1.4fr 0.6fr;
+        gap: 12px;
+        padding: 12px;
+        box-sizing: border-box;
       }
 
-      .meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        justify-content: flex-end;
-        align-items: center;
-        font-size: 10px;
-        color: rgba(200, 216, 211, 0.65);
-      }
-
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 7px;
-        padding: 5px 10px;
-        border-radius: 999px;
-        border: 1px solid rgba(77, 255, 161, 0.16);
-        background: rgba(12, 15, 14, 0.45);
-      }
-
-      .dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: var(--accent);
-        box-shadow: 0 0 18px rgba(77, 255, 161, 0.25);
-      }
-
-      .dot.warn {
-        background: var(--warn);
-        box-shadow: 0 0 18px rgba(245, 230, 66, 0.20);
+      @media (max-width: 900px) {
+        main {
+          grid-template-columns: 1fr;
+        }
       }
 
       .panel {
-        min-height: 0;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.07), 0 12px 40px rgba(0, 0, 0, 0.5);
         border-radius: 10px;
         overflow: hidden;
-        border: 1px solid rgba(77, 255, 161, 0.16);
-        background: rgba(17, 21, 20, 0.55);
-        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
-        display: grid;
-        grid-template-rows: auto 1fr;
+        position: relative;
       }
 
-      .panelHeader {
-        padding: 10px 12px;
-        background: rgba(26, 32, 31, 0.65);
-        border-bottom: 1px solid rgba(77, 255, 161, 0.10);
+      .panel:after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+          180deg,
+          rgba(57, 255, 20, 0.03),
+          rgba(57, 255, 20, 0.03) 1px,
+          transparent 1px,
+          transparent 4px
+        );
+        pointer-events: none;
+        opacity: 0.35;
+      }
+
+      .panel .inner {
+        position: relative;
+        z-index: 1;
+        padding: 12px;
+      }
+
+      .controls {
         display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
         align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        min-width: 0;
       }
 
-      .h {
-        font-size: 10px;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: rgba(232, 240, 236, 0.86);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .hRight {
-        font-size: 10px;
-        color: rgba(200, 216, 211, 0.62);
-        white-space: nowrap;
-      }
-
-      .panelBody {
-        min-height: 0;
-        padding: 10px 10px;
-        background: rgba(12, 15, 14, 0.25);
-      }
-
-      strudel-editor {
-        display: block;
-        width: 100%;
-        height: 100%;
-        min-height: 360px;
+      button,
+      select {
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 8px 10px;
         border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid rgba(77, 255, 161, 0.12);
-        background: var(--bg);
+        font-size: 12px;
       }
 
-      .hint {
-        color: rgba(200, 216, 211, 0.62);
+      button:hover,
+      select:hover {
+        border-color: var(--border-strong);
       }
 
-      code {
-        color: rgba(232, 240, 236, 0.90);
+      button.primary {
+        border-color: var(--border-strong);
+        box-shadow: 0 0 18px rgba(0, 255, 136, 0.12);
+      }
+
+      button.danger {
+        border-color: var(--danger);
+        color: #ffd4d4;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 360px;
+        resize: vertical;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        line-height: 1.35;
+        box-sizing: border-box;
+        margin-top: 10px;
+      }
+
+      .statusline {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .kbd {
+        border: 1px solid var(--border);
+        padding: 1px 6px;
+        border-radius: 6px;
+        color: var(--green2);
+      }
+
+      .log {
+        font-size: 12px;
+        white-space: pre-wrap;
+        background: rgba(0, 0, 0, 0.5);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        height: 220px;
+        overflow: auto;
+        margin-top: 8px;
+      }
+
+      .small {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.35;
+      }
+
+      .label {
+        margin-top: 10px;
+        color: var(--green2);
+        letter-spacing: 0.08em;
       }
 
       a {
-        color: rgba(34, 211, 238, 0.95);
+        color: var(--green2);
       }
     </style>
   </head>
+
   <body>
-    <div class="fx">
-      <div class="scanlines"></div>
-      <div class="vignette"></div>
+    <div id="app">
+      <header>
+        <h1>STRUDEL // HANS</h1>
+        <div class="sub">Minimal REPL that survives the Artifact iframe sandbox. Click ARM once, then Play.</div>
+      </header>
+
+      <main>
+        <div class="panel">
+          <div class="inner">
+            <div class="controls">
+              <button id="armBtn" class="primary">ARM AUDIO</button>
+              <button id="playBtn" class="primary" disabled>PLAY / EVAL</button>
+              <button id="stopBtn" class="danger" disabled>STOP / HUSH</button>
+              <select id="presetSel" title="Load a preset">
+                <option value="">Presets…</option>
+              </select>
+              <button id="loadBtn">LOAD</button>
+            </div>
+
+            <textarea id="code" spellcheck="false"></textarea>
+
+            <div class="statusline">
+              <div>Play: <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span></div>
+              <div>Stop: <span class="kbd">Esc</span></div>
+              <div id="state">State: idle</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="inner">
+            <div class="small">
+              Notes
+              <br />
+              - Audio contexts require a click. If silent: click ARM again, then PLAY.
+              <br />
+              - This uses the @strudel/web engine directly (no &lt;strudel-editor&gt; web component).
+              <br />
+              - Hotkeys: Ctrl+Enter = play, Esc = hush.
+            </div>
+
+            <div class="label">LOG</div>
+            <div id="log" class="log"></div>
+          </div>
+        </div>
+      </main>
     </div>
 
-    <div class="wrap">
-      <div class="top">
-        <div class="brand">
-          <div class="title">HANS / STRUDEL</div>
-          <div class="subtitle">live coding repl • embedded web component • matrix skin</div>
-        </div>
-        <div class="meta">
-          <div class="pill"><span class="dot warn"></span><span>audio requires click</span></div>
-          <div class="pill"><span>source</span> <code>@strudel/repl</code></div>
-        </div>
-      </div>
+    <script src="https://unpkg.com/@strudel/web@1.3.0/dist/index.js"></script>
+    <script>
+      (() => {
+        const armBtn = document.getElementById("armBtn");
+        const playBtn = document.getElementById("playBtn");
+        const stopBtn = document.getElementById("stopBtn");
+        const presetSel = document.getElementById("presetSel");
+        const loadBtn = document.getElementById("loadBtn");
+        const codeEl = document.getElementById("code");
+        const logEl = document.getElementById("log");
+        const stateEl = document.getElementById("state");
 
-      <div class="panel">
-        <div class="panelHeader">
-          <div class="h">Strudel editor</div>
-          <div class="hRight hint">Tip: click inside, then press Play</div>
-        </div>
-        <div class="panelBody">
-          <!-- pinned to a known-good version for video stability -->
-          <script src="https://unpkg.com/@strudel/repl@1.3.0"></script>
+        const log = (msg) => {
+          const ts = new Date().toISOString().split("T")[1].replace("Z", "");
+          const line = `[${ts}] ${msg}`;
+          logEl.textContent = (logEl.textContent ? logEl.textContent + "\n" : "") + line;
+          logEl.scrollTop = logEl.scrollHeight;
+        };
 
-          <strudel-editor>
-            <!--
-setcps(1)
+        const setState = (s) => {
+          stateEl.textContent = "State: " + s;
+        };
 
-stack(
-  note("<c2 a1 f1 e1>*2").s("sawtooth").lpf(600).gain(0.18),
-  note("<c4 a3 f3 e3>*4").s("square").lpf(sine.range(500,6000).slow(8)).room(0.8).gain(0.12)
-).slow(2)
-            -->
-          </strudel-editor>
-        </div>
-      </div>
-    </div>
+        const presets = {
+          "Kick / Snare": `setcps(1)\nstack(\n  s("bd").gain(1.0),\n  s("~ sd").gain(0.85)\n).out()`,
+          Hats: `setcps(1.5)\ns("hh*8").gain(0.6).out()`,
+          Melody: `setcps(1)\nn("<0 2 4 7>").scale("minor").sine().gain(0.15).out()`,
+          "Noise FX": `setcps(1)\nnoise().lpf(mouseX.range(200, 4000)).gain(0.12).out()`,
+        };
+
+        Object.keys(presets).forEach((name) => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          presetSel.appendChild(opt);
+        });
+
+        codeEl.value = presets["Kick / Snare"];
+
+        let replPromise = null;
+        async function ensureRepl() {
+          if (!window.strudel) {
+            throw new Error("Strudel did not load (global 'strudel' missing)");
+          }
+
+          if (!replPromise) {
+            setState("arming...");
+            log("initStrudel()...");
+
+            // IMPORTANT: call initStrudel only after a user gesture (ARM/PLAY)
+            replPromise = window.strudel.initStrudel({
+              // keep defaults; notably: sync=false (no SharedWorker)
+            });
+
+            const repl = await replPromise;
+            setState("armed");
+            log("Strudel ready.");
+
+            playBtn.disabled = false;
+            stopBtn.disabled = false;
+
+            return repl;
+          }
+
+          return replPromise;
+        }
+
+        async function doPlay() {
+          try {
+            const repl = await ensureRepl();
+            const code = codeEl.value;
+
+            setState("eval...");
+            log("evaluate()");
+
+            // signature (per @strudel/web): evaluate(code, setPattern=true, hushFirst=true)
+            await repl.evaluate(code, true, true);
+
+            // ensure scheduler is running
+            repl.start();
+
+            setState("playing");
+          } catch (err) {
+            console.error(err);
+            setState("error");
+            log("ERROR: " + (err?.message || String(err)));
+          }
+        }
+
+        function doStop() {
+          try {
+            if (window.strudel?.hush) {
+              window.strudel.hush();
+              setState("stopped");
+              log("hush()");
+            } else {
+              setState("idle");
+              log("hush() skipped (not armed yet)");
+            }
+          } catch (err) {
+            console.error(err);
+            setState("error");
+            log("ERROR: " + (err?.message || String(err)));
+          }
+        }
+
+        armBtn.addEventListener("click", async () => {
+          try {
+            await ensureRepl();
+          } catch (err) {
+            console.error(err);
+            setState("error");
+            log("ERROR: " + (err?.message || String(err)));
+          }
+        });
+
+        playBtn.addEventListener("click", doPlay);
+        stopBtn.addEventListener("click", doStop);
+
+        loadBtn.addEventListener("click", () => {
+          const name = presetSel.value;
+          if (!name) return;
+          codeEl.value = presets[name];
+          log(`loaded preset: ${name}`);
+        });
+
+        window.addEventListener("keydown", (e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+            e.preventDefault();
+            doPlay();
+          }
+
+          if (e.key === "Escape") {
+            e.preventDefault();
+            doStop();
+          }
+        });
+
+        // Hook Strudel's internal logger (it dispatches CustomEvent('strudel.log', {detail:{message,type,data}}))
+        document.addEventListener("strudel.log", (e) => {
+          if (!e?.detail?.message) return;
+          log(e.detail.message);
+        });
+
+        log("Loaded. Click ARM AUDIO to initialize.");
+      })();
+    </script>
   </body>
 </html>
