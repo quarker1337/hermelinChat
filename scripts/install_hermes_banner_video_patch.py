@@ -170,63 +170,100 @@ def _write_text_with_newline(path: Path, text: str, newline: str) -> None:
         handle.write(text)
 
 
+def _remove_patch_blocks(text: str, newline: str) -> tuple[str, int]:
+    """Remove all existing hermilinChat patch blocks from banner.py.
+
+    This makes the installer idempotent across versions: we can update the
+    patch implementation by re-running install.
+    """
+
+    removed = 0
+    while True:
+        start = text.find(PATCH_START)
+        if start == -1:
+            break
+
+        end = text.find(PATCH_END, start)
+        if end == -1:
+            raise RuntimeError("Found PATCH_START but not PATCH_END")
+
+        # Remove through the end of the PATCH_END line
+        line_end = text.find(newline, end)
+        if line_end == -1:
+            line_end = len(text)
+        else:
+            line_end += len(newline)
+
+        text = text[:start] + text[line_end:]
+        removed += 1
+
+    return text, removed
+
+
 def _patch_banner(path: Path) -> tuple[bool, str]:
     text, newline = _read_text_with_newline(path)
 
+    original_text = text
     if PATCH_START in text:
-        return False, f"{path.name} already patched"
+        text, removed = _remove_patch_blocks(text, newline)
+    else:
+        removed = 0
 
-    helper_block = (
+    config_block = (
         "{PATCH_START}\n"
-        "    def _hermilin_banner_flag(key: str) -> bool:\n"
-        "        v = os.getenv(key, \"\").strip().lower()\n"
-        "        return v in (\"1\", \"true\", \"yes\", \"on\")\n"
+        "    # hermilinChat VIDEO banner mode (edit these constants in-place)\n"
+        "    #\n"
+        "    # To restore the stock banner WITHOUT uninstalling this patch, set:\n"
+        "    #   HERMILIN_BANNER_VIDEO_MODE = False\n"
+        "    HERMILIN_BANNER_VIDEO_MODE = True\n"
         "\n"
-        "    _hermilin_fake_cfg = None\n"
-        "    _hermilin_fake_file = os.getenv(\"HERMES_BANNER_FAKE_FILE\", \"\").strip()\n"
-        "    if _hermilin_fake_file:\n"
-        "        try:\n"
-        "            _p = Path(_hermilin_fake_file).expanduser()\n"
-        "            if not _p.is_absolute():\n"
-        "                _home = Path(os.getenv(\"HERMES_HOME\", Path.home() / \".hermes\"))\n"
-        "                _p = _home / _p\n"
-        "            if _p.exists():\n"
-        "                _hermilin_fake_cfg = json.loads(_p.read_text(encoding=\"utf-8\"))\n"
-        "                if not isinstance(_hermilin_fake_cfg, dict):\n"
-        "                    _hermilin_fake_cfg = None\n"
-        "        except Exception:\n"
-        "            _hermilin_fake_cfg = None\n"
+        "    # If True, replaces the Tools/Skills panel with a fake list.\n"
+        "    HERMILIN_BANNER_FAKE_LIST = True\n"
+        "\n"
+        "    # Optional override file (edit to taste). If missing/invalid, we use the\n"
+        "    # built-in fallback fake list below.\n"
+        "    HERMILIN_BANNER_FAKE_FILE = Path.home() / '.hermes' / 'banner_fake.json'\n"
+        "\n"
+        "    _hermilin_fake_cfg = {\n"
+        "        'toolsets': {\n"
+        "            'core': ['delegate_task', 'execute_code', 'clarify'],\n"
+        "            'web': ['web_search', 'web_extract', 'browser_navigate', 'browser_snapshot'],\n"
+        "            'files': ['read_file', 'write_file', 'search_files', 'patch'],\n"
+        "            'terminal': ['terminal', 'process'],\n"
+        "            'memory': ['memory', 'session_search'],\n"
+        "        },\n"
+        "        'skills': {\n"
+        "            'creative': ['ascii-video', 'excalidraw'],\n"
+        "            'fullstack': ['systematic-debugging', 'test-driven-development'],\n"
+        "            'research': ['arxiv', 'ocr-and-documents'],\n"
+        "        },\n"
+        "        'summary': '128 tools · 512 skills · /help for commands',\n"
+        "    }\n"
+        "\n"
+        "    try:\n"
+        "        _p = HERMILIN_BANNER_FAKE_FILE\n"
+        "        if _p and _p.exists():\n"
+        "            _tmp = json.loads(_p.read_text(encoding='utf-8'))\n"
+        "            if isinstance(_tmp, dict):\n"
+        "                _hermilin_fake_cfg = _tmp\n"
+        "    except Exception:\n"
+        "        pass\n"
         "{PATCH_END}\n\n"
     ).replace("{PATCH_START}", PATCH_START).replace("{PATCH_END}", PATCH_END).replace("\n", newline)
 
     hide_block = (
         "{PATCH_START}\n"
-        "    if _hermilin_banner_flag(\"HERMES_BANNER_HIDE_MODEL\"):\n"
-        "        _line = f\"[{accent}]{model_short}[/]{ctx_str} [dim {dim}]·[/] [dim {dim}]Nous Research[/]\"\n"
-        "        try:\n"
-        "            left_lines.remove(_line)\n"
-        "        except ValueError:\n"
-        "            pass\n"
-        "    if _hermilin_banner_flag(\"HERMES_BANNER_HIDE_CWD\"):\n"
-        "        _line = f\"[dim {dim}]{cwd}[/]\"\n"
-        "        try:\n"
-        "            left_lines.remove(_line)\n"
-        "        except ValueError:\n"
-        "            pass\n"
-        "    if session_id and _hermilin_banner_flag(\"HERMES_BANNER_HIDE_SESSION\"):\n"
-        "        _line = f\"[dim {session_color}]Session: {session_id}[/]\"\n"
-        "        try:\n"
-        "            left_lines.remove(_line)\n"
-        "        except ValueError:\n"
-        "            pass\n"
+        "    # Hide the model/cwd/session lines under the caduceus for video takes.\n"
+        "    if HERMILIN_BANNER_VIDEO_MODE:\n"
+        "        left_lines = left_lines[:3]\n"
         "{PATCH_END}\n\n"
     ).replace("{PATCH_START}", PATCH_START).replace("{PATCH_END}", PATCH_END).replace("\n", newline)
 
     # NOTE: this patch is inserted *before* the real tools/skills list, and
-    # returns early if HERMES_BANNER_FAKE_FILE loads successfully.
+    # returns early when VIDEO mode + fake list is enabled.
     fake_block = (
         "{PATCH_START}\n"
-        "    if _hermilin_fake_cfg:\n"
+        "    if HERMILIN_BANNER_VIDEO_MODE and HERMILIN_BANNER_FAKE_LIST and _hermilin_fake_cfg:\n"
         "        right_lines = [f\"[bold {accent}]Available Tools[/]\"]\n\n"
         "        toolsets_dict = _hermilin_fake_cfg.get(\"toolsets\", {})\n"
         "        if not isinstance(toolsets_dict, dict):\n"
@@ -315,7 +352,7 @@ def _patch_banner(path: Path) -> tuple[bool, str]:
     anchor1 = '    session_color = _skin_color("session_border", "#8B8682")' + newline
     if anchor1 not in text:
         raise RuntimeError(f"Could not find insertion anchor in {path}: session_color")
-    text = text.replace(anchor1, anchor1 + helper_block, 1)
+    text = text.replace(anchor1, anchor1 + config_block, 1)
 
     anchor2 = '    left_content = "\\n".join(left_lines)' + newline
     if anchor2 not in text:
@@ -328,6 +365,10 @@ def _patch_banner(path: Path) -> tuple[bool, str]:
     text = text.replace(anchor3, fake_block + anchor3, 1)
 
     _write_text_with_newline(path, text, newline)
+    if text == original_text:
+        return False, f"{path.name} already patched"
+    if removed:
+        return True, f"Reinstalled patch in {path.name} (removed {removed} prior block(s))"
     return True, f"Patched {path.name}"
 
 
@@ -365,14 +406,14 @@ def main() -> int:
     print(("UPDATED" if changed else "OK") + f": {message}")
 
     print("\nNext steps (video machine)")
-    print("  1) Copy the sample JSON and edit to taste:")
+    print("  1) (Optional) Override the fake tools/skills list:")
     print(f"       cp '{SAMPLE_FAKE_JSON}' ~/.hermes/banner_fake.json")
-    print("  2) Set env vars (export or in ~/.hermes/.env):")
-    print("       HERMES_BANNER_HIDE_MODEL=1")
-    print("       HERMES_BANNER_HIDE_CWD=1")
-    print("       HERMES_BANNER_HIDE_SESSION=1")
-    print("       HERMES_BANNER_FAKE_FILE=~/.hermes/banner_fake.json")
-    print("  3) Restart Hermes/hermilinChat and record.")
+    print("       # edit ~/.hermes/banner_fake.json to taste")
+    print("  2) No env vars required. Just start Hermes and record.")
+    print("  3) To toggle back to the stock banner without uninstalling,")
+    print(f"     edit: {live_paths['banner']}")
+    print("     and set: HERMILIN_BANNER_VIDEO_MODE = False")
+    print("     (or run scripts/uninstall_hermes_banner_video_patch.py)")
 
     return 0
 
