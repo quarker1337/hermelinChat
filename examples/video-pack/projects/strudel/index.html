@@ -268,6 +268,8 @@
               <br />
               - Some GM sounds are temporarily mapped to built-in synths in compatibility mode.
               <br />
+              - If code uses <code>duckorbit(2)</code>, a silent orbit-2 keepalive is auto-injected.
+              <br />
               - Hotkeys: Ctrl+Enter = play, Esc = hush.
             </div>
 
@@ -461,6 +463,11 @@ $CHORDS: arrange(
               rewrites.push(`mapped ${from} -> ${to} (temporary built-in synth fallback)`);
             }
           });
+
+          if (/\.duckorbit\s*\(\s*2\s*\)/g.test(code) && !code.includes("$DUCKKEEP:")) {
+            code = `$DUCKKEEP: note("c2").s("sine").gain(0.000001).orbit(2).early(0.01)\n\n${code}`;
+            rewrites.push("injected silent keepalive on orbit 2 for duckorbit(2)");
+          }
 
           return { code, rewrites };
         }
