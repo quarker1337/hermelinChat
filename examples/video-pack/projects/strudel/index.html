@@ -258,7 +258,9 @@
               <br />
               - Audio contexts require a click. If silent: click ARM again, then PLAY.
               <br />
-              - This uses the @strudel/web engine directly (no &lt;strudel-editor&gt; web component).
+              - Paste normal Strudel patterns directly. You usually do NOT need <code>.out()</code> here.
+              <br />
+              - Tempo is Strudel-style: use <code>setcpm(bpm/4)</code> for a typical 4-beat groove.
               <br />
               - Hotkeys: Ctrl+Enter = play, Esc = hush.
             </div>
@@ -294,10 +296,10 @@
         };
 
         const presets = {
-          "Kick / Snare": `setcps(1)\nstack(\n  s("bd").gain(1.0),\n  s("~ sd").gain(0.85)\n).out()`,
-          Hats: `setcps(1.5)\ns("hh*8").gain(0.6).out()`,
-          Melody: `setcps(1)\nn("<0 2 4 7>").scale("minor").sine().gain(0.15).out()`,
-          "Noise FX": `setcps(1)\nnoise().lpf(mouseX.range(200, 4000)).gain(0.12).out()`,
+          "Kick / Snare": `setcpm(120/4)\nstack(\n  s("bd ~ ~ ~"),\n  s("~ ~ sd ~").gain(0.85)\n)`,
+          Hats: `setcpm(120/4)\ns("hh*8").gain(0.6)`,
+          Melody: `setcpm(90/4)\nnote("c4 e4 g4 b4").s("sawtooth").gain(0.2)`,
+          "Groove + Lead": `setcpm(110/4)\nstack(\n  s("bd sd bd rim, hh*8"),\n  note("<c4 e4 g4 b4>").s("triangle").gain(0.18)\n)`,
         };
 
         Object.keys(presets).forEach((name) => {
@@ -337,13 +339,39 @@
           return replPromise;
         }
 
+        function normalizeCode(rawCode) {
+          let code = rawCode;
+          const rewrites = [];
+
+          if (/\.out\s*\(\s*\)/g.test(code)) {
+            code = code.replace(/\.out\s*\(\s*\)/g, "");
+            rewrites.push("removed .out() (not needed in this artifact)");
+          }
+
+          if (/\btempo\s*\(/g.test(code)) {
+            code = code.replace(/\btempo\s*\(\s*([^,)]+)\s*(?:,\s*([^)]*?)\s*)?\)/g, (_m, bpm, beatsPerCycle) => {
+              const bpc = beatsPerCycle && beatsPerCycle.trim() ? beatsPerCycle : "4";
+              return `setcpm((${bpm})/(${bpc}))`;
+            });
+            rewrites.push("tempo(bpm[, beatsPerCycle]) -> setcpm(bpm / beatsPerCycle)");
+          }
+
+          return { code, rewrites };
+        }
+
         async function doPlay() {
           try {
             const repl = await ensureRepl();
-            const code = codeEl.value;
+            const normalized = normalizeCode(codeEl.value);
+            const code = normalized.code;
+
+            if (normalized.rewrites.length) {
+              codeEl.value = code;
+            }
 
             setState("eval...");
             log("evaluate()");
+            normalized.rewrites.forEach((msg) => log("compat: " + msg));
 
             // signature (per @strudel/web): evaluate(code, setPattern=true, hushFirst=true)
             await repl.evaluate(code, true, true);
