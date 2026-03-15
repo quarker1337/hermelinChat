@@ -12,6 +12,10 @@ from pathlib import Path
 PATCH_START = "    # hermilinChat banner video patch (installed by hermilinChat patch)"
 PATCH_END = "    # end hermilinChat banner video patch"
 
+# When unpatching Hermes' project-root cli.py we need a non-indented marker.
+CLI_PATCH_START = "# hermilinChat banner video patch (installed by hermilinChat patch)"
+CLI_PATCH_END = "# end hermilinChat banner video patch"
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -138,6 +142,16 @@ print(json.dumps({
     for key, path in paths.items():
         if not path.exists():
             raise FileNotFoundError(f"Resolved Hermes path for {key} does not exist: {path}")
+
+    # Hermes v0.2.0 renders the banner through project-root cli.py. Derive it
+    # from hermes_cli/banner.py without requiring it to exist for every layout.
+    try:
+        banner_path = paths.get("banner")
+        if banner_path:
+            paths["cli"] = banner_path.resolve().parent.parent / "cli.py"
+    except Exception:
+        pass
+
     return paths
 
 
@@ -152,17 +166,22 @@ def _write_text_with_newline(path: Path, text: str, newline: str) -> None:
         handle.write(text)
 
 
-def _remove_patch_blocks(text: str, newline: str) -> tuple[str, int]:
+def _remove_patch_blocks(
+    text: str,
+    newline: str,
+    start_marker: str = PATCH_START,
+    end_marker: str = PATCH_END,
+) -> tuple[str, int]:
     removed = 0
 
     while True:
-        start = text.find(PATCH_START)
+        start = text.find(start_marker)
         if start == -1:
             break
 
-        end = text.find(PATCH_END, start)
+        end = text.find(end_marker, start)
         if end == -1:
-            raise RuntimeError("Found PATCH_START but not PATCH_END")
+            raise RuntimeError(f"Found {start_marker!r} but not {end_marker!r}")
 
         # Remove through the end of the PATCH_END line
         line_end = text.find(newline, end)
@@ -191,6 +210,24 @@ def _unpatch_banner(path: Path) -> tuple[bool, str]:
     return True, f"Removed {removed} patch block(s) from {path.name}"
 
 
+def _unpatch_cli(path: Path) -> tuple[bool, str]:
+    text, newline = _read_text_with_newline(path)
+
+    removed_total = 0
+    if CLI_PATCH_START in text:
+        text, r = _remove_patch_blocks(text, newline, CLI_PATCH_START, CLI_PATCH_END)
+        removed_total += r
+    if PATCH_START in text:
+        text, r = _remove_patch_blocks(text, newline, PATCH_START, PATCH_END)
+        removed_total += r
+
+    if removed_total == 0:
+        return False, f"{path.name} not patched"
+
+    _write_text_with_newline(path, text, newline)
+    return True, f"Removed {removed_total} patch block(s) from {path.name}"
+
+
 def main() -> int:
     args = parse_args()
 
@@ -206,19 +243,28 @@ def main() -> int:
     print(f"  hermes exe:    {hermes_exe}")
     print(f"  hermes python: {hermes_python}")
     print(f"  banner:        {live_paths['banner']}")
+    if live_paths.get("cli"):
+        print(f"  cli:           {live_paths['cli']}")
 
     if args.dry_run:
         print("\nDry run only. No files changed.")
         return 0
 
     try:
-        changed, message = _unpatch_banner(live_paths["banner"])
+        changed_banner, message_banner = _unpatch_banner(live_paths["banner"])
+        changed_cli = False
+        message_cli = "cli.py not found (skipped)"
+        cli_path = live_paths.get("cli")
+        if cli_path and cli_path.exists():
+            changed_cli, message_cli = _unpatch_cli(cli_path)
     except Exception as exc:
         print(f"ERROR: failed to unpatch Hermes installation: {exc}", file=sys.stderr)
         return 1
 
     print()
-    print(("UPDATED" if changed else "OK") + f": {message}")
+    print(("UPDATED" if changed_banner else "OK") + f": {message_banner}")
+    if live_paths.get("cli"):
+        print(("UPDATED" if changed_cli else "OK") + f": {message_cli}")
     return 0
 
 

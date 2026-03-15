@@ -16,6 +16,11 @@ SAMPLE_FAKE_JSON = ASSET_DIR / "banner_fake.json"
 PATCH_START = "    # hermilinChat banner video patch (installed by hermilinChat patch)"
 PATCH_END = "    # end hermilinChat banner video patch"
 
+# When patching Hermes' project-root cli.py we need a non-indented marker (an
+# indented line at module scope would be a syntax error).
+CLI_PATCH_START = "# hermilinChat banner video patch (installed by hermilinChat patch)"
+CLI_PATCH_END = "# end hermilinChat banner video patch"
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -156,6 +161,18 @@ print(json.dumps({
     for key, path in paths.items():
         if not path.exists():
             raise FileNotFoundError(f"Resolved Hermes path for {key} does not exist: {path}")
+
+    # Hermes v0.2.0 renders the banner through project-root cli.py, which
+    # contains a local build_welcome_banner() that shadows hermes_cli.banner.
+    # Derive cli.py from hermes_cli/banner.py without requiring it to exist for
+    # older/newer install layouts.
+    try:
+        banner_path = paths.get("banner")
+        if banner_path:
+            paths["cli"] = banner_path.resolve().parent.parent / "cli.py"
+    except Exception:
+        pass
+
     return paths
 
 
@@ -170,8 +187,13 @@ def _write_text_with_newline(path: Path, text: str, newline: str) -> None:
         handle.write(text)
 
 
-def _remove_patch_blocks(text: str, newline: str) -> tuple[str, int]:
-    """Remove all existing hermilinChat patch blocks from banner.py.
+def _remove_patch_blocks(
+    text: str,
+    newline: str,
+    start_marker: str = PATCH_START,
+    end_marker: str = PATCH_END,
+) -> tuple[str, int]:
+    """Remove all existing hermilinChat patch blocks.
 
     This makes the installer idempotent across versions: we can update the
     patch implementation by re-running install.
@@ -179,13 +201,13 @@ def _remove_patch_blocks(text: str, newline: str) -> tuple[str, int]:
 
     removed = 0
     while True:
-        start = text.find(PATCH_START)
+        start = text.find(start_marker)
         if start == -1:
             break
 
-        end = text.find(PATCH_END, start)
+        end = text.find(end_marker, start)
         if end == -1:
-            raise RuntimeError("Found PATCH_START but not PATCH_END")
+            raise RuntimeError(f"Found {start_marker!r} but not {end_marker!r}")
 
         # Remove through the end of the PATCH_END line
         line_end = text.find(newline, end)
@@ -372,6 +394,73 @@ def _patch_banner(path: Path) -> tuple[bool, str]:
     return True, f"Patched {path.name}"
 
 
+def _patch_cli(path: Path) -> tuple[bool, str]:
+    """Patch Hermes' project-root cli.py so the banner patch is not ignored.
+
+    Hermes v0.2.0 defines a local build_welcome_banner() in cli.py which shadows
+    hermes_cli.banner.build_welcome_banner. We override it at module scope to
+    delegate back to hermes_cli.banner (which this installer patches).
+    """
+
+    text, newline = _read_text_with_newline(path)
+    original_text = text
+
+    removed = 0
+    if CLI_PATCH_START in text:
+        text, r = _remove_patch_blocks(text, newline, CLI_PATCH_START, CLI_PATCH_END)
+        removed += r
+    if PATCH_START in text:
+        text, r = _remove_patch_blocks(text, newline, PATCH_START, PATCH_END)
+        removed += r
+
+    # Ensure we end with exactly one newline before appending.
+    while text.endswith(newline + newline):
+        text = text[: -len(newline)]
+    if not text.endswith(newline):
+        text += newline
+
+    patch_block = (
+        f"{CLI_PATCH_START}\n"
+        "try:\n"
+        "    # Delegate to hermes_cli.banner (which hermilinChat patches for video mode).\n"
+        "    from hermes_cli import banner as _hermilin_banner\n\n"
+        "    def build_welcome_banner(\n"
+        "        console,\n"
+        "        model,\n"
+        "        cwd,\n"
+        "        tools=None,\n"
+        "        enabled_toolsets=None,\n"
+        "        session_id=None,\n"
+        "        context_length=None,\n"
+        "    ):\n"
+        "        _gtt = globals().get('get_toolset_for_tool', None)\n"
+        "        return _hermilin_banner.build_welcome_banner(\n"
+        "            console=console,\n"
+        "            model=model,\n"
+        "            cwd=cwd,\n"
+        "            tools=tools,\n"
+        "            enabled_toolsets=enabled_toolsets,\n"
+        "            session_id=session_id,\n"
+        "            get_toolset_for_tool=_gtt,\n"
+        "            context_length=context_length,\n"
+        "        )\n"
+        "except Exception:\n"
+        "    # Never break Hermes startup over a banner patch.\n"
+        "    pass\n"
+        f"{CLI_PATCH_END}\n"
+    ).replace("\n", newline)
+
+    text = text + patch_block
+
+    if text == original_text:
+        return False, f"{path.name} already patched"
+
+    _write_text_with_newline(path, text, newline)
+    if removed:
+        return True, f"Reinstalled patch in {path.name} (removed {removed} prior block(s))"
+    return True, f"Patched {path.name}"
+
+
 def main() -> int:
     args = parse_args()
 
@@ -387,6 +476,8 @@ def main() -> int:
     print(f"  hermes exe:    {hermes_exe}")
     print(f"  hermes python: {hermes_python}")
     print(f"  banner:        {live_paths['banner']}")
+    if live_paths.get("cli"):
+        print(f"  cli:           {live_paths['cli']}")
     print(f"  sample fake:   {SAMPLE_FAKE_JSON}")
 
     if not SAMPLE_FAKE_JSON.exists():
@@ -397,13 +488,20 @@ def main() -> int:
         return 0
 
     try:
-        changed, message = _patch_banner(live_paths["banner"])
+        changed_banner, message_banner = _patch_banner(live_paths["banner"])
+        changed_cli = False
+        message_cli = "cli.py not found (skipped)"
+        cli_path = live_paths.get("cli")
+        if cli_path and cli_path.exists():
+            changed_cli, message_cli = _patch_cli(cli_path)
     except Exception as exc:
         print(f"ERROR: failed to patch Hermes installation: {exc}", file=sys.stderr)
         return 1
 
     print()
-    print(("UPDATED" if changed else "OK") + f": {message}")
+    print(("UPDATED" if changed_banner else "OK") + f": {message_banner}")
+    if live_paths.get("cli"):
+        print(("UPDATED" if changed_cli else "OK") + f": {message_cli}")
 
     print("\nNext steps (video machine)")
     print("  1) (Optional) Override the fake tools/skills list:")
