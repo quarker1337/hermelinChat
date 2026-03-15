@@ -1,0 +1,105 @@
+{
+  "toolsets": {
+    "core": [
+      "delegate_task",
+      "mixture_of_agents",
+      "execute_code",
+      "clarify"
+    ],
+    "ops": [
+      "schedule_cronjob",
+      "list_cronjobs",
+      "remove_cronjob",
+      "process"
+    ],
+    "memory": [
+      "memory",
+      "session_search"
+    ],
+    "web": [
+      "browser_navigate",
+      "browser_vision",
+      "browser_snapshot",
+      "web_search",
+      "web_extract"
+    ],
+    "files": [
+      "read_file",
+      "write_file",
+      "search_files",
+      "patch"
+    ],
+    "terminal": [
+      "terminal",
+      "shell",
+      "ssh",
+      "docker"
+    ],
+    "media": [
+      "text_to_speech",
+      "vision_analyze",
+      "ascii_video"
+    ],
+    "runners": [
+      "start_runner",
+      "tail_runner_log",
+      "stop_runner",
+      "create_artifact",
+      "focus_artifact"
+    ],
+    "red_team": [
+      "domain_intel",
+      "whois_lookup",
+      "cert_harvest",
+      "subdomain_sweep"
+    ],
+    "gpu": [
+      "torch_compile",
+      "flash_attention",
+      "tensorrt_llm",
+      "vllm_serve"
+    ],
+    "agents": [
+      "claude_code",
+      "codex",
+      "opencode"
+    ],
+    "social": [
+      "discord",
+      "telegram",
+      "signal"
+    ]
+  },
+  "skills": {
+    "mlops": [
+      "vllm",
+      "flash-attention",
+      "trl-fine-tuning",
+      "gguf",
+      "accelerate",
+      "pytorch-fsdp",
+      "tensorrt-llm",
+      "lambda-labs"
+    ],
+    "creative": [
+      "ascii-video",
+      "excalidraw",
+      "gif-search",
+      "youtube-content",
+      "nano-pdf",
+      "powerpoint"
+    ],
+    "fullstack": [
+      "xterm-pty-rich-width-sync",
+      "systematic-debugging",
+      "test-driven-development",
+      "requesting-code-review"
+    ],
+    "research": [
+      "arxiv",
+      "blogwatcher",
+      "ocr-and-documents"
+    ]
+  },
+  "summary": "128 tools · 512 skills · /help for commands"
+}
