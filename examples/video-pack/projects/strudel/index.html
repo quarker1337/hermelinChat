@@ -160,19 +160,39 @@
         cursor: not-allowed;
       }
 
-      textarea {
+      #code {
         width: 100%;
         min-height: 360px;
-        resize: vertical;
+        height: 360px;
         background: rgba(0, 0, 0, 0.55);
         border: 1px solid var(--border);
-        color: var(--text);
-        padding: 12px;
         border-radius: 10px;
-        font-size: 12px;
-        line-height: 1.35;
         box-sizing: border-box;
         margin-top: 10px;
+        overflow: hidden;
+      }
+
+      #code .cm-editor {
+        height: 100%;
+        background: transparent;
+      }
+
+      #code .cm-scroller {
+        font-family: inherit;
+      }
+
+      #code .cm-content {
+        padding: 12px 0 32px;
+      }
+
+      #code .cm-line {
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      #code .cm-gutters {
+        background: rgba(0, 0, 0, 0.2);
+        border-right: 1px solid var(--border);
       }
 
       .statusline {
@@ -241,7 +261,7 @@
               <button id="loadBtn">LOAD</button>
             </div>
 
-            <textarea id="code" spellcheck="false"></textarea>
+            <div id="code"></div>
 
             <div class="statusline">
               <div>Play: <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span></div>
@@ -273,18 +293,19 @@
     </div>
 
     <script type="module">
-      import * as strudelApi from "https://unpkg.com/@strudel/web@1.3.0?module";
+      import { StrudelMirror } from "https://unpkg.com/@strudel/codemirror@1.3.0?module";
+      import { getDrawContext } from "https://unpkg.com/@strudel/draw@1.2.6?module";
+      import { webaudioOutput, getAudioContextCurrentTime } from "https://unpkg.com/@strudel/webaudio@1.3.0?module";
+      import { transpiler } from "https://unpkg.com/@strudel/transpiler@1.2.6?module";
       import { prebake } from "https://unpkg.com/@strudel/repl@1.3.0?module";
 
       (() => {
-        window.strudel = strudelApi;
-
         const armBtn = document.getElementById("armBtn");
         const playBtn = document.getElementById("playBtn");
         const stopBtn = document.getElementById("stopBtn");
         const presetSel = document.getElementById("presetSel");
         const loadBtn = document.getElementById("loadBtn");
-        const codeEl = document.getElementById("code");
+        const codeRoot = document.getElementById("code");
         const logEl = document.getElementById("log");
         const stateEl = document.getElementById("state");
 
@@ -300,10 +321,20 @@
         };
 
         const presets = {
-          "Kick / Snare": `setcpm(120/4)\nstack(\n  s("bd ~ ~ ~"),\n  s("~ ~ sd ~").gain(0.85)\n)`,
-          Hats: `setcpm(120/4)\ns("hh*8").gain(0.6)`,
-          Melody: `setcpm(90/4)\nnote("c4 e4 g4 b4").s("sawtooth").gain(0.2)`,
-          "Groove + Lead": `setcpm(110/4)\nstack(\n  s("bd sd bd rim, hh*8"),\n  note("<c4 e4 g4 b4>").s("triangle").gain(0.18)\n)`,
+          "Kick / Snare": `setcpm(120/4)
+stack(
+  s("bd ~ ~ ~"),
+  s("~ ~ sd ~").gain(0.85)
+)`,
+          Hats: `setcpm(120/4)
+s("hh*8").gain(0.6)`,
+          Melody: `setcpm(90/4)
+note("c4 e4 g4 b4").s("sawtooth").gain(0.2)`,
+          "Groove + Lead": `setcpm(110/4)
+stack(
+  s("bd sd bd rim, hh*8"),
+  note("<c4 e4 g4 b4>").s("triangle").gain(0.18)
+)`,
           "Video Song": `setcpm(90/4)
 
 // Base patterns
@@ -391,49 +422,72 @@ $CHORDS: arrange(
           presetSel.appendChild(opt);
         });
 
-        codeEl.value = presets["Kick / Snare"];
+        let mirror = null;
+        let pendingCode = presets["Kick / Snare"];
+        let initPromise = null;
 
-        let replPromise = null;
-        async function ensureRepl() {
-          if (!strudelApi?.initStrudel) {
-            throw new Error("Strudel module did not load (initStrudel missing)");
+        async function ensureMirror() {
+          if (mirror) {
+            return mirror;
           }
 
-          if (!replPromise) {
+          if (!initPromise) {
             setState("arming...");
-            log("initStrudel()...");
+            log("init StrudelMirror()...");
 
-            replPromise = strudelApi.initStrudel({
+            mirror = new StrudelMirror({
+              root: codeRoot,
+              initialCode: pendingCode,
+              defaultOutput: webaudioOutput,
+              getTime: getAudioContextCurrentTime,
+              transpiler,
+              drawContext: getDrawContext(),
+              drawTime: [-2, 2],
+              bgFill: false,
+              solo: false,
               prebake: async () => {
                 log("loading stock strudel runtime...");
                 await prebake();
                 log("stock strudel runtime ready.");
               },
+              onUpdateState: (state) => {
+                if (state.pending) {
+                  setState("eval...");
+                } else if (state.error) {
+                  setState("error");
+                } else if (state.started) {
+                  setState("playing");
+                }
+              },
+              onToggle: (started) => {
+                setState(started ? "playing" : "stopped");
+              },
             });
 
-            const repl = await replPromise;
-            setState("armed");
-            log("Strudel ready.");
+            window.strudelMirror = mirror;
 
-            playBtn.disabled = false;
-            stopBtn.disabled = false;
-
-            return repl;
+            initPromise = mirror.prebaked.then(() => {
+              setState("armed");
+              log("StrudelMirror ready.");
+              playBtn.disabled = false;
+              stopBtn.disabled = false;
+              return mirror;
+            }).catch((err) => {
+              mirror?.clear?.();
+              mirror = null;
+              initPromise = null;
+              throw err;
+            });
           }
 
-          return replPromise;
+          return initPromise;
         }
 
         async function doPlay() {
           try {
-            const repl = await ensureRepl();
-            const code = codeEl.value;
-
-            setState("eval...");
+            const currentMirror = await ensureMirror();
             log("evaluate()");
-
-            await repl.evaluate(code, true, true);
-            setState("playing");
+            await currentMirror.evaluate();
           } catch (err) {
             console.error(err);
             setState("error");
@@ -443,13 +497,13 @@ $CHORDS: arrange(
 
         function doStop() {
           try {
-            if (strudelApi?.hush) {
-              strudelApi.hush();
+            if (mirror) {
+              mirror.stop();
               setState("stopped");
-              log("hush()");
+              log("stop()");
             } else {
               setState("idle");
-              log("hush() skipped (not armed yet)");
+              log("stop() skipped (not armed yet)");
             }
           } catch (err) {
             console.error(err);
@@ -460,7 +514,7 @@ $CHORDS: arrange(
 
         armBtn.addEventListener("click", async () => {
           try {
-            await ensureRepl();
+            await ensureMirror();
           } catch (err) {
             console.error(err);
             setState("error");
@@ -474,7 +528,10 @@ $CHORDS: arrange(
         loadBtn.addEventListener("click", () => {
           const name = presetSel.value;
           if (!name) return;
-          codeEl.value = presets[name];
+          pendingCode = presets[name];
+          if (mirror) {
+            mirror.setCode(pendingCode);
+          }
           log(`loaded preset: ${name}`);
         });
 
