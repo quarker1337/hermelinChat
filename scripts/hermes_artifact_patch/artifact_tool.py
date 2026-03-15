@@ -16,6 +16,7 @@ Provides tools:
 - artifact_bridge_read_state
 - strudel_get_code
 - strudel_set_code
+- strudel_load_file
 - strudel_append_code
 - strudel_replace_range
 - strudel_get_cursor
@@ -325,6 +326,13 @@ def artifact_bridge_command(
         if resp is None:
             out["status"] = "timeout"
             out["timeout_seconds"] = float(timeout_seconds or 0)
+            last_state = _read_json(_bridge_state_path(artifact_id, bridge_channel))
+            if isinstance(last_state, dict):
+                out["state"] = last_state
+                if last_state.get("ready") is not True:
+                    out["hint"] = "Bridge has not reported ready yet. Focus/open the artifact tab and ensure the bridge-enabled video pack is installed."
+            else:
+                out["hint"] = "No bridge response received. Focus/open the artifact tab and ensure the bridge-enabled video pack is installed."
         else:
             out["status"] = "ok"
             out["response"] = resp
@@ -350,41 +358,147 @@ def artifact_bridge_read_state(tab_id: str, channel: str = "strudel") -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
-def strudel_get_code(tab_id: str, timeout_seconds: float = 10.0) -> str:
-    return artifact_bridge_command(tab_id, "strudel", "get-code", "{}", expect_response=True, timeout_seconds=timeout_seconds)
+def _coerce_timeout_seconds(value: Any, default: float = 20.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = float(default)
+    return max(0.1, min(120.0, parsed))
 
 
-def strudel_set_code(tab_id: str, code: str) -> str:
-    return artifact_bridge_command(tab_id, "strudel", "set-code", json.dumps({"code": str(code)}, ensure_ascii=False))
+def _resolve_local_text_path(path: str) -> Path:
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("path is required")
+    file_path = Path(os.path.expanduser(raw))
+    if not file_path.is_absolute():
+        file_path = (Path.cwd() / file_path).absolute()
+    return file_path
 
 
-def strudel_append_code(tab_id: str, text: str) -> str:
-    return artifact_bridge_command(tab_id, "strudel", "append-code", json.dumps({"text": str(text)}, ensure_ascii=False))
+def strudel_get_code(tab_id: str, timeout_seconds: float = 20.0) -> str:
+    return artifact_bridge_command(
+        tab_id,
+        "strudel",
+        "get-code",
+        "{}",
+        expect_response=True,
+        timeout_seconds=_coerce_timeout_seconds(timeout_seconds, 20.0),
+    )
 
 
-def strudel_replace_range(tab_id: str, start: int, end: int, text: str) -> str:
+def strudel_set_code(tab_id: str, code: str, timeout_seconds: float = 20.0) -> str:
+    return artifact_bridge_command(
+        tab_id,
+        "strudel",
+        "set-code",
+        json.dumps({"code": str(code)}, ensure_ascii=False),
+        expect_response=True,
+        timeout_seconds=_coerce_timeout_seconds(timeout_seconds, 20.0),
+    )
+
+
+def strudel_load_file(tab_id: str, path: str, timeout_seconds: float = 30.0) -> str:
+    try:
+        file_path = _resolve_local_text_path(path)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    if not file_path.exists():
+        return json.dumps({"error": f"file not found: {file_path}"}, ensure_ascii=False)
+    if not file_path.is_file():
+        return json.dumps({"error": f"not a file: {file_path}"}, ensure_ascii=False)
+
+    try:
+        code = file_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return json.dumps({"error": f"file is not valid UTF-8 text: {file_path}"}, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"error": f"failed to read file: {exc}"}, ensure_ascii=False)
+
+    line_count = 0 if code == "" else code.count("\n") + 1
+    result_raw = strudel_set_code(tab_id=tab_id, code=code, timeout_seconds=timeout_seconds)
+    try:
+        result_obj = json.loads(result_raw)
+    except Exception:
+        result_obj = {"raw": result_raw}
+
+    return json.dumps(
+        {
+            "tab_id": _sanitize_artifact_id(tab_id),
+            "path": str(file_path),
+            "chars": len(code),
+            "line_count": line_count,
+            "result": result_obj,
+        },
+        ensure_ascii=False,
+    )
+
+
+def strudel_append_code(tab_id: str, text: str, timeout_seconds: float = 20.0) -> str:
+    return artifact_bridge_command(
+        tab_id,
+        "strudel",
+        "append-code",
+        json.dumps({"text": str(text)}, ensure_ascii=False),
+        expect_response=True,
+        timeout_seconds=_coerce_timeout_seconds(timeout_seconds, 20.0),
+    )
+
+
+def strudel_replace_range(tab_id: str, start: int, end: int, text: str, timeout_seconds: float = 20.0) -> str:
     return artifact_bridge_command(
         tab_id,
         "strudel",
         "replace-range",
         json.dumps({"from": int(start), "to": int(end), "text": str(text)}, ensure_ascii=False),
+        expect_response=True,
+        timeout_seconds=_coerce_timeout_seconds(timeout_seconds, 20.0),
     )
 
 
-def strudel_get_cursor(tab_id: str, timeout_seconds: float = 10.0) -> str:
-    return artifact_bridge_command(tab_id, "strudel", "get-cursor", "{}", expect_response=True, timeout_seconds=timeout_seconds)
+def strudel_get_cursor(tab_id: str, timeout_seconds: float = 20.0) -> str:
+    return artifact_bridge_command(
+        tab_id,
+        "strudel",
+        "get-cursor",
+        "{}",
+        expect_response=True,
+        timeout_seconds=_coerce_timeout_seconds(timeout_seconds, 20.0),
+    )
 
 
-def strudel_set_cursor(tab_id: str, position: int) -> str:
-    return artifact_bridge_command(tab_id, "strudel", "set-cursor", json.dumps({"position": int(position)}, ensure_ascii=False))
+def strudel_set_cursor(tab_id: str, position: int, timeout_seconds: float = 10.0) -> str:
+    return artifact_bridge_command(
+        tab_id,
+        "strudel",
+        "set-cursor",
+        json.dumps({"position": int(position)}, ensure_ascii=False),
+        expect_response=True,
+        timeout_seconds=_coerce_timeout_seconds(timeout_seconds, 10.0),
+    )
 
 
-def strudel_play(tab_id: str) -> str:
-    return artifact_bridge_command(tab_id, "strudel", "play", "{}")
+def strudel_play(tab_id: str, timeout_seconds: float = 10.0) -> str:
+    return artifact_bridge_command(
+        tab_id,
+        "strudel",
+        "play",
+        "{}",
+        expect_response=True,
+        timeout_seconds=_coerce_timeout_seconds(timeout_seconds, 10.0),
+    )
 
 
-def strudel_stop(tab_id: str) -> str:
-    return artifact_bridge_command(tab_id, "strudel", "stop", "{}")
+def strudel_stop(tab_id: str, timeout_seconds: float = 10.0) -> str:
+    return artifact_bridge_command(
+        tab_id,
+        "strudel",
+        "stop",
+        "{}",
+        expect_response=True,
+        timeout_seconds=_coerce_timeout_seconds(timeout_seconds, 10.0),
+    )
 
 
 def create_artifact(
@@ -1417,7 +1531,7 @@ STOP_RUNNER_SCHEMA = {
 
 ARTIFACT_BRIDGE_COMMAND_SCHEMA = {
     "name": "artifact_bridge_command",
-    "description": "Queue a collaboration command for an artifact iframe bridge and optionally wait for a response.",
+    "description": "Low-level escape hatch for artifact iframe bridge commands. Prefer the typed strudel_* tools unless you need a custom command.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -1449,7 +1563,7 @@ ARTIFACT_BRIDGE_READ_STATE_SCHEMA = {
 
 STRUDEL_GET_CODE_SCHEMA = {
     "name": "strudel_get_code",
-    "description": "Ask the Strudel artifact bridge for the current editor buffer.",
+    "description": "Read the live Strudel editor buffer. Use after the artifact is focused/open; do not run concurrently with focus_artifact on the same tab.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -1463,21 +1577,36 @@ STRUDEL_GET_CODE_SCHEMA = {
 
 STRUDEL_SET_CODE_SCHEMA = {
     "name": "strudel_set_code",
-    "description": "Replace the entire Strudel editor buffer.",
+    "description": "Replace the entire Strudel editor buffer with code already in context. For local files or large songs, prefer strudel_load_file.",
     "parameters": {
         "type": "object",
         "properties": {
             "tab_id": {"type": "string", "description": "Artifact tab ID."},
-            "code": {"type": "string", "description": "Full code to place in the editor."},
+            "code": {"type": "string", "description": "Full code to place in the editor. Prefer strudel_load_file for local files or large songs."},
         },
         "required": ["tab_id", "code"],
     },
 }
 
 
+STRUDEL_LOAD_FILE_SCHEMA = {
+    "name": "strudel_load_file",
+    "description": "Load a local UTF-8 text file into the Strudel editor. Prefer this over read_file + strudel_set_code for .strudel songs and other large sources.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+            "path": {"type": "string", "description": "Path to a local UTF-8 text file to load into the editor."},
+            "timeout_seconds": {"type": "number", "default": 30.0, "minimum": 0.1, "maximum": 120.0},
+        },
+        "required": ["tab_id", "path"],
+    },
+}
+
+
 STRUDEL_APPEND_CODE_SCHEMA = {
     "name": "strudel_append_code",
-    "description": "Append text at the current cursor location in the Strudel editor.",
+    "description": "Append text at the current cursor location in the Strudel editor. Use for small edits; prefer strudel_load_file or strudel_set_code for full-song loads.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -1491,7 +1620,7 @@ STRUDEL_APPEND_CODE_SCHEMA = {
 
 STRUDEL_REPLACE_RANGE_SCHEMA = {
     "name": "strudel_replace_range",
-    "description": "Replace a character range in the Strudel editor buffer.",
+    "description": "Replace a character range in the Strudel editor buffer for surgical edits without reloading the whole song.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -1632,6 +1761,14 @@ def _handle_strudel_set_code(args, **kw):
     return strudel_set_code(tab_id=args.get("tab_id", ""), code=args.get("code", ""))
 
 
+def _handle_strudel_load_file(args, **kw):
+    return strudel_load_file(
+        tab_id=args.get("tab_id", ""),
+        path=args.get("path", ""),
+        timeout_seconds=args.get("timeout_seconds", 30.0),
+    )
+
+
 def _handle_strudel_append_code(args, **kw):
     return strudel_append_code(tab_id=args.get("tab_id", ""), text=args.get("text", ""))
 
@@ -1754,6 +1891,14 @@ registry.register(
     toolset="artifacts",
     schema=STRUDEL_SET_CODE_SCHEMA,
     handler=_handle_strudel_set_code,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="strudel_load_file",
+    toolset="artifacts",
+    schema=STRUDEL_LOAD_FILE_SCHEMA,
+    handler=_handle_strudel_load_file,
     check_fn=_check_requirements,
 )
 

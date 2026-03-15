@@ -33,6 +33,7 @@ ARTIFACT_TOOLSETS_BLOCK = '''
             "artifact_bridge_read_state",
             "strudel_get_code",
             "strudel_set_code",
+            "strudel_load_file",
             "strudel_append_code",
             "strudel_replace_range",
             "strudel_get_cursor",

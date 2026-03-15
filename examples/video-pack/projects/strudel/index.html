@@ -177,6 +177,14 @@ function currentCode() {
   }
 }
 
+function currentCodeSummary() {
+  const code = currentCode();
+  return {
+    code_length: code.length,
+    line_count: code === '' ? 0 : code.split(/\r?\n/).length,
+  };
+}
+
 function currentCursor() {
   try {
     return Number(api?.getCursorLocation?.() ?? 0);
@@ -253,17 +261,19 @@ function handleHermesCommand(message) {
 
   try {
     switch (command) {
-      case 'get-code':
-        emitHermesEvent('code', { code: currentCode() }, requestId);
+      case 'get-code': {
+        const code = currentCode();
+        emitHermesEvent('code', { code, ...currentCodeSummary() }, requestId);
         return;
+      }
       case 'set-code': {
         api.setCode(String(payload.code ?? ''));
-        emitHermesEvent('ack', { action: command, ok: true, code: currentCode() }, requestId);
+        emitHermesEvent('ack', { action: command, ok: true, ...currentCodeSummary() }, requestId);
         return;
       }
       case 'append-code': {
         api.appendCode(String(payload.text ?? ''));
-        emitHermesEvent('ack', { action: command, ok: true, code: currentCode() }, requestId);
+        emitHermesEvent('ack', { action: command, ok: true, inserted_length: String(payload.text ?? '').length, ...currentCodeSummary() }, requestId);
         return;
       }
       case 'replace-range': {
@@ -272,7 +282,7 @@ function handleHermesCommand(message) {
         const from = Math.max(0, Math.min(full.length, Number(payload.from ?? 0)));
         const to = Math.max(from, Math.min(full.length, Number(payload.to ?? from)));
         api.editor.dispatch({ changes: { from, to, insert: text } });
-        emitHermesEvent('ack', { action: command, ok: true, code: currentCode() }, requestId);
+        emitHermesEvent('ack', { action: command, ok: true, from, to, inserted_length: text.length, ...currentCodeSummary() }, requestId);
         return;
       }
       case 'get-cursor':
