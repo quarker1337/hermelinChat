@@ -262,6 +262,8 @@
               <br />
               - Tempo is Strudel-style: use <code>setcpm(bpm/4)</code> for a typical 4-beat groove.
               <br />
+              - Samples are loaded from the standard Dirt sample map; first hit can still be a little late while audio fetches.
+              <br />
               - Hotkeys: Ctrl+Enter = play, Esc = hush.
             </div>
 
@@ -324,6 +326,11 @@
             // IMPORTANT: call initStrudel only after a user gesture (ARM/PLAY)
             replPromise = window.strudel.initStrudel({
               // keep defaults; notably: sync=false (no SharedWorker)
+              prebake: async () => {
+                log("loading sample map...");
+                await window.strudel.samples("github:tidalcycles/dirt-samples");
+                log("sample map loaded.");
+              },
             });
 
             const repl = await replPromise;
