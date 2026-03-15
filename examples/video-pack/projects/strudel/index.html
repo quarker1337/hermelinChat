@@ -258,17 +258,9 @@
               <br />
               - Audio contexts require a click. If silent: click ARM again, then PLAY.
               <br />
-              - Paste normal Strudel patterns directly. You usually do NOT need <code>.out()</code> here.
+              - Uses stock Strudel runtime preload as closely as possible, so sample and soundfont behavior should match strudel.cc better.
               <br />
-              - Tempo is Strudel-style: use <code>setcpm(bpm/4)</code> for a typical 4-beat groove.
-              <br />
-              - Samples are loaded from the fuller default dough-samples bundle; first hit can still be a little late while audio fetches.
-              <br />
-              - Full REPL visuals like <code>._pianoroll()</code> / <code>._scope()</code> are currently stripped in compatibility mode.
-              <br />
-              - Some GM sounds are temporarily mapped to built-in synths in compatibility mode.
-              <br />
-              - If code uses <code>duckorbit(2)</code>, a silent orbit-2 keepalive is auto-injected.
+              - First load can take a moment while samples and soundfonts warm up.
               <br />
               - Hotkeys: Ctrl+Enter = play, Esc = hush.
             </div>
@@ -280,9 +272,13 @@
       </main>
     </div>
 
-    <script src="https://unpkg.com/@strudel/web@1.3.0/dist/index.js"></script>
-    <script>
+    <script type="module">
+      import * as strudelApi from "https://unpkg.com/@strudel/web@1.3.0?module";
+      import { prebake } from "https://unpkg.com/@strudel/repl@1.3.0?module";
+
       (() => {
+        window.strudel = strudelApi;
+
         const armBtn = document.getElementById("armBtn");
         const playBtn = document.getElementById("playBtn");
         const stopBtn = document.getElementById("stopBtn");
@@ -399,29 +395,19 @@ $CHORDS: arrange(
 
         let replPromise = null;
         async function ensureRepl() {
-          if (!window.strudel) {
-            throw new Error("Strudel did not load (global 'strudel' missing)");
+          if (!strudelApi?.initStrudel) {
+            throw new Error("Strudel module did not load (initStrudel missing)");
           }
 
           if (!replPromise) {
             setState("arming...");
             log("initStrudel()...");
 
-            // IMPORTANT: call initStrudel only after a user gesture (ARM/PLAY)
-            replPromise = window.strudel.initStrudel({
-              // keep defaults; notably: sync=false (no SharedWorker)
+            replPromise = strudelApi.initStrudel({
               prebake: async () => {
-                log("loading default sample bundle...");
-                const ds = "https://raw.githubusercontent.com/felixroos/dough-samples/main";
-                await Promise.all([
-                  window.strudel.samples(`${ds}/tidal-drum-machines.json`),
-                  window.strudel.samples(`${ds}/piano.json`),
-                  window.strudel.samples(`${ds}/Dirt-Samples.json`),
-                  window.strudel.samples(`${ds}/EmuSP12.json`),
-                  window.strudel.samples(`${ds}/vcsl.json`),
-                  window.strudel.samples(`${ds}/mridangam.json`),
-                ]);
-                log("default sample bundle loaded.");
+                log("loading stock strudel runtime...");
+                await prebake();
+                log("stock strudel runtime ready.");
               },
             });
 
@@ -438,68 +424,15 @@ $CHORDS: arrange(
           return replPromise;
         }
 
-        function normalizeCode(rawCode) {
-          let code = rawCode;
-          const rewrites = [];
-
-          if (/\.out\s*\(\s*\)/g.test(code)) {
-            code = code.replace(/\.out\s*\(\s*\)/g, "");
-            rewrites.push("removed .out() (not needed in this artifact)");
-          }
-
-          if (/\._(?:pianoroll|scope|tscope|spectrum|pitchwheel|punchcard|spiral)\s*\([^)]*\)/g.test(code)) {
-            code = code.replace(/\._(?:pianoroll|scope|tscope|spectrum|pitchwheel|punchcard|spiral)\s*\([^)]*\)/g, "");
-            rewrites.push("stripped full-REPL visual helpers (not supported in artifact yet)");
-          }
-
-          if (/\btempo\s*\(/g.test(code)) {
-            code = code.replace(/\btempo\s*\(\s*([^,)]+)\s*(?:,\s*([^)]*?)\s*)?\)/g, (_m, bpm, beatsPerCycle) => {
-              const bpc = beatsPerCycle && beatsPerCycle.trim() ? beatsPerCycle : "4";
-              return `setcpm((${bpm})/(${bpc}))`;
-            });
-            rewrites.push("tempo(bpm[, beatsPerCycle]) -> setcpm(bpm / beatsPerCycle)");
-          }
-
-          const gmFallbacks = [
-            ["gm_synth_brass_2", "supersaw"],
-            ["gm_lead_8_bass_lead", "sawtooth"],
-          ];
-
-          gmFallbacks.forEach(([from, to]) => {
-            if (code.includes(from)) {
-              code = code.split(from).join(to);
-              rewrites.push(`mapped ${from} -> ${to} (temporary built-in synth fallback)`);
-            }
-          });
-
-          if (/\.duckorbit\s*\(\s*2\s*\)/g.test(code) && !code.includes("$DUCKKEEP:")) {
-            code = `$DUCKKEEP: note("c2").s("sine").gain(0.000001).orbit(2).early(0.01)\n\n${code}`;
-            rewrites.push("injected silent keepalive on orbit 2 for duckorbit(2)");
-          }
-
-          return { code, rewrites };
-        }
-
         async function doPlay() {
           try {
             const repl = await ensureRepl();
-            const normalized = normalizeCode(codeEl.value);
-            const code = normalized.code;
-
-            if (normalized.rewrites.length) {
-              codeEl.value = code;
-            }
+            const code = codeEl.value;
 
             setState("eval...");
             log("evaluate()");
-            normalized.rewrites.forEach((msg) => log("compat: " + msg));
 
-            // signature (per @strudel/web): evaluate(code, setPattern=true, hushFirst=true)
             await repl.evaluate(code, true, true);
-
-            // ensure scheduler is running
-            repl.start();
-
             setState("playing");
           } catch (err) {
             console.error(err);
@@ -510,8 +443,8 @@ $CHORDS: arrange(
 
         function doStop() {
           try {
-            if (window.strudel?.hush) {
-              window.strudel.hush();
+            if (strudelApi?.hush) {
+              strudelApi.hush();
               setState("stopped");
               log("hush()");
             } else {
@@ -557,7 +490,6 @@ $CHORDS: arrange(
           }
         });
 
-        // Hook Strudel's internal logger (it dispatches CustomEvent('strudel.log', {detail:{message,type,data}}))
         document.addEventListener("strudel.log", (e) => {
           if (!e?.detail?.message) return;
           log(e.detail.message);
