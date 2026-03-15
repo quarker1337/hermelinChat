@@ -20,7 +20,26 @@ ARTIFACT_TOOLSETS_BLOCK = '''
     # hermilinChat artifact panel toolsets (installed by hermilinChat patch)
     "artifacts": {
         "description": "Create and manage artifacts in hermilinChat's right-side artifact panel",
-        "tools": ["list_artifacts", "focus_artifact", "create_artifact", "remove_artifact", "clear_artifacts", "start_runner", "tail_runner_log", "stop_runner"],
+        "tools": [
+            "list_artifacts",
+            "focus_artifact",
+            "create_artifact",
+            "remove_artifact",
+            "clear_artifacts",
+            "start_runner",
+            "tail_runner_log",
+            "stop_runner",
+            "artifact_bridge_command",
+            "artifact_bridge_read_state",
+            "strudel_get_code",
+            "strudel_set_code",
+            "strudel_append_code",
+            "strudel_replace_range",
+            "strudel_get_cursor",
+            "strudel_set_cursor",
+            "strudel_play",
+            "strudel_stop"
+        ],
         "includes": []
     },
 '''
