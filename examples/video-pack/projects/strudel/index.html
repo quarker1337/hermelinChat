@@ -3,445 +3,275 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Strudel Router</title>
+    <title>HANS / STRUDEL</title>
     <style>
       :root {
-        --bg: #07070b;
-        --panel: rgba(18, 18, 28, 0.78);
-        --border: rgba(110, 255, 210, 0.16);
-        --text: rgba(235, 245, 255, 0.92);
-        --muted: rgba(210, 220, 235, 0.55);
-        --accent: #46ffd2;
-        --accent2: #f5b731;
-        --danger: #e84057;
-        --ok: #38c878;
+        /* hermilinChat matrix palette */
+        --bg: #0c0f0e;
+        --surface: #111514;
+        --elev: #1a201f;
+        --border: #2a3533;
+        --muted: #5a6f6a;
+        --text: #c8d8d3;
+        --bright: #e8f0ec;
+
+        --accent: #4dffa1;
+        --warn: #f5e642;
+        --danger: #fb7185;
+        --cyan: #22d3ee;
+
         --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+        /* Strudel / CodeMirror theme vars (fallbacks seen on strudel.cc) */
+        --background: var(--bg);
+        --lineBackground: rgba(17, 21, 20, 0.70);
+        --foreground: var(--text);
+        --caret: var(--accent);
+        --selection: rgba(77, 255, 161, 0.22);
+        --selectionMatch: rgba(34, 211, 238, 0.18);
+        --lineHighlight: rgba(77, 255, 161, 0.08);
+        --gutterBackground: transparent;
+        --gutterForeground: rgba(90, 111, 106, 0.88);
+
+        --font-family: var(--mono);
+        --font-size: 13px;
       }
 
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
 
       body {
         margin: 0;
-        background: radial-gradient(1000px 700px at 22% 18%, rgba(70,255,210,0.12), transparent 55%),
-                    radial-gradient(800px 600px at 78% 18%, rgba(245,183,49,0.10), transparent 52%),
-                    radial-gradient(900px 900px at 60% 85%, rgba(232,64,87,0.07), transparent 60%),
-                    var(--bg);
-        color: var(--text);
         font-family: var(--mono);
+        color: var(--text);
+        background:
+          radial-gradient(1100px 700px at 20% 10%, rgba(77, 255, 161, 0.10), transparent 55%),
+          radial-gradient(900px 650px at 85% 20%, rgba(34, 211, 238, 0.07), transparent 52%),
+          radial-gradient(1100px 900px at 70% 85%, rgba(251, 113, 133, 0.06), transparent 60%),
+          var(--bg);
         overflow: hidden;
       }
 
+      .fx {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .fx .scanlines {
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+          to bottom,
+          rgba(255, 255, 255, 0.035) 0px,
+          rgba(255, 255, 255, 0.035) 1px,
+          rgba(0, 0, 0, 0) 2px,
+          rgba(0, 0, 0, 0) 6px
+        );
+        opacity: 0.18;
+        mix-blend-mode: overlay;
+      }
+
+      .fx .vignette {
+        position: absolute;
+        inset: -30px;
+        background: radial-gradient(closest-side at 50% 50%, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.55));
+        opacity: 0.55;
+      }
+
       .wrap {
-        height: 100vh;
-        padding: 16px;
+        height: 100%;
+        padding: 14px;
         display: grid;
         grid-template-rows: auto 1fr;
         gap: 12px;
+        position: relative;
+        z-index: 1;
       }
 
       .top {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 12px 14px;
-        border: 1px solid var(--border);
-        background: linear-gradient(180deg, rgba(18,18,28,0.75), rgba(10,10,16,0.55));
+        gap: 12px;
+        padding: 11px 12px;
+        border: 1px solid rgba(77, 255, 161, 0.18);
+        background: linear-gradient(180deg, rgba(26, 32, 31, 0.75), rgba(17, 21, 20, 0.55));
         border-radius: 10px;
+        min-width: 0;
       }
 
-      .brand { display: flex; flex-direction: column; gap: 4px; }
+      .brand {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+
       .title {
+        color: var(--accent);
         font-size: 12px;
         letter-spacing: 0.14em;
         text-transform: uppercase;
-        color: var(--accent);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
-      .subtitle { font-size: 10px; color: var(--muted); }
 
-      .right {
+      .subtitle {
+        font-size: 10px;
+        color: rgba(200, 216, 211, 0.62);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .meta {
         display: flex;
-        gap: 10px;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
         align-items: center;
         font-size: 10px;
-        color: var(--muted);
+        color: rgba(200, 216, 211, 0.65);
       }
 
       .pill {
-        border: 1px solid var(--border);
-        background: rgba(18,18,28,0.6);
-        padding: 6px 10px;
-        border-radius: 999px;
-      }
-
-      .grid {
-        display: grid;
-        grid-template-columns: 1.2fr 0.8fr;
-        gap: 12px;
-        min-height: 0;
-      }
-
-      .panel {
-        border: 1px solid var(--border);
-        background: var(--panel);
-        border-radius: 10px;
-        overflow: hidden;
-        min-height: 0;
-      }
-
-      .panelHeader {
-        padding: 10px 12px;
-        border-bottom: 1px solid rgba(110,255,210,0.12);
-        background: rgba(24,24,38,0.65);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-
-      .panelHeader .h {
-        font-size: 10px;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: rgba(235,245,255,0.82);
-      }
-
-      .panelBody { padding: 12px; min-height: 0; }
-
-      .canvasWrap {
-        position: relative;
-        height: 100%;
-        min-height: 360px;
-        border-radius: 10px;
-        border: 1px solid rgba(110,255,210,0.14);
-        background: rgba(10,10,16,0.35);
-        overflow: hidden;
-      }
-
-      canvas {
-        width: 100%;
-        height: 100%;
-        display: block;
-      }
-
-      .hud {
-        position: absolute;
-        inset: 12px 12px auto 12px;
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        pointer-events: none;
-      }
-
-      .tag {
-        pointer-events: none;
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 4px 9px;
+        gap: 7px;
+        padding: 5px 10px;
         border-radius: 999px;
-        border: 1px solid rgba(110,255,210,0.18);
-        background: rgba(10,10,16,0.50);
-        color: rgba(235,245,255,0.86);
-        font-size: 10px;
+        border: 1px solid rgba(77, 255, 161, 0.16);
+        background: rgba(12, 15, 14, 0.45);
       }
 
       .dot {
         width: 7px;
         height: 7px;
         border-radius: 50%;
-        background: var(--ok);
-        box-shadow: 0 0 16px rgba(56,200,120,0.30);
+        background: var(--accent);
+        box-shadow: 0 0 18px rgba(77, 255, 161, 0.25);
       }
 
-      .warn { background: var(--accent2); box-shadow: 0 0 16px rgba(245,183,49,0.30); }
-      .bad { background: var(--danger); box-shadow: 0 0 16px rgba(232,64,87,0.30); }
-
-      .list {
-        display: grid;
-        gap: 10px;
+      .dot.warn {
+        background: var(--warn);
+        box-shadow: 0 0 18px rgba(245, 230, 66, 0.20);
       }
 
-      .card {
-        border: 1px solid rgba(110,255,210,0.14);
-        background: rgba(10,10,16,0.35);
+      .panel {
+        min-height: 0;
         border-radius: 10px;
-        padding: 10px 10px;
+        overflow: hidden;
+        border: 1px solid rgba(77, 255, 161, 0.16);
+        background: rgba(17, 21, 20, 0.55);
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
+        display: grid;
+        grid-template-rows: auto 1fr;
       }
 
-      .kv {
+      .panelHeader {
+        padding: 10px 12px;
+        background: rgba(26, 32, 31, 0.65);
+        border-bottom: 1px solid rgba(77, 255, 161, 0.10);
         display: flex;
+        align-items: center;
         justify-content: space-between;
         gap: 10px;
+        min-width: 0;
+      }
+
+      .h {
         font-size: 10px;
-        color: rgba(210,220,235,0.72);
-      }
-
-      .kv b {
-        color: rgba(235,245,255,0.90);
-        font-weight: 700;
-      }
-
-      .monoSmall { font-size: 10px; color: rgba(210,220,235,0.60); margin-top: 8px; line-height: 1.45; }
-
-      .bar {
-        height: 6px;
-        border-radius: 999px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: rgba(232, 240, 236, 0.86);
+        white-space: nowrap;
         overflow: hidden;
-        background: rgba(235,245,255,0.06);
-        margin-top: 8px;
+        text-overflow: ellipsis;
       }
 
-      .bar > div {
+      .hRight {
+        font-size: 10px;
+        color: rgba(200, 216, 211, 0.62);
+        white-space: nowrap;
+      }
+
+      .panelBody {
+        min-height: 0;
+        padding: 10px 10px;
+        background: rgba(12, 15, 14, 0.25);
+      }
+
+      strudel-editor {
+        display: block;
+        width: 100%;
         height: 100%;
-        width: 20%;
-        background: linear-gradient(90deg, rgba(70,255,210,0.95), rgba(245,183,49,0.75));
-        box-shadow: 0 0 18px rgba(70,255,210,0.20);
+        min-height: 360px;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid rgba(77, 255, 161, 0.12);
+        background: var(--bg);
+      }
+
+      .hint {
+        color: rgba(200, 216, 211, 0.62);
+      }
+
+      code {
+        color: rgba(232, 240, 236, 0.90);
+      }
+
+      a {
+        color: rgba(34, 211, 238, 0.95);
       }
     </style>
   </head>
   <body>
+    <div class="fx">
+      <div class="scanlines"></div>
+      <div class="vignette"></div>
+    </div>
+
     <div class="wrap">
       <div class="top">
         <div class="brand">
-          <div class="title">NEON DECK / STRUDEL</div>
-          <div class="subtitle">signal router • packet choreography • jitter control</div>
+          <div class="title">HANS / STRUDEL</div>
+          <div class="subtitle">live coding repl • embedded web component • matrix skin</div>
         </div>
-        <div class="right">
-          <div class="pill" id="clock">--:--:--</div>
-          <div class="pill">proto: s/9</div>
-          <div class="pill" id="route">route: a→k</div>
+        <div class="meta">
+          <div class="pill"><span class="dot warn"></span><span>audio requires click</span></div>
+          <div class="pill"><span>source</span> <code>@strudel/repl</code></div>
         </div>
       </div>
 
-      <div class="grid">
-        <div class="panel">
-          <div class="panelHeader">
-            <div class="h">Router fabric</div>
-            <div class="subtitle">live topology (sim)</div>
-          </div>
-          <div class="panelBody">
-            <div class="canvasWrap">
-              <canvas id="c" width="1200" height="700"></canvas>
-              <div class="hud">
-                <div class="tag"><span class="dot" id="dot"></span><span id="status">nominal</span></div>
-                <div class="tag">ingress <b id="ing">0</b> pkt/s</div>
-                <div class="tag">egress <b id="egr">0</b> pkt/s</div>
-                <div class="tag">lat <b id="lat">0</b> ms</div>
-                <div class="tag">jitter <b id="jit">0</b> ms</div>
-              </div>
-            </div>
-          </div>
+      <div class="panel">
+        <div class="panelHeader">
+          <div class="h">Strudel editor</div>
+          <div class="hRight hint">Tip: click inside, then press Play</div>
         </div>
+        <div class="panelBody">
+          <!-- pinned to a known-good version for video stability -->
+          <script src="https://unpkg.com/@strudel/repl@1.3.0"></script>
 
-        <div class="panel">
-          <div class="panelHeader">
-            <div class="h">Channels</div>
-            <div class="subtitle" id="chan">8 online</div>
-          </div>
-          <div class="panelBody">
-            <div class="list">
-              <div class="card">
-                <div class="kv"><span>mux</span><b id="mux">A-K</b></div>
-                <div class="kv"><span>window</span><b>64</b></div>
-                <div class="kv"><span>drops</span><b id="drops">0</b></div>
-                <div class="bar"><div id="bar1"></div></div>
-                <div class="monoSmall" id="note">phase-lock stable • packet dance green</div>
-              </div>
+          <strudel-editor>
+            <!--
+setcps(1)
 
-              <div class="card">
-                <div class="kv"><span>filter</span><b>strudel</b></div>
-                <div class="kv"><span>gain</span><b id="gain">1.00</b></div>
-                <div class="kv"><span>noise</span><b id="noise">-42 dB</b></div>
-                <div class="bar"><div id="bar2"></div></div>
-              </div>
-
-              <div class="card">
-                <div class="kv"><span>signature</span><b>hans</b></div>
-                <div class="monoSmall">quiet mode: on • proxies: armed • localhost only</div>
-              </div>
-            </div>
-          </div>
+stack(
+  note("<c2 a1 f1 e1>*2").s("sawtooth").lpf(600).gain(0.18),
+  note("<c4 a3 f3 e3>*4").s("square").lpf(sine.range(500,6000).slow(8)).room(0.8).gain(0.12)
+).slow(2)
+            -->
+          </strudel-editor>
         </div>
       </div>
     </div>
-
-    <script>
-      const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
-      const lerp = (a, b, t) => a + (b - a) * t
-
-      const clock = document.getElementById('clock')
-      const status = document.getElementById('status')
-      const dot = document.getElementById('dot')
-      const ing = document.getElementById('ing')
-      const egr = document.getElementById('egr')
-      const lat = document.getElementById('lat')
-      const jit = document.getElementById('jit')
-      const route = document.getElementById('route')
-      const drops = document.getElementById('drops')
-      const note = document.getElementById('note')
-      const bar1 = document.getElementById('bar1')
-      const bar2 = document.getElementById('bar2')
-      const gain = document.getElementById('gain')
-      const noise = document.getElementById('noise')
-
-      const tickClock = () => {
-        const d = new Date()
-        const hh = String(d.getHours()).padStart(2, '0')
-        const mm = String(d.getMinutes()).padStart(2, '0')
-        const ss = String(d.getSeconds()).padStart(2, '0')
-        clock.textContent = `${hh}:${mm}:${ss}`
-      }
-      setInterval(tickClock, 250)
-      tickClock()
-
-      const canvas = document.getElementById('c')
-      const ctx = canvas.getContext('2d')
-
-      const W = canvas.width
-      const H = canvas.height
-
-      const nodes = []
-      const N = 12
-      for (let i = 0; i < N; i++) {
-        nodes.push({
-          x: (0.12 + 0.76 * (i / (N - 1))) * W,
-          y: (0.18 + 0.64 * (Math.sin(i * 1.2) * 0.5 + 0.5)) * H,
-          vx: (Math.random() - 0.5) * 0.2,
-          vy: (Math.random() - 0.5) * 0.2,
-        })
-      }
-
-      const edges = []
-      for (let i = 0; i < N - 1; i++) {
-        edges.push([i, i + 1])
-        if (i + 2 < N && Math.random() < 0.35) edges.push([i, i + 2])
-      }
-
-      const packets = []
-      const spawnPacket = () => {
-        const e = edges[Math.floor(Math.random() * edges.length)]
-        packets.push({ e, t: 0, speed: 0.006 + Math.random() * 0.01, hue: 160 + Math.random() * 40 })
-      }
-
-      for (let i = 0; i < 18; i++) spawnPacket()
-
-      let t = 0
-      let dropsN = 0
-      let ingress = 420
-      let egress = 418
-      let latency = 12
-      let jitter = 3
-
-      const routes = ['a→k', 'a→m', 'c→k', 'd→j', 'b→h', 'f→k']
-
-      const step = () => {
-        t += 0.016
-
-        // update stats
-        ingress = clamp(ingress + (Math.random() - 0.48) * 30, 120, 980)
-        egress = clamp(egress + (Math.random() - 0.52) * 30, 120, 980)
-        latency = clamp(latency + (Math.random() - 0.49) * 1.2, 6, 48)
-        jitter = clamp(jitter + (Math.random() - 0.5) * 0.6, 1, 18)
-
-        if (Math.random() < 0.03) route.textContent = `route: ${routes[Math.floor(Math.random() * routes.length)]}`
-
-        const stress = jitter > 10 || latency > 30
-        dot.className = 'dot'
-        status.textContent = 'nominal'
-        note.textContent = 'phase-lock stable • packet dance green'
-        if (stress) {
-          dot.className = 'dot warn'
-          status.textContent = 'degraded'
-          note.textContent = 'jitter spike • rebalancing channels'
-        }
-        if (Math.random() < 0.01 && stress) {
-          dot.className = 'dot bad'
-          status.textContent = 'alert'
-          note.textContent = 'microburst • shaping traffic'
-          dropsN += Math.random() < 0.7 ? 0 : 1
-        }
-
-        ing.textContent = Math.round(ingress)
-        egr.textContent = Math.round(egress)
-        lat.textContent = Math.round(latency)
-        jit.textContent = Math.round(jitter)
-        drops.textContent = String(dropsN)
-
-        bar1.style.width = `${clamp((ingress / 980) * 100, 5, 100)}%`
-        bar2.style.width = `${clamp((1 - jitter / 18) * 100, 5, 100)}%`
-        gain.textContent = (1.0 + Math.sin(t * 0.9) * 0.08).toFixed(2)
-        noise.textContent = `${Math.round(-38 - jitter * 0.8)} dB`
-
-        // animate nodes
-        for (const n of nodes) {
-          n.vx += (Math.random() - 0.5) * 0.02
-          n.vy += (Math.random() - 0.5) * 0.02
-          n.vx *= 0.985
-          n.vy *= 0.985
-          n.x += n.vx
-          n.y += n.vy
-          n.x = clamp(n.x, 60, W - 60)
-          n.y = clamp(n.y, 60, H - 60)
-        }
-
-        // draw
-        ctx.clearRect(0, 0, W, H)
-
-        // edges
-        ctx.lineWidth = 1
-        for (const [a, b] of edges) {
-          const A = nodes[a]
-          const B = nodes[b]
-          const dx = B.x - A.x
-          const dy = B.y - A.y
-          const d = Math.sqrt(dx * dx + dy * dy)
-          const alpha = clamp(0.10 + 0.18 * (1 - d / 900), 0.08, 0.22)
-          ctx.strokeStyle = `rgba(70,255,210,${alpha})`
-          ctx.beginPath()
-          ctx.moveTo(A.x, A.y)
-          ctx.lineTo(B.x, B.y)
-          ctx.stroke()
-        }
-
-        // packets
-        if (Math.random() < 0.18) spawnPacket()
-        for (const p of packets) {
-          p.t += p.speed * (stress ? 1.25 : 1.0)
-        }
-        while (packets.length > 60) packets.shift()
-
-        for (const p of packets) {
-          const [a, b] = p.e
-          const A = nodes[a]
-          const B = nodes[b]
-          const tt = (Math.sin(p.t * Math.PI * 2) * 0.5 + 0.5)
-          const x = lerp(A.x, B.x, tt)
-          const y = lerp(A.y, B.y, tt)
-          ctx.fillStyle = `hsla(${p.hue}, 100%, 68%, 0.85)`
-          ctx.beginPath()
-          ctx.arc(x, y, 2.2, 0, Math.PI * 2)
-          ctx.fill()
-        }
-
-        // nodes
-        for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i]
-          const ring = 7 + (Math.sin(t * 1.4 + i) * 0.5 + 0.5) * 3
-          ctx.strokeStyle = `rgba(70,255,210,0.35)`
-          ctx.lineWidth = 1
-          ctx.beginPath()
-          ctx.arc(n.x, n.y, ring, 0, Math.PI * 2)
-          ctx.stroke()
-
-          ctx.fillStyle = `rgba(235,245,255,0.88)`
-          ctx.beginPath()
-          ctx.arc(n.x, n.y, 2.2, 0, Math.PI * 2)
-          ctx.fill()
-        }
-
-        requestAnimationFrame(step)
-      }
-
-      requestAnimationFrame(step)
-    </script>
   </body>
 </html>
