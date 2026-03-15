@@ -264,6 +264,10 @@
               <br />
               - Samples are loaded from the standard Dirt sample map; first hit can still be a little late while audio fetches.
               <br />
+              - Full REPL visuals like <code>._pianoroll()</code> / <code>._scope()</code> are currently stripped in compatibility mode.
+              <br />
+              - Some GM sounds are temporarily mapped to built-in synths in compatibility mode.
+              <br />
               - Hotkeys: Ctrl+Enter = play, Esc = hush.
             </div>
 
@@ -302,6 +306,84 @@
           Hats: `setcpm(120/4)\ns("hh*8").gain(0.6)`,
           Melody: `setcpm(90/4)\nnote("c4 e4 g4 b4").s("sawtooth").gain(0.2)`,
           "Groove + Lead": `setcpm(110/4)\nstack(\n  s("bd sd bd rim, hh*8"),\n  note("<c4 e4 g4 b4>").s("triangle").gain(0.18)\n)`,
+          "Video Song": `setcpm(90/4)
+
+// Base patterns
+const kick = s("bd!4:6").duckorbit(2).duckattack(.25)
+const snare = s("- sd:4 - sd:4")
+const hihat = s("hh!8:1").gain(.5)
+const synthNotes = note("f2 d2!6 d#2!3 d2!5 d1")
+const arpNotes = note("<[d5 a5 a#5 d6]*4 [[d5 a5 a#5 f6] [d5 a5 a#5 e6]]*2>")
+const chordNotes = note("<[a#3,a#4] [g3,g4] [d3,d4]@2>")
+const leadNotes = note("<d4@0.75 f4@0.25 e4@0.5 a#4@0.25 a4@0.25 -@2>")
+const leadAltNotes = note("<d4@0.75 f4@0.25 e4@0.5 a#4@0.25 c5@0.25 -@2>")
+
+// Helpers
+const syn = (lpf, g, orb=2) => synthNotes.s("supersaw").orbit(orb).lpf(lpf).gain(g)
+const arp = (dist, lpfMax, g, lpfMin=100) => arpNotes.trans(-12).s("sawtooth").orbit(2)
+  .distort(dist).lpenv(perlin.slow(3).range(1,5))
+  .lpf(perlin.slow(2).range(lpfMin, lpfMax)).gain(g).room(.8).rsize(6)
+const chord = (lpf, g, orb=2) => chordNotes.s("gm_synth_brass_2")
+  .lpf(lpf).gain(g).orbit(orb).trans(-12).room(.8).rsize(4)
+const drums = (k, sn, hh) => stack(kick.gain(k), snare.gain(sn), hihat.gain(hh))
+const lead = (n, lpf, g, rm=.8, rs=6) => n.orbit(2).s("gm_lead_8_bass_lead")
+  .lpenv(perlin.slow(3).range(1,5)).lpf(lpf).gain(g).room(rm).rsize(rs)
+
+$DRUMS: arrange(
+  [2, drums(0,0,.08)],
+  [3, drums(.9,0,.22)],
+  [4, drums(1,1,.5)],
+  [2, drums(0,0,.04)],
+  [4, drums(1,1,.55)],
+  [2, drums(1,1,.6)],
+  [4, drums(1,1,.68)],
+  [2, drums(.9,0,.32)],
+  [3, drums(1,0,.42)],
+  [2, drums(.72,0,.18)],
+  [1, drums(0,0,.05)],
+  [1, silence]
+)._scope()
+
+$SYNTH: arrange(
+  [2, syn(900,.6,1)],
+  [3, syn(1400,.75)],
+  [4, syn(20000,.9)],
+  [2, syn(1200,.72,1)],
+  [4, syn(1800,.95)],
+  [2, silence],
+  [4, syn(2400,1)],
+  [2, syn(1100,.7,1)],
+  [3, syn(2000,.92)],
+  [2, syn(1100,.68)],
+  [1, syn(650,.42,1)],
+  [1, silence]
+)._pianoroll()
+
+$LEAD: arrange(
+  [11, silence],
+  [4, lead(leadNotes, perlin.slow(2).range(100,600), .25)],
+  [4, lead(leadAltNotes, perlin.slow(2).range(100,700), .30, .4, 3)],
+  [11, silence]
+)._pianoroll()
+
+$ARP: arrange(
+  [9, silence],
+  [4, arp(.45,2000,.22)],
+  [2, arp(.4,1600,.28)],
+  [4, arp(.5,2600,.28,250)],
+  [2, silence],
+  [3, arp(.42,1800,.24,180)],
+  [2, arp(.35,1200,.19)],
+  [2, arp(.25,700,.12)],
+  [2, silence]
+)._pianoroll()
+
+$CHORDS: arrange(
+  [11, silence],
+  [4, chord(600,.30,1)],
+  [4, chord(700,.35,1)],
+  [11, silence]
+)._pianoroll()`,
         };
 
         Object.keys(presets).forEach((name) => {
@@ -355,6 +437,11 @@
             rewrites.push("removed .out() (not needed in this artifact)");
           }
 
+          if (/\._(?:pianoroll|scope|tscope|spectrum|pitchwheel|punchcard|spiral)\s*\([^)]*\)/g.test(code)) {
+            code = code.replace(/\._(?:pianoroll|scope|tscope|spectrum|pitchwheel|punchcard|spiral)\s*\([^)]*\)/g, "");
+            rewrites.push("stripped full-REPL visual helpers (not supported in artifact yet)");
+          }
+
           if (/\btempo\s*\(/g.test(code)) {
             code = code.replace(/\btempo\s*\(\s*([^,)]+)\s*(?:,\s*([^)]*?)\s*)?\)/g, (_m, bpm, beatsPerCycle) => {
               const bpc = beatsPerCycle && beatsPerCycle.trim() ? beatsPerCycle : "4";
@@ -362,6 +449,18 @@
             });
             rewrites.push("tempo(bpm[, beatsPerCycle]) -> setcpm(bpm / beatsPerCycle)");
           }
+
+          const gmFallbacks = [
+            ["gm_synth_brass_2", "supersaw"],
+            ["gm_lead_8_bass_lead", "sawtooth"],
+          ];
+
+          gmFallbacks.forEach(([from, to]) => {
+            if (code.includes(from)) {
+              code = code.split(from).join(to);
+              rewrites.push(`mapped ${from} -> ${to} (temporary built-in synth fallback)`);
+            }
+          });
 
           return { code, rewrites };
         }
