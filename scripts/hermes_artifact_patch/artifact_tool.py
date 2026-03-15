@@ -12,6 +12,16 @@ Provides tools:
 - start_runner
 - stop_runner
 - tail_runner_log
+- artifact_bridge_command
+- artifact_bridge_read_state
+- strudel_get_code
+- strudel_set_code
+- strudel_append_code
+- strudel_replace_range
+- strudel_get_cursor
+- strudel_set_cursor
+- strudel_play
+- strudel_stop
 
 Artifacts are written under:
 - $HERMES_HOME/artifacts/session/
@@ -68,6 +78,10 @@ ARTIFACTS_ROOT_DIR = ARTIFACTS_HOME
 RUNNERS_DIR = os.path.join(ARTIFACTS_HOME, "runners")
 RUNNER_PROJECTS_DIR = os.path.join(RUNNERS_DIR, "projects")
 PIDS_DIR = os.path.join(ARTIFACTS_HOME, "pids")
+BRIDGE_DIR = os.path.join(ARTIFACTS_HOME, "bridge")
+BRIDGE_COMMANDS_DIR = os.path.join(BRIDGE_DIR, "commands")
+BRIDGE_RESPONSES_DIR = os.path.join(BRIDGE_DIR, "responses")
+BRIDGE_STATE_DIR = os.path.join(BRIDGE_DIR, "state")
 
 # Legacy (pre-move) locations
 LEGACY_RUNNERS_DIR = os.path.join(HERMES_HOME, "runners")
@@ -203,6 +217,174 @@ def _recompute_latest() -> None:
 def _write_close_signal(payload: dict[str, Any]) -> None:
     signal_path = _ensure_artifacts_root_dir() / "_close_signal.json"
     _write_json_atomic(signal_path, payload)
+
+
+def _sanitize_bridge_name(value: str) -> str:
+    return _sanitize_artifact_id(value)
+
+
+def _bridge_commands_dir() -> Path:
+    return _ensure_dir(BRIDGE_COMMANDS_DIR)
+
+
+def _bridge_responses_dir() -> Path:
+    return _ensure_dir(BRIDGE_RESPONSES_DIR)
+
+
+def _bridge_state_dir() -> Path:
+    return _ensure_dir(BRIDGE_STATE_DIR)
+
+
+def _bridge_state_path(tab_id: str, channel: str) -> Path:
+    return _bridge_state_dir() / tab_id / f"{channel}.json"
+
+
+def _bridge_response_path(request_id: str) -> Path:
+    return _bridge_responses_dir() / f"{request_id}.json"
+
+
+def _queue_bridge_command(payload: dict[str, Any]) -> Path:
+    commands_dir = _bridge_commands_dir()
+    command_id = _sanitize_bridge_name(str(payload.get("command_id") or "")) or f"cmd_{int(time.time() * 1000)}"
+    artifact_id = _sanitize_bridge_name(str(payload.get("artifact_id") or "")) or "artifact"
+    path = commands_dir / f"{int(time.time() * 1000)}_{artifact_id}_{command_id}.json"
+    _write_json_atomic(path, payload)
+    return path
+
+
+def _wait_for_bridge_response(request_id: str, timeout_seconds: float = 10.0) -> dict[str, Any] | None:
+    safe_id = _sanitize_bridge_name(request_id)
+    if not safe_id:
+        return None
+    path = _bridge_response_path(safe_id)
+    deadline = time.time() + max(0.1, float(timeout_seconds or 0))
+    while time.time() < deadline:
+        payload = _read_json(path)
+        if isinstance(payload, dict):
+            return payload
+        time.sleep(0.1)
+    return None
+
+
+def artifact_bridge_command(
+    tab_id: str,
+    channel: str,
+    command: str,
+    payload_json: str = "{}",
+    expect_response: bool = False,
+    timeout_seconds: float = 10.0,
+) -> str:
+    """Queue a one-shot bridge command for an artifact iframe and optionally wait for a response."""
+
+    artifact_id = _sanitize_artifact_id(tab_id)
+    if not artifact_id:
+        return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
+
+    bridge_channel = _sanitize_bridge_name(channel)
+    if not bridge_channel:
+        return json.dumps({"error": "channel is required"}, ensure_ascii=False)
+
+    action = str(command or "").strip()
+    if not action:
+        return json.dumps({"error": "command is required"}, ensure_ascii=False)
+
+    try:
+        payload_obj = json.loads(payload_json or "{}")
+    except json.JSONDecodeError as exc:
+        return json.dumps({"error": f"Invalid JSON in payload_json: {exc}"}, ensure_ascii=False)
+
+    if not isinstance(payload_obj, dict):
+        return json.dumps({"error": "payload_json must decode to a JSON object"}, ensure_ascii=False)
+
+    request_id = _sanitize_bridge_name(f"req_{int(time.time() * 1000)}_{os.getpid()}")
+    command_payload = {
+        "command_id": request_id,
+        "artifact_id": artifact_id,
+        "channel": bridge_channel,
+        "command": action,
+        "payload": payload_obj,
+        "timestamp": time.time(),
+    }
+
+    try:
+        command_path = _queue_bridge_command(command_payload)
+    except Exception as exc:
+        return json.dumps({"error": f"failed to queue bridge command: {exc}"}, ensure_ascii=False)
+
+    out: dict[str, Any] = {
+        "status": "queued",
+        "artifact_id": artifact_id,
+        "channel": bridge_channel,
+        "command": action,
+        "command_id": request_id,
+        "path": str(command_path),
+    }
+
+    if expect_response:
+        resp = _wait_for_bridge_response(request_id, timeout_seconds=timeout_seconds)
+        if resp is None:
+            out["status"] = "timeout"
+            out["timeout_seconds"] = float(timeout_seconds or 0)
+        else:
+            out["status"] = "ok"
+            out["response"] = resp
+
+    return json.dumps(out, ensure_ascii=False)
+
+
+def artifact_bridge_read_state(tab_id: str, channel: str = "strudel") -> str:
+    """Read the latest bridge state snapshot for an artifact/channel."""
+
+    artifact_id = _sanitize_artifact_id(tab_id)
+    if not artifact_id:
+        return json.dumps({"error": "tab_id is required"}, ensure_ascii=False)
+
+    bridge_channel = _sanitize_bridge_name(channel)
+    if not bridge_channel:
+        return json.dumps({"error": "channel is required"}, ensure_ascii=False)
+
+    path = _bridge_state_path(artifact_id, bridge_channel)
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return json.dumps({"status": "not_found", "artifact_id": artifact_id, "channel": bridge_channel}, ensure_ascii=False)
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def strudel_get_code(tab_id: str, timeout_seconds: float = 10.0) -> str:
+    return artifact_bridge_command(tab_id, "strudel", "get-code", "{}", expect_response=True, timeout_seconds=timeout_seconds)
+
+
+def strudel_set_code(tab_id: str, code: str) -> str:
+    return artifact_bridge_command(tab_id, "strudel", "set-code", json.dumps({"code": str(code)}, ensure_ascii=False))
+
+
+def strudel_append_code(tab_id: str, text: str) -> str:
+    return artifact_bridge_command(tab_id, "strudel", "append-code", json.dumps({"text": str(text)}, ensure_ascii=False))
+
+
+def strudel_replace_range(tab_id: str, start: int, end: int, text: str) -> str:
+    return artifact_bridge_command(
+        tab_id,
+        "strudel",
+        "replace-range",
+        json.dumps({"from": int(start), "to": int(end), "text": str(text)}, ensure_ascii=False),
+    )
+
+
+def strudel_get_cursor(tab_id: str, timeout_seconds: float = 10.0) -> str:
+    return artifact_bridge_command(tab_id, "strudel", "get-cursor", "{}", expect_response=True, timeout_seconds=timeout_seconds)
+
+
+def strudel_set_cursor(tab_id: str, position: int) -> str:
+    return artifact_bridge_command(tab_id, "strudel", "set-cursor", json.dumps({"position": int(position)}, ensure_ascii=False))
+
+
+def strudel_play(tab_id: str) -> str:
+    return artifact_bridge_command(tab_id, "strudel", "play", "{}")
+
+
+def strudel_stop(tab_id: str) -> str:
+    return artifact_bridge_command(tab_id, "strudel", "stop", "{}")
 
 
 def create_artifact(
@@ -1233,6 +1415,150 @@ STOP_RUNNER_SCHEMA = {
 }
 
 
+ARTIFACT_BRIDGE_COMMAND_SCHEMA = {
+    "name": "artifact_bridge_command",
+    "description": "Queue a collaboration command for an artifact iframe bridge and optionally wait for a response.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+            "channel": {"type": "string", "description": "Bridge channel name (e.g. strudel).", "default": "strudel"},
+            "command": {"type": "string", "description": "Command name to send to the iframe bridge."},
+            "payload_json": {"type": "string", "description": "JSON object payload encoded as a string.", "default": "{}"},
+            "expect_response": {"type": "boolean", "description": "Whether to wait for a response file from the iframe bridge.", "default": False},
+            "timeout_seconds": {"type": "number", "description": "Max wait time when expect_response=true.", "default": 10.0, "minimum": 0.1, "maximum": 120.0},
+        },
+        "required": ["tab_id", "channel", "command"],
+    },
+}
+
+
+ARTIFACT_BRIDGE_READ_STATE_SCHEMA = {
+    "name": "artifact_bridge_read_state",
+    "description": "Read the latest bridge state snapshot for an artifact iframe channel.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+            "channel": {"type": "string", "description": "Bridge channel name.", "default": "strudel"},
+        },
+        "required": ["tab_id"],
+    },
+}
+
+
+STRUDEL_GET_CODE_SCHEMA = {
+    "name": "strudel_get_code",
+    "description": "Ask the Strudel artifact bridge for the current editor buffer.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+            "timeout_seconds": {"type": "number", "default": 10.0, "minimum": 0.1, "maximum": 120.0},
+        },
+        "required": ["tab_id"],
+    },
+}
+
+
+STRUDEL_SET_CODE_SCHEMA = {
+    "name": "strudel_set_code",
+    "description": "Replace the entire Strudel editor buffer.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+            "code": {"type": "string", "description": "Full code to place in the editor."},
+        },
+        "required": ["tab_id", "code"],
+    },
+}
+
+
+STRUDEL_APPEND_CODE_SCHEMA = {
+    "name": "strudel_append_code",
+    "description": "Append text at the current cursor location in the Strudel editor.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+            "text": {"type": "string", "description": "Text to append."},
+        },
+        "required": ["tab_id", "text"],
+    },
+}
+
+
+STRUDEL_REPLACE_RANGE_SCHEMA = {
+    "name": "strudel_replace_range",
+    "description": "Replace a character range in the Strudel editor buffer.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+            "start": {"type": "integer", "description": "Start character offset.", "minimum": 0},
+            "end": {"type": "integer", "description": "End character offset.", "minimum": 0},
+            "text": {"type": "string", "description": "Replacement text."},
+        },
+        "required": ["tab_id", "start", "end", "text"],
+    },
+}
+
+
+STRUDEL_GET_CURSOR_SCHEMA = {
+    "name": "strudel_get_cursor",
+    "description": "Ask the Strudel artifact bridge for the current cursor position.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+            "timeout_seconds": {"type": "number", "default": 10.0, "minimum": 0.1, "maximum": 120.0},
+        },
+        "required": ["tab_id"],
+    },
+}
+
+
+STRUDEL_SET_CURSOR_SCHEMA = {
+    "name": "strudel_set_cursor",
+    "description": "Move the Strudel editor cursor to a specific character offset.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+            "position": {"type": "integer", "description": "Character offset to place the cursor at.", "minimum": 0},
+        },
+        "required": ["tab_id", "position"],
+    },
+}
+
+
+STRUDEL_PLAY_SCHEMA = {
+    "name": "strudel_play",
+    "description": "Trigger Play/Evaluate in the Strudel artifact.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+        },
+        "required": ["tab_id"],
+    },
+}
+
+
+STRUDEL_STOP_SCHEMA = {
+    "name": "strudel_stop",
+    "description": "Stop playback in the Strudel artifact.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab_id": {"type": "string", "description": "Artifact tab ID."},
+        },
+        "required": ["tab_id"],
+    },
+}
+
+
 def _check_requirements() -> bool:
     return True
 
@@ -1281,6 +1607,58 @@ def _handle_stop_runner(args, **kw):
 
 def _handle_tail_runner_log(args, **kw):
     return tail_runner_log(tab_id=args.get("tab_id", ""), lines=args.get("lines", 200))
+
+
+def _handle_artifact_bridge_command(args, **kw):
+    return artifact_bridge_command(
+        tab_id=args.get("tab_id", ""),
+        channel=args.get("channel", "strudel"),
+        command=args.get("command", ""),
+        payload_json=args.get("payload_json", "{}"),
+        expect_response=args.get("expect_response", False),
+        timeout_seconds=args.get("timeout_seconds", 10.0),
+    )
+
+
+def _handle_artifact_bridge_read_state(args, **kw):
+    return artifact_bridge_read_state(tab_id=args.get("tab_id", ""), channel=args.get("channel", "strudel"))
+
+
+def _handle_strudel_get_code(args, **kw):
+    return strudel_get_code(tab_id=args.get("tab_id", ""), timeout_seconds=args.get("timeout_seconds", 10.0))
+
+
+def _handle_strudel_set_code(args, **kw):
+    return strudel_set_code(tab_id=args.get("tab_id", ""), code=args.get("code", ""))
+
+
+def _handle_strudel_append_code(args, **kw):
+    return strudel_append_code(tab_id=args.get("tab_id", ""), text=args.get("text", ""))
+
+
+def _handle_strudel_replace_range(args, **kw):
+    return strudel_replace_range(
+        tab_id=args.get("tab_id", ""),
+        start=args.get("start", 0),
+        end=args.get("end", 0),
+        text=args.get("text", ""),
+    )
+
+
+def _handle_strudel_get_cursor(args, **kw):
+    return strudel_get_cursor(tab_id=args.get("tab_id", ""), timeout_seconds=args.get("timeout_seconds", 10.0))
+
+
+def _handle_strudel_set_cursor(args, **kw):
+    return strudel_set_cursor(tab_id=args.get("tab_id", ""), position=args.get("position", 0))
+
+
+def _handle_strudel_play(args, **kw):
+    return strudel_play(tab_id=args.get("tab_id", ""))
+
+
+def _handle_strudel_stop(args, **kw):
+    return strudel_stop(tab_id=args.get("tab_id", ""))
 
 
 registry.register(
@@ -1344,5 +1722,85 @@ registry.register(
     toolset="artifacts",
     schema=STOP_RUNNER_SCHEMA,
     handler=_handle_stop_runner,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="artifact_bridge_command",
+    toolset="artifacts",
+    schema=ARTIFACT_BRIDGE_COMMAND_SCHEMA,
+    handler=_handle_artifact_bridge_command,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="artifact_bridge_read_state",
+    toolset="artifacts",
+    schema=ARTIFACT_BRIDGE_READ_STATE_SCHEMA,
+    handler=_handle_artifact_bridge_read_state,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="strudel_get_code",
+    toolset="artifacts",
+    schema=STRUDEL_GET_CODE_SCHEMA,
+    handler=_handle_strudel_get_code,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="strudel_set_code",
+    toolset="artifacts",
+    schema=STRUDEL_SET_CODE_SCHEMA,
+    handler=_handle_strudel_set_code,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="strudel_append_code",
+    toolset="artifacts",
+    schema=STRUDEL_APPEND_CODE_SCHEMA,
+    handler=_handle_strudel_append_code,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="strudel_replace_range",
+    toolset="artifacts",
+    schema=STRUDEL_REPLACE_RANGE_SCHEMA,
+    handler=_handle_strudel_replace_range,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="strudel_get_cursor",
+    toolset="artifacts",
+    schema=STRUDEL_GET_CURSOR_SCHEMA,
+    handler=_handle_strudel_get_cursor,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="strudel_set_cursor",
+    toolset="artifacts",
+    schema=STRUDEL_SET_CURSOR_SCHEMA,
+    handler=_handle_strudel_set_cursor,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="strudel_play",
+    toolset="artifacts",
+    schema=STRUDEL_PLAY_SCHEMA,
+    handler=_handle_strudel_play,
+    check_fn=_check_requirements,
+)
+
+registry.register(
+    name="strudel_stop",
+    toolset="artifacts",
+    schema=STRUDEL_STOP_SCHEMA,
+    handler=_handle_strudel_stop,
     check_fn=_check_requirements,
 )

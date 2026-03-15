@@ -4121,6 +4121,30 @@ export default function App() {
         }
       }
 
+      if (payload.type === 'artifact_bridge_command') {
+        const command = payload.payload || {}
+        const artifactId = command.artifact_id || command.artifactId || command.id || command.tab_id || null
+
+        if (artifactId) {
+          setActiveArtifactId(String(artifactId))
+          setArtifactPanelDismissed(false)
+          setArtifactPanelOpen(true)
+          closePeek()
+        }
+
+        if (typeof window !== 'undefined') {
+          const store = (window.__hermesArtifactBridgeCommands = window.__hermesArtifactBridgeCommands || {})
+          const key = artifactId ? String(artifactId) : '__global__'
+          const queue = Array.isArray(store[key]) ? store[key] : []
+          store[key] = [...queue, command]
+          window.setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('hermes-artifact-command', { detail: command }))
+          }, 30)
+        }
+
+        return true
+      }
+
       return false
     },
     [applyArtifacts],

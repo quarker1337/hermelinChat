@@ -459,7 +459,100 @@ function MarkdownArtifact({ artifact }) {
   )
 }
 
-function HtmlLikeFrame({ srcDoc, src, title }) {
+function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
+  const iframeRef = useRef(null)
+
+  useEffect(() => {
+    const removeQueuedCommand = (targetArtifactId, commandId) => {
+      if (typeof window === 'undefined' || !targetArtifactId || !commandId) return
+      const store = window.__hermesArtifactBridgeCommands
+      if (!store || typeof store !== 'object') return
+      const key = String(targetArtifactId)
+      const queue = Array.isArray(store[key]) ? store[key] : []
+      store[key] = queue.filter((item) => {
+        const itemId = item?.command_id || item?.commandId || null
+        return itemId !== commandId
+      })
+    }
+
+    const postCommandToIframe = (command) => {
+      const frame = iframeRef.current
+      const target = frame?.contentWindow
+      if (!target || !command || typeof command !== 'object') return false
+      const targetArtifactId = command.artifact_id || command.artifactId || command.id || command.tab_id || artifactId || null
+      if (targetArtifactId && artifactId && String(targetArtifactId) !== String(artifactId)) return false
+      target.postMessage(
+        {
+          type: 'hermes:artifact-command',
+          artifactId: artifactId || targetArtifactId || null,
+          channel: command.channel || 'strudel',
+          command: command.command || command.action || '',
+          requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
+          payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
+        },
+        '*',
+      )
+      const commandId = command.command_id || command.commandId || null
+      removeQueuedCommand(targetArtifactId || artifactId, commandId)
+      return true
+    }
+
+    const flushQueuedCommands = () => {
+      if (typeof window === 'undefined') return
+      const store = window.__hermesArtifactBridgeCommands
+      if (!store || typeof store !== 'object') return
+      const keys = artifactId ? [String(artifactId)] : ['__global__']
+      keys.forEach((key) => {
+        const queue = Array.isArray(store[key]) ? [...store[key]] : []
+        queue.forEach((cmd) => {
+          postCommandToIframe(cmd)
+        })
+      })
+    }
+
+    const handleWindowMessage = (event) => {
+      const frame = iframeRef.current
+      const target = frame?.contentWindow
+      if (!target || event.source !== target) return
+      const data = event.data
+      if (!data || typeof data !== 'object' || data.type !== 'hermes:artifact-event') return
+      const channel = String(data.channel || 'strudel')
+      const eventName = String(data.event || '').trim()
+      if (!eventName) return
+      const payload = data.payload && typeof data.payload === 'object' ? data.payload : {}
+      const requestId = data.requestId || data.request_id || null
+      void fetch('/api/artifacts/bridge/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          artifact_id: artifactId || data.artifactId || data.artifact_id || null,
+          channel,
+          event: eventName,
+          request_id: requestId,
+          payload,
+        }),
+      }).catch(() => {
+        // ignore relay failures for now
+      })
+    }
+
+    const handleBridgeCommand = (event) => {
+      const command = event?.detail
+      if (!command || typeof command !== 'object') return
+      postCommandToIframe(command)
+    }
+
+    window.addEventListener('message', handleWindowMessage)
+    window.addEventListener('hermes-artifact-command', handleBridgeCommand)
+    const timer = window.setTimeout(flushQueuedCommands, 0)
+
+    return () => {
+      window.removeEventListener('message', handleWindowMessage)
+      window.removeEventListener('hermes-artifact-command', handleBridgeCommand)
+      window.clearTimeout(timer)
+    }
+  }, [artifactId])
+
   return (
     <div style={{ padding: '12px 14px', height: '100%', minHeight: 360, boxSizing: 'border-box' }}>
       <iframe
@@ -468,6 +561,34 @@ function HtmlLikeFrame({ srcDoc, src, title }) {
         srcDoc={srcDoc || undefined}
         sandbox="allow-scripts allow-forms"
         referrerPolicy="no-referrer"
+        ref={iframeRef}
+        onLoad={() => {
+          try {
+            const store = window.__hermesArtifactBridgeCommands
+            const key = artifactId ? String(artifactId) : '__global__'
+            const queue = store && typeof store === 'object' && Array.isArray(store[key]) ? [...store[key]] : []
+            const target = iframeRef.current?.contentWindow
+            if (!target) return
+            queue.forEach((command) => {
+              target.postMessage(
+                {
+                  type: 'hermes:artifact-command',
+                  artifactId: artifactId || command.artifact_id || command.artifactId || null,
+                  channel: command.channel || 'strudel',
+                  command: command.command || command.action || '',
+                  requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
+                  payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
+                },
+                '*',
+              )
+            })
+            if (store && typeof store === 'object') {
+              store[key] = []
+            }
+          } catch {
+            // ignore
+          }
+        }}
         style={{
           width: '100%',
           minHeight: 360,
@@ -487,7 +608,7 @@ function HtmlArtifact({ artifact }) {
   if (!html) {
     return <ArtifactEmpty title="Invalid html artifact" detail="Expected data.html or data.srcdoc." />
   }
-  return <HtmlLikeFrame title={artifact?.title || 'HTML artifact'} srcDoc={html} />
+  return <HtmlLikeFrame title={artifact?.title || 'HTML artifact'} srcDoc={html} artifactId={artifact?.id || ''} />
 }
 
 function IframeArtifact({ artifact }) {
@@ -551,10 +672,10 @@ function IframeArtifact({ artifact }) {
       return <ArtifactEmpty title="Loading runner..." detail="Preparing secure proxy URL for this iframe runner." />
     }
 
-    return <HtmlLikeFrame title={artifact?.title || 'Iframe runner'} src={resolvedSrc} srcDoc={srcDoc} />
+    return <HtmlLikeFrame title={artifact?.title || 'Iframe runner'} src={resolvedSrc} srcDoc={srcDoc} artifactId={artifact?.id || ''} />
   }
 
-  return <HtmlLikeFrame title={artifact?.title || 'Iframe artifact'} src={rawSrc} srcDoc={srcDoc} />
+  return <HtmlLikeFrame title={artifact?.title || 'Iframe artifact'} src={rawSrc} srcDoc={srcDoc} artifactId={artifact?.id || ''} />
 }
 
 function LogsArtifact({ artifact }) {

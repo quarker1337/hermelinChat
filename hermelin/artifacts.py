@@ -15,6 +15,10 @@ SESSION_SUBDIR = "session"
 PERSISTENT_SUBDIR = "persistent"
 RUNNERS_SUBDIR = "runners"
 PIDS_SUBDIR = "pids"
+BRIDGE_SUBDIR = "bridge"
+BRIDGE_COMMANDS_SUBDIR = "commands"
+BRIDGE_RESPONSES_SUBDIR = "responses"
+BRIDGE_STATE_SUBDIR = "state"
 
 
 def ensure_artifact_dir(path: Path) -> Path:
@@ -40,6 +44,30 @@ def artifact_runners_dir(root: Path) -> Path:
 
 def artifact_pids_dir(root: Path) -> Path:
     return ensure_artifact_dir(artifact_root_dir(root) / PIDS_SUBDIR)
+
+
+def artifact_bridge_dir(root: Path) -> Path:
+    return ensure_artifact_dir(artifact_root_dir(root) / BRIDGE_SUBDIR)
+
+
+def artifact_bridge_commands_dir(root: Path) -> Path:
+    return ensure_artifact_dir(artifact_bridge_dir(root) / BRIDGE_COMMANDS_SUBDIR)
+
+
+def artifact_bridge_responses_dir(root: Path) -> Path:
+    return ensure_artifact_dir(artifact_bridge_dir(root) / BRIDGE_RESPONSES_SUBDIR)
+
+
+def artifact_bridge_state_dir(root: Path) -> Path:
+    return ensure_artifact_dir(artifact_bridge_dir(root) / BRIDGE_STATE_SUBDIR)
+
+
+def artifact_bridge_state_path(root: Path, artifact_id: str, channel: str) -> Path:
+    return artifact_bridge_state_dir(root) / artifact_id / f"{channel}.json"
+
+
+def artifact_bridge_response_path(root: Path, request_id: str) -> Path:
+    return artifact_bridge_responses_dir(root) / f"{request_id}.json"
 
 
 def is_valid_artifact_id(value: str) -> bool:

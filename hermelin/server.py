@@ -24,6 +24,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from .artifacts import (
+    artifact_bridge_commands_dir,
+    artifact_bridge_response_path,
+    artifact_bridge_state_path,
     cleanup_session_artifacts,
     delete_artifact,
     is_valid_artifact_id,
@@ -221,6 +224,93 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     @app.get("/api/artifacts/latest")
     async def api_artifacts_latest():
         return latest_artifact(config.artifact_dir)
+
+    def _artifact_bridge_safe(value: str, fallback: str = "") -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return fallback
+        return raw if is_valid_artifact_id(raw) else fallback
+
+    def _artifact_bridge_write_state(artifact_id: str, channel: str, event_name: str, request_id: str, payload: dict) -> None:
+        now = time.time()
+        path = artifact_bridge_state_path(config.artifact_dir, artifact_id, channel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        previous: dict = {}
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(previous, dict):
+                previous = {}
+        except Exception:
+            previous = {}
+
+        next_state = dict(previous)
+        next_state.update(
+            {
+                "artifact_id": artifact_id,
+                "channel": channel,
+                "event": event_name,
+                "request_id": request_id or None,
+                "payload": payload,
+                "updated_at": now,
+            }
+        )
+        if isinstance(payload, dict):
+            if "code" in payload:
+                next_state["code"] = payload.get("code")
+            if "position" in payload:
+                next_state["position"] = payload.get("position")
+            if "playing" in payload:
+                next_state["playing"] = payload.get("playing")
+            if event_name == "ready":
+                next_state["ready"] = True
+
+        tmp_path = path.with_name(f".{path.name}.{int(now * 1000)}.tmp")
+        tmp_path.write_text(json.dumps(next_state, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp_path, path)
+
+    @app.post("/api/artifacts/bridge/event")
+    async def api_artifact_bridge_event(payload: dict = Body(default={})):  # type: ignore[assignment]
+        if not isinstance(payload, dict):
+            return JSONResponse({"detail": "payload must be an object"}, status_code=400)
+
+        artifact_id = _artifact_bridge_safe(payload.get("artifact_id") or payload.get("artifactId") or payload.get("id"), "")
+        if not artifact_id:
+            return JSONResponse({"detail": "invalid artifact_id"}, status_code=400)
+
+        channel = _artifact_bridge_safe(payload.get("channel"), "")
+        if not channel:
+            return JSONResponse({"detail": "invalid channel"}, status_code=400)
+
+        event_name = str(payload.get("event") or "").strip()
+        if not event_name:
+            return JSONResponse({"detail": "event is required"}, status_code=400)
+
+        request_id = _artifact_bridge_safe(payload.get("request_id") or payload.get("requestId"), "")
+        event_payload = payload.get("payload")
+        if not isinstance(event_payload, dict):
+            event_payload = {"value": event_payload}
+
+        try:
+            _artifact_bridge_write_state(artifact_id, channel, event_name, request_id, event_payload)
+            if request_id:
+                response_path = artifact_bridge_response_path(config.artifact_dir, request_id)
+                response_path.parent.mkdir(parents=True, exist_ok=True)
+                response_obj = {
+                    "artifact_id": artifact_id,
+                    "channel": channel,
+                    "event": event_name,
+                    "request_id": request_id,
+                    "payload": event_payload,
+                    "updated_at": time.time(),
+                }
+                tmp_path = response_path.with_name(f".{response_path.name}.{int(time.time() * 1000)}.tmp")
+                tmp_path.write_text(json.dumps(response_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.replace(tmp_path, response_path)
+        except Exception as exc:
+            return JSONResponse({"detail": f"failed to store bridge event: {exc}"}, status_code=500)
+
+        return {"ok": True, "artifact_id": artifact_id, "channel": channel, "event": event_name, "request_id": request_id or None}
 
     # ---------------------------------------------------------------------
     # Runner gateway (iframe runners)
@@ -1839,6 +1929,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 focus_signal_path = config.artifact_dir / "_focus.json"
                 focus_signal_seen_ns = 0
 
+                # One-shot bridge commands written by Hermes-side artifact tools.
+                bridge_commands_dir = artifact_bridge_commands_dir(config.artifact_dir)
+
                 while True:
                     await asyncio.sleep(0.75)
                     current = _artifact_snapshot()
@@ -1888,6 +1981,26 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                     except FileNotFoundError:
                         focus_signal_seen_ns = 0
                         pass
+                    except Exception:
+                        pass
+
+                    # Forward queued artifact bridge commands (editor collaboration, play/stop, etc.).
+                    try:
+                        for cmd_path in sorted(bridge_commands_dir.glob("*.json"), key=lambda p: p.name):
+                            if not cmd_path.is_file():
+                                continue
+                            try:
+                                cmd = json.loads(cmd_path.read_text(encoding="utf-8"))
+                            except Exception:
+                                cmd = None
+                            if isinstance(cmd, dict):
+                                await websocket.send_text(
+                                    json.dumps({"type": "artifact_bridge_command", "payload": cmd}, ensure_ascii=False)
+                                )
+                            try:
+                                cmd_path.unlink()
+                            except Exception:
+                                pass
                     except Exception:
                         pass
 

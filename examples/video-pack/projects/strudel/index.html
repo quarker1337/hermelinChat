@@ -151,12 +151,66 @@ s("bd sd")
 // Wait for the web component to fully init, then grab the API
 let api = null;
 let isPlaying = false;
+let bridgeReadySent = false;
+
+function emitHermesEvent(eventName, payload = {}, requestId = null) {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: 'hermes:artifact-event',
+        channel: 'strudel',
+        event: eventName,
+        requestId,
+        payload,
+      }, '*');
+    }
+  } catch (e) {
+    console.warn('[hermilinChat] bridge emit failed:', e);
+  }
+}
+
+function currentCode() {
+  try {
+    return api?.editor?.state?.doc?.toString?.() ?? api?.code ?? '';
+  } catch {
+    return api?.code ?? '';
+  }
+}
+
+function currentCursor() {
+  try {
+    return Number(api?.getCursorLocation?.() ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+function setPlayUi(playing) {
+  isPlaying = !!playing;
+  document.getElementById('btnPlay').classList.toggle('on', isPlaying);
+  document.getElementById('statusDot').classList.toggle('playing', isPlaying);
+}
 
 function tryGetAPI() {
   const el = document.getElementById('repl');
   if (el && el.editor) {
     api = el.editor;
     console.log('[hermilinChat] StrudelMirror API ready:', Object.keys(api));
+    if (!bridgeReadySent) {
+      bridgeReadySent = true;
+      emitHermesEvent('ready', {
+        capabilities: [
+          'get-code',
+          'set-code',
+          'append-code',
+          'replace-range',
+          'get-cursor',
+          'set-cursor',
+          'play',
+          'stop',
+        ],
+      });
+    }
     return true;
   }
   return false;
@@ -173,9 +227,8 @@ function doPlay() {
   if (!api) { console.warn('Editor not ready'); return; }
   try {
     api.evaluate();
-    isPlaying = true;
-    document.getElementById('btnPlay').classList.add('on');
-    document.getElementById('statusDot').classList.add('playing');
+    setPlayUi(true);
+    emitHermesEvent('playing', { playing: true });
   } catch(e) { console.error(e); }
 }
 
@@ -184,10 +237,77 @@ function doStop() {
   try {
     api.stop();
   } catch(e) { console.error(e); }
-  isPlaying = false;
-  document.getElementById('btnPlay').classList.remove('on');
-  document.getElementById('statusDot').classList.remove('playing');
+  setPlayUi(false);
+  emitHermesEvent('playing', { playing: false });
 }
+
+function handleHermesCommand(message) {
+  if (!api) {
+    emitHermesEvent('error', { message: 'Editor not ready' }, message.requestId || null);
+    return;
+  }
+
+  const command = String(message.command || '').trim();
+  const requestId = message.requestId || null;
+  const payload = message.payload && typeof message.payload === 'object' ? message.payload : {};
+
+  try {
+    switch (command) {
+      case 'get-code':
+        emitHermesEvent('code', { code: currentCode() }, requestId);
+        return;
+      case 'set-code': {
+        api.setCode(String(payload.code ?? ''));
+        emitHermesEvent('ack', { action: command, ok: true, code: currentCode() }, requestId);
+        return;
+      }
+      case 'append-code': {
+        api.appendCode(String(payload.text ?? ''));
+        emitHermesEvent('ack', { action: command, ok: true, code: currentCode() }, requestId);
+        return;
+      }
+      case 'replace-range': {
+        const text = String(payload.text ?? '');
+        const full = currentCode();
+        const from = Math.max(0, Math.min(full.length, Number(payload.from ?? 0)));
+        const to = Math.max(from, Math.min(full.length, Number(payload.to ?? from)));
+        api.editor.dispatch({ changes: { from, to, insert: text } });
+        emitHermesEvent('ack', { action: command, ok: true, code: currentCode() }, requestId);
+        return;
+      }
+      case 'get-cursor':
+        emitHermesEvent('cursor', { position: currentCursor() }, requestId);
+        return;
+      case 'set-cursor': {
+        const position = Math.max(0, Number(payload.position ?? 0));
+        api.setCursorLocation(position);
+        emitHermesEvent('ack', { action: command, ok: true, position: currentCursor() }, requestId);
+        return;
+      }
+      case 'play':
+        doPlay();
+        emitHermesEvent('ack', { action: command, ok: true, playing: true }, requestId);
+        return;
+      case 'stop':
+        doStop();
+        emitHermesEvent('ack', { action: command, ok: true, playing: false }, requestId);
+        return;
+      default:
+        emitHermesEvent('error', { message: `Unknown command: ${command}` }, requestId);
+    }
+  } catch (err) {
+    console.error(err);
+    emitHermesEvent('error', { message: err?.message || String(err), command }, requestId);
+  }
+}
+
+window.addEventListener('message', (event) => {
+  const message = event.data;
+  if (!message || typeof message !== 'object') return;
+  if (message.type !== 'hermes:artifact-command') return;
+  if (String(message.channel || 'strudel') !== 'strudel') return;
+  handleHermesCommand(message);
+});
 
 // ── AUDIO LEVEL METER ──
 const METER_SEGS = 32;
