@@ -52,6 +52,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+try:
+    import yaml
+except Exception:  # pragma: no cover - safe fallback if PyYAML is unavailable
+    yaml = None
+
 from tools.registry import registry
 
 
@@ -69,6 +74,53 @@ DEFAULT_ARTIFACT_SUMMARIES = (
         "default": True,
     },
 )
+
+DEFAULT_ARTIFACT_ENABLED_DEFAULTS = {
+    "strudel": False,
+}
+
+
+def _load_default_artifact_flags() -> dict[str, bool]:
+    config_path = Path(HERMES_HOME).expanduser() / "config.yaml"
+    if yaml is None or not config_path.is_file():
+        return {}
+
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    node: Any = data
+    for key in ("hermilin", "default_artifacts"):
+        if not isinstance(node, dict):
+            return {}
+        node = node.get(key, {})
+
+    if not isinstance(node, dict):
+        return {}
+
+    flags: dict[str, bool] = {}
+    for key, value in node.items():
+        artifact_id = str(key or "").strip()
+        if artifact_id:
+            flags[artifact_id] = bool(value)
+    return flags
+
+
+def _enabled_default_artifact_summaries() -> list[dict[str, Any]]:
+    flags = _load_default_artifact_flags()
+    out: list[dict[str, Any]] = []
+    for item in DEFAULT_ARTIFACT_SUMMARIES:
+        artifact_id = str(item.get("id") or "").strip()
+        if not artifact_id:
+            continue
+        enabled = flags.get(artifact_id, DEFAULT_ARTIFACT_ENABLED_DEFAULTS.get(artifact_id, True))
+        if enabled:
+            out.append(dict(item))
+    return out
 
 
 # -----------------------------------------------------------------------------
@@ -865,7 +917,7 @@ def list_artifacts(scope: str = "all") -> str:
 
     if scope_value in {"session", "all"}:
         seen_ids = {str(item.get("id") or "") for item in summaries}
-        for item in DEFAULT_ARTIFACT_SUMMARIES:
+        for item in _enabled_default_artifact_summaries():
             artifact_id = str(item.get("id") or "").strip()
             if not artifact_id or artifact_id in seen_ids:
                 continue

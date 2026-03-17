@@ -4,6 +4,11 @@ import copy
 from pathlib import Path
 from typing import Any
 
+try:
+    import yaml
+except Exception:  # pragma: no cover - safe fallback if PyYAML is unavailable
+    yaml = None
+
 _PACKAGE_ASSET_DIR = Path(__file__).resolve().parent / "default_artifact_assets"
 
 _DEFAULT_ARTIFACTS: tuple[dict[str, Any], ...] = (
@@ -21,9 +26,62 @@ _DEFAULT_ARTIFACTS: tuple[dict[str, Any], ...] = (
     },
 )
 
+_DEFAULT_ARTIFACT_ENABLED_DEFAULTS: dict[str, bool] = {
+    "strudel": False,
+}
 
-def load_default_artifacts() -> list[dict[str, Any]]:
-    return [copy.deepcopy(item) for item in _DEFAULT_ARTIFACTS]
+
+def _default_artifact_config_path(*, artifact_root: Path | None = None, hermes_home: Path | None = None) -> Path | None:
+    if hermes_home is not None:
+        return Path(hermes_home).expanduser() / "config.yaml"
+    if artifact_root is None:
+        return None
+    return Path(artifact_root).expanduser().parent / "config.yaml"
+
+
+def _load_default_artifact_flags(*, artifact_root: Path | None = None, hermes_home: Path | None = None) -> dict[str, bool]:
+    config_path = _default_artifact_config_path(artifact_root=artifact_root, hermes_home=hermes_home)
+    if yaml is None or config_path is None or not config_path.is_file():
+        return {}
+
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    node: Any = data
+    for key in ("hermilin", "default_artifacts"):
+        if not isinstance(node, dict):
+            return {}
+        node = node.get(key, {})
+
+    if not isinstance(node, dict):
+        return {}
+
+    flags: dict[str, bool] = {}
+    for key, value in node.items():
+        artifact_id = str(key or "").strip()
+        if artifact_id:
+            flags[artifact_id] = bool(value)
+    return flags
+
+
+def load_default_artifacts(*, artifact_root: Path | None = None, hermes_home: Path | None = None) -> list[dict[str, Any]]:
+    flags = _load_default_artifact_flags(artifact_root=artifact_root, hermes_home=hermes_home)
+
+    enabled_items: list[dict[str, Any]] = []
+    for item in _DEFAULT_ARTIFACTS:
+        artifact_id = str(item.get("id") or "").strip()
+        if not artifact_id:
+            continue
+        enabled = flags.get(artifact_id, _DEFAULT_ARTIFACT_ENABLED_DEFAULTS.get(artifact_id, True))
+        if not enabled:
+            continue
+        enabled_items.append(copy.deepcopy(item))
+    return enabled_items
 
 
 def resolve_default_artifact_path(static_dir: Path, asset_path: str) -> Path | None:

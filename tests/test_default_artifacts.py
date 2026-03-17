@@ -45,10 +45,28 @@ def _route_for_path(app, path: str):
     raise AssertionError(f"route not found: {path}")
 
 
+def _write_default_artifact_config(path: Path, **flags):
+    lines = ["hermilin:", "  default_artifacts:"]
+    for key, value in sorted(flags.items()):
+        lines.append(f"    {key}: {'true' if value else 'false'}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 class DefaultArtifactsTests(unittest.TestCase):
-    def test_list_artifacts_includes_default_strudel(self):
+    def test_list_artifacts_omits_default_strudel_without_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_root = Path(tmpdir) / "artifacts"
+            items = list_artifacts(artifact_root)
+
+        strudel = next((item for item in items if item.get("id") == "strudel"), None)
+        self.assertIsNone(strudel)
+
+    def test_list_artifacts_includes_default_strudel_when_enabled_in_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            _write_default_artifact_config(tmp / "config.yaml", strudel=True)
+            artifact_root = tmp / "artifacts"
             items = list_artifacts(artifact_root)
 
         strudel = next((item for item in items if item.get("id") == "strudel"), None)
@@ -60,7 +78,9 @@ class DefaultArtifactsTests(unittest.TestCase):
 
     def test_disk_artifact_overrides_default_entry_with_same_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            artifact_root = Path(tmpdir) / "artifacts"
+            tmp = Path(tmpdir)
+            _write_default_artifact_config(tmp / "config.yaml", strudel=True)
+            artifact_root = tmp / "artifacts"
             session_dir = artifact_root / "session"
             session_dir.mkdir(parents=True, exist_ok=True)
             (session_dir / "strudel.json").write_text(
@@ -85,11 +105,13 @@ class DefaultArtifactsTests(unittest.TestCase):
         self.assertFalse(strudel.get("default", False))
         self.assertEqual((strudel.get("data") or {}).get("content"), "hello")
 
-    def test_server_lists_and_serves_default_strudel(self):
+    def test_server_lists_and_serves_default_strudel_when_enabled_in_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
+            hermes_home = tmp / "hermes-home"
+            _write_default_artifact_config(hermes_home / "config.yaml", strudel=True)
             config = HermelinConfig(
-                hermes_home=tmp / "hermes-home",
+                hermes_home=hermes_home,
                 meta_db_path=tmp / "hermelin_meta.db",
                 spawn_cwd=tmp / "spawn-cwd",
             )
@@ -117,12 +139,33 @@ class DefaultArtifactsTests(unittest.TestCase):
         self.assertIn("getActiveTheme", renderer_text)
         self.assertIn("type: 'hermes:artifact-theme'", renderer_text)
 
-    def test_artifact_tool_lists_default_strudel(self):
+    def test_artifact_tool_omits_default_strudel_without_config(self):
         tool_module = _load_artifact_tool_module()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             artifacts_home = Path(tmpdir) / "artifacts"
             tool_module.HERMES_HOME = str(Path(tmpdir))
+            tool_module.ARTIFACTS_HOME = str(artifacts_home)
+            tool_module.ARTIFACT_SESSION_DIR = str(artifacts_home / "session")
+            tool_module.ARTIFACT_PERSISTENT_DIR = str(artifacts_home / "persistent")
+            tool_module.ARTIFACTS_ROOT_DIR = str(artifacts_home)
+            tool_module.RUNNERS_DIR = str(artifacts_home / "runners")
+            tool_module.RUNNER_PROJECTS_DIR = str(artifacts_home / "runners" / "projects")
+            tool_module.PIDS_DIR = str(artifacts_home / "pids")
+
+            items = json.loads(tool_module.list_artifacts())
+
+        strudel = next((item for item in items if item.get("id") == "strudel"), None)
+        self.assertIsNone(strudel)
+
+    def test_artifact_tool_lists_default_strudel_when_enabled_in_config(self):
+        tool_module = _load_artifact_tool_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            _write_default_artifact_config(tmp / "config.yaml", strudel=True)
+            artifacts_home = tmp / "artifacts"
+            tool_module.HERMES_HOME = str(tmp)
             tool_module.ARTIFACTS_HOME = str(artifacts_home)
             tool_module.ARTIFACT_SESSION_DIR = str(artifacts_home / "session")
             tool_module.ARTIFACT_PERSISTENT_DIR = str(artifacts_home / "persistent")

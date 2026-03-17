@@ -220,11 +220,11 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     @app.get("/api/artifacts")
     async def api_artifacts():
-        return list_artifacts(config.artifact_dir)
+        return list_artifacts(config.artifact_dir, hermes_home=config.hermes_home)
 
     @app.get("/api/artifacts/latest")
     async def api_artifacts_latest():
-        return latest_artifact(config.artifact_dir)
+        return latest_artifact(config.artifact_dir, hermes_home=config.hermes_home)
 
     @app.get("/api/default-artifacts/{asset_path:path}")
     async def api_default_artifact_asset(asset_path: str):
@@ -1718,7 +1718,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 # panel (otherwise it can remain open in an empty-state).
                 if did_remove:
                     try:
-                        if not list_artifacts(config.artifact_dir):
+                        if not list_artifacts(config.artifact_dir, hermes_home=config.hermes_home):
                             await websocket.send_text(
                                 json.dumps(
                                     {
@@ -1815,7 +1815,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=init_cols, rows=init_rows)
 
         def _artifact_snapshot() -> dict[str, dict]:
-            items = list_artifacts(config.artifact_dir)
+            items = list_artifacts(config.artifact_dir, hermes_home=config.hermes_home)
             out: dict[str, dict] = {}
             for item in items:
                 if not isinstance(item, dict):

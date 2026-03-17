@@ -149,7 +149,7 @@ def _iter_artifact_files(root: Path) -> Iterable[tuple[Path, bool]]:
         yield path, False
 
 
-def list_artifacts(root: Path) -> list[dict[str, Any]]:
+def list_artifacts(root: Path, *, hermes_home: Path | None = None) -> list[dict[str, Any]]:
     artifact_root_dir(root)
 
     artifacts_by_id: dict[str, dict[str, Any]] = {}
@@ -176,7 +176,7 @@ def list_artifacts(root: Path) -> list[dict[str, Any]]:
         if curr_key > prev_key:
             artifacts_by_id[artifact_id] = payload
 
-    for payload in load_default_artifacts():
+    for payload in load_default_artifacts(artifact_root=root, hermes_home=hermes_home):
         artifact_id = str(payload.get("id") or "").strip()
         if not artifact_id or not is_valid_artifact_id(artifact_id):
             continue
@@ -192,24 +192,23 @@ def list_artifacts(root: Path) -> list[dict[str, Any]]:
     return artifacts
 
 
-def latest_artifact(root: Path) -> dict[str, Any] | None:
+def latest_artifact(root: Path, *, hermes_home: Path | None = None) -> dict[str, Any] | None:
     latest_path = artifact_root_dir(root) / "_latest.json"
     payload = _read_json(latest_path)
     if payload is not None:
         artifact_id = str(payload.get("id") or "").strip()
         if artifact_id and is_valid_artifact_id(artifact_id):
-            # Best-effort: infer persistent if missing.
             if "persistent" not in payload:
                 payload["persistent"] = (artifact_persistent_dir(root) / f"{artifact_id}.json").exists()
-        return payload
+            return payload
 
-    artifacts = list_artifacts(root)
+    artifacts = list_artifacts(root, hermes_home=hermes_home)
     return artifacts[0] if artifacts else None
 
 
-def recompute_latest(root: Path) -> None:
+def recompute_latest(root: Path, *, hermes_home: Path | None = None) -> None:
     latest_path = artifact_root_dir(root) / "_latest.json"
-    latest = latest_artifact_from_list(list_artifacts(root))
+    latest = latest_artifact_from_list(list_artifacts(root, hermes_home=hermes_home))
     if latest is None:
         try:
             latest_path.unlink(missing_ok=True)
