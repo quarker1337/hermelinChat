@@ -121,7 +121,7 @@ export const THEMES = {
         speedBase: 0.025,
         speedJitter: 0.03,
 
-        // A little "glitch" red, per matrix_effect.js reference.
+        // A little "glitch" red for the matrix-rain palette.
         redChance: 0.18,
 
         // When a column is past the bottom, chance per draw to reset back to the top.
