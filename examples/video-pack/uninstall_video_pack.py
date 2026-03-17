@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""uninstall_video_pack.py — Revert hermilinChat video pack changes in a Hermes HOME.
+"""uninstall_video_pack.py — Revert hermelinChat video pack changes in a Hermes HOME.
 
 What it does:
 - Restores $HERMES_HOME/config.yaml from config.yaml.video-pack.bak (if present)
@@ -9,7 +9,7 @@ What it does:
     $HERMES_HOME/artifacts/runners/projects/{gpu,builder,strudel,money}/
 
 Usage:
-  cd /path/to/hermilinChat
+  cd /path/to/hermelinChat
   ./.venv/bin/python examples/video-pack/uninstall_video_pack.py --env-file .hermelin.env
 """
 
@@ -58,7 +58,7 @@ def _default_hermes_home() -> Path:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Uninstall hermilinChat video pack from a Hermes HOME")
+    p = argparse.ArgumentParser(description="Uninstall hermelinChat video pack from a Hermes HOME")
     p.add_argument(
         "--env-file",
         default=str(REPO_ROOT / ".hermelin.env"),
@@ -105,7 +105,7 @@ def main() -> int:
 
     dst_projects_root = hermes_home / "artifacts" / "runners" / "projects"
 
-    print("hermilinChat video pack uninstall target")
+    print("hermelinChat video pack uninstall target")
     print(f"  env_file:     {env_path}")
     print(f"  hermes_home:  {hermes_home}")
     print(f"  config:       {config_path}")

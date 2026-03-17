@@ -380,13 +380,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     }
 
     _RUNNER_STRIP_REQUEST_HEADERS = {
-        # Never forward hermilinChat session material to runners.
+        # Never forward hermelinChat session material to runners.
         "cookie",
         "authorization",
     }
 
     _RUNNER_STRIP_RESPONSE_HEADERS = {
-        # Runner must never be able to set cookies on hermilinChat origin.
+        # Runner must never be able to set cookies on hermelinChat origin.
         "set-cookie",
     }
 
@@ -881,7 +881,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         Best-effort: read Hermes Agent's canonical OpenRouter model menu (the one used by `hermes model`).
 
         We run inside Hermes' own venv (as referenced by the hermes launcher shebang),
-        so hermilinChat doesn't need hermes_cli installed in its own venv.
+        so hermelinChat doesn't need hermes_cli installed in its own venv.
         """
 
         hermes_bin = _hermes_bin()
@@ -1188,7 +1188,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     def _set_display_skin(skin: str) -> bool:
         """Best-effort: set display.skin in Hermes' config.yaml.
 
-        Hermes reads the skin at startup; hermilinChat uses this to auto-sync the
+        Hermes reads the skin at startup; hermelinChat uses this to auto-sync the
         CLI skin with the UI theme.
         """
 
@@ -1636,7 +1636,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         argv = shlex.split(config.hermes_cmd)
 
         # -------------------------------------------------------------
-        # hermilinChat UI theme -> Hermes CLI skin (upstream skin system)
+        # hermelinChat UI theme -> Hermes CLI skin (upstream skin system)
         # -------------------------------------------------------------
         # Hermes reads the active skin from ~/.hermes/config.yaml (display.skin).
         # There is no per-launch CLI flag, so we sync the skin before spawning Hermes.
@@ -1647,8 +1647,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             ui_theme = ""
 
         skin_name: str | None = None
-        if ui_theme == "hermilin":
-            skin_name = "hermilin"
+        if ui_theme == "hermelin":
+            skin_name = "hermelin"
         elif ui_theme == "matrix":
             skin_name = "matrix"
         elif ui_theme == "nous":
@@ -1680,7 +1680,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         # Avoid surprising overrides: hermes' runtime CLI prioritizes env vars
         # (and loads ~/.hermes/.env via dotenv). We want config.yaml/.env to be
-        # the source of truth, not the environment hermilinChat was launched with.
+        # the source of truth, not the environment hermelinChat was launched with.
         for k in (
             "LLM_MODEL",
             "OPENAI_MODEL",
@@ -1692,7 +1692,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "BROWSERBASE_PROJECT_ID",
             "GITHUB_TOKEN",
             # IMPORTANT: Rich will prefer these env vars over the actual PTY
-            # TIOCGWINSZ width/height. If hermilinChat was started from a wide
+            # TIOCGWINSZ width/height. If hermelinChat was started from a wide
             # local terminal (e.g. 160 cols) and the shell exported COLUMNS,
             # Hermes/Rich will render as if it had that width regardless of the
             # real xterm.js viewport. We must drop them so Rich reads from the

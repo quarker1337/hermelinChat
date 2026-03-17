@@ -13,19 +13,19 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = SCRIPT_DIR / "hermes_banner_video_patch"
 SAMPLE_FAKE_JSON = ASSET_DIR / "banner_fake.json"
 
-PATCH_START = "    # hermilinChat banner video patch (installed by hermilinChat patch)"
-PATCH_END = "    # end hermilinChat banner video patch"
+PATCH_START = "    # hermelinChat banner video patch (installed by hermelinChat patch)"
+PATCH_END = "    # end hermelinChat banner video patch"
 
 # When patching Hermes' project-root cli.py we need a non-indented marker (an
 # indented line at module scope would be a syntax error).
-CLI_PATCH_START = "# hermilinChat banner video patch (installed by hermilinChat patch)"
-CLI_PATCH_END = "# end hermilinChat banner video patch"
+CLI_PATCH_START = "# hermelinChat banner video patch (installed by hermelinChat patch)"
+CLI_PATCH_END = "# end hermelinChat banner video patch"
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
-            "Patch the active Hermes installation's startup banner for hermilinChat video takes. "
+            "Patch the active Hermes installation's startup banner for hermelinChat video takes. "
             "Adds env-var toggles to hide model/cwd/session under the caduceus and optionally "
             "display a fake tools/skills list."
         )
@@ -193,7 +193,7 @@ def _remove_patch_blocks(
     start_marker: str = PATCH_START,
     end_marker: str = PATCH_END,
 ) -> tuple[str, int]:
-    """Remove all existing hermilinChat patch blocks.
+    """Remove all existing hermelinChat patch blocks.
 
     This makes the installer idempotent across versions: we can update the
     patch implementation by re-running install.
@@ -233,20 +233,20 @@ def _patch_banner(path: Path) -> tuple[bool, str]:
 
     config_block = (
         "{PATCH_START}\n"
-        "    # hermilinChat VIDEO banner mode (edit these constants in-place)\n"
+        "    # hermelinChat VIDEO banner mode (edit these constants in-place)\n"
         "    #\n"
         "    # To restore the stock banner WITHOUT uninstalling this patch, set:\n"
-        "    #   HERMILIN_BANNER_VIDEO_MODE = False\n"
-        "    HERMILIN_BANNER_VIDEO_MODE = True\n"
+        "    #   HERMELIN_BANNER_VIDEO_MODE = False\n"
+        "    HERMELIN_BANNER_VIDEO_MODE = True\n"
         "\n"
         "    # If True, replaces the Tools/Skills panel with a fake list.\n"
-        "    HERMILIN_BANNER_FAKE_LIST = True\n"
+        "    HERMELIN_BANNER_FAKE_LIST = True\n"
         "\n"
         "    # Optional override file (edit to taste). If missing/invalid, we use the\n"
         "    # built-in fallback fake list below.\n"
-        "    HERMILIN_BANNER_FAKE_FILE = Path.home() / '.hermes' / 'banner_fake.json'\n"
+        "    HERMELIN_BANNER_FAKE_FILE = Path.home() / '.hermes' / 'banner_fake.json'\n"
         "\n"
-        "    _hermilin_fake_cfg = {\n"
+        "    _hermelin_fake_cfg = {\n"
         "        'toolsets': {\n"
         "            'core': ['delegate_task', 'execute_code', 'clarify'],\n"
         "            'web': ['web_search', 'web_extract', 'browser_navigate', 'browser_snapshot'],\n"
@@ -263,11 +263,11 @@ def _patch_banner(path: Path) -> tuple[bool, str]:
         "    }\n"
         "\n"
         "    try:\n"
-        "        _p = HERMILIN_BANNER_FAKE_FILE\n"
+        "        _p = HERMELIN_BANNER_FAKE_FILE\n"
         "        if _p and _p.exists():\n"
         "            _tmp = json.loads(_p.read_text(encoding='utf-8'))\n"
         "            if isinstance(_tmp, dict):\n"
-        "                _hermilin_fake_cfg = _tmp\n"
+        "                _hermelin_fake_cfg = _tmp\n"
         "    except Exception:\n"
         "        pass\n"
         "{PATCH_END}\n\n"
@@ -276,7 +276,7 @@ def _patch_banner(path: Path) -> tuple[bool, str]:
     hide_block = (
         "{PATCH_START}\n"
         "    # Hide the model/cwd/session lines under the caduceus for video takes.\n"
-        "    if HERMILIN_BANNER_VIDEO_MODE:\n"
+        "    if HERMELIN_BANNER_VIDEO_MODE:\n"
         "        left_lines = left_lines[:3]\n"
         "{PATCH_END}\n\n"
     ).replace("{PATCH_START}", PATCH_START).replace("{PATCH_END}", PATCH_END).replace("\n", newline)
@@ -285,9 +285,9 @@ def _patch_banner(path: Path) -> tuple[bool, str]:
     # returns early when VIDEO mode + fake list is enabled.
     fake_block = (
         "{PATCH_START}\n"
-        "    if HERMILIN_BANNER_VIDEO_MODE and HERMILIN_BANNER_FAKE_LIST and _hermilin_fake_cfg:\n"
+        "    if HERMELIN_BANNER_VIDEO_MODE and HERMELIN_BANNER_FAKE_LIST and _hermelin_fake_cfg:\n"
         "        right_lines = [f\"[bold {accent}]Available Tools[/]\"]\n\n"
-        "        toolsets_dict = _hermilin_fake_cfg.get(\"toolsets\", {})\n"
+        "        toolsets_dict = _hermelin_fake_cfg.get(\"toolsets\", {})\n"
         "        if not isinstance(toolsets_dict, dict):\n"
         "            toolsets_dict = {}\n\n"
         "        sorted_toolsets = sorted(toolsets_dict.keys())\n"
@@ -321,7 +321,7 @@ def _patch_banner(path: Path) -> tuple[bool, str]:
         "            right_lines.append(f\"[dim {dim}](and {remaining_toolsets} more toolsets...)[/]\")\n\n"
         "        right_lines.append('')\n"
         "        right_lines.append(f\"[bold {accent}]Available Skills[/]\")\n\n"
-        "        skills_by_category = _hermilin_fake_cfg.get(\"skills\", {})\n"
+        "        skills_by_category = _hermelin_fake_cfg.get(\"skills\", {})\n"
         "        if not isinstance(skills_by_category, dict):\n"
         "            skills_by_category = {}\n\n"
         "        total_skills = 0\n"
@@ -343,7 +343,7 @@ def _patch_banner(path: Path) -> tuple[bool, str]:
         "        else:\n"
         "            right_lines.append(f\"[dim {dim}]No skills installed[/]\")\n\n"
         "        right_lines.append('')\n"
-        "        summary = str(_hermilin_fake_cfg.get(\"summary\", \"\")).strip()\n"
+        "        summary = str(_hermelin_fake_cfg.get(\"summary\", \"\")).strip()\n"
         "        if summary:\n"
         "            right_lines.append(f\"[dim {dim}]{summary}[/]\")\n"
         "        else:\n"
@@ -422,8 +422,8 @@ def _patch_cli(path: Path) -> tuple[bool, str]:
     patch_block = (
         f"{CLI_PATCH_START}\n"
         "try:\n"
-        "    # Delegate to hermes_cli.banner (which hermilinChat patches for video mode).\n"
-        "    from hermes_cli import banner as _hermilin_banner\n\n"
+        "    # Delegate to hermes_cli.banner (which hermelinChat patches for video mode).\n"
+        "    from hermes_cli import banner as _hermelin_banner\n\n"
         "    # Preserve skin banner art (banner_logo/banner_hero) so delegating to\n"
         "    # hermes_cli.banner doesn't revert to the stock Hermes Agent ASCII art.\n"
         "    _skin_logo = None\n"
@@ -438,29 +438,29 @@ def _patch_cli(path: Path) -> tuple[bool, str]:
         "        _skin_hero = None\n"
         "\n"
         "    if _skin_logo:\n"
-        "        _hermilin_banner.HERMES_AGENT_LOGO = _skin_logo\n"
+        "        _hermelin_banner.HERMES_AGENT_LOGO = _skin_logo\n"
         "    if _skin_hero:\n"
-        "        _hermilin_banner.HERMES_CADUCEUS = _skin_hero\n"
+        "        _hermelin_banner.HERMES_CADUCEUS = _skin_hero\n"
         "\n"
         "    # Fallback: preserve cli.py overrides when skin doesn't supply them.\n"
         "    if not _skin_logo:\n"
         "        try:\n"
         "            _val = globals().get('HERMES_AGENT_LOGO')\n"
         "            if _val is not None:\n"
-        "                _hermilin_banner.HERMES_AGENT_LOGO = _val\n"
+        "                _hermelin_banner.HERMES_AGENT_LOGO = _val\n"
         "        except Exception:\n"
         "            pass\n"
         "    if not _skin_hero:\n"
         "        try:\n"
         "            _val = globals().get('HERMES_CADUCEUS')\n"
         "            if _val is not None:\n"
-        "                _hermilin_banner.HERMES_CADUCEUS = _val\n"
+        "                _hermelin_banner.HERMES_CADUCEUS = _val\n"
         "        except Exception:\n"
         "            pass\n"
         "    try:\n"
         "        _val = globals().get('COMPACT_BANNER')\n"
         "        if _val is not None:\n"
-        "            _hermilin_banner.COMPACT_BANNER = _val\n"
+        "            _hermelin_banner.COMPACT_BANNER = _val\n"
         "    except Exception:\n"
         "        pass\n\n"
         "    def build_welcome_banner(\n"
@@ -473,7 +473,7 @@ def _patch_cli(path: Path) -> tuple[bool, str]:
         "        context_length=None,\n"
         "    ):\n"
         "        _gtt = globals().get('get_toolset_for_tool', None)\n"
-        "        return _hermilin_banner.build_welcome_banner(\n"
+        "        return _hermelin_banner.build_welcome_banner(\n"
         "            console=console,\n"
         "            model=model,\n"
         "            cwd=cwd,\n"
@@ -549,7 +549,7 @@ def main() -> int:
     print("  2) No env vars required. Just start Hermes and record.")
     print("  3) To toggle back to the stock banner without uninstalling,")
     print(f"     edit: {live_paths['banner']}")
-    print("     and set: HERMILIN_BANNER_VIDEO_MODE = False")
+    print("     and set: HERMELIN_BANNER_VIDEO_MODE = False")
     print("     (or run examples/video-pack/uninstall_hermes_banner_video_patch.py)")
 
     return 0

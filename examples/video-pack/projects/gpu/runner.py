@@ -30,7 +30,7 @@ class _QuietHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="hermilinChat video-pack runner (static http server)")
+    p = argparse.ArgumentParser(description="hermelinChat video-pack runner (static http server)")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=0, help="Port to bind (0 = auto).")
     args = p.parse_args()

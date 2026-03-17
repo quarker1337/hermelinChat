@@ -11,21 +11,21 @@ import { AMBER, SLATE, DEFAULT_THEME_ID, THEME_OPTIONS, THEMES, normalizeThemeId
 
 // ─── UI PREFS (LOCAL) ───────────────────────────────────────────────
 // Stored in localStorage and applied instantly (no backend required).
-const UI_PREFS_STORAGE_KEY = 'hermilinChat.uiPrefs'
+const UI_PREFS_STORAGE_KEY = 'hermelinChat.uiPrefs'
 
-const ARTIFACT_PANEL_WIDTH_STORAGE_KEY = 'hermilinChat.artifactPanelWidth'
+const ARTIFACT_PANEL_WIDTH_STORAGE_KEY = 'hermelinChat.artifactPanelWidth'
 const DEFAULT_ARTIFACT_PANEL_WIDTH = 480
 
 const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
 const BACKGROUND_EFFECT_VALUES = ['auto', 'particles', 'matrix-rain', 'nous-crt', 'samaritan']
 
 // Release version (keep in sync with git tag + backend pyproject).
-const HERMILINCHAT_VERSION = '0.13'
+const HERMELINCHAT_VERSION = '0.13'
 
 const DEFAULT_UI_PREFS = {
   theme: DEFAULT_THEME_ID,
   // Displayed in the sidebar header + browser tab title. (Empty => fallback)
-  appName: 'hermilinChat',
+  appName: 'hermelinChat',
   particles: {
     enabled: true,
     // 50..100 (50 matches the old look)
@@ -3059,7 +3059,7 @@ const SettingsPanel = ({
           </div>
 
           <div style={{ fontSize: 10, color: SLATE.muted, textAlign: 'right' }}>
-            hermilinChat Version: {HERMILINCHAT_VERSION}
+            hermelinChat Version: {HERMELINCHAT_VERSION}
           </div>
         </div>
       </div>
@@ -3591,10 +3591,10 @@ export default function App() {
       if (!entries.length) return
 
       // Remove any previous theme-managed icons.
-      document.querySelectorAll('link[data-hermilin-theme-icon="1"]').forEach((el) => el.remove())
+      document.querySelectorAll('link[data-hermelin-theme-icon="1"]').forEach((el) => el.remove())
 
       const applyLink = (el, cfg) => {
-        el.setAttribute('data-hermilin-theme-icon', '1')
+        el.setAttribute('data-hermelin-theme-icon', '1')
         el.setAttribute('rel', cfg.rel || 'icon')
         if (cfg.type) el.setAttribute('type', cfg.type)
         else el.removeAttribute('type')

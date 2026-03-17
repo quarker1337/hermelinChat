@@ -53,7 +53,7 @@ def _load_default_artifact_flags(*, artifact_root: Path | None = None, hermes_ho
         return {}
 
     node: Any = data
-    for key in ("hermilin", "default_artifacts"):
+    for key in ("hermelin", "default_artifacts"):
         if not isinstance(node, dict):
             return {}
         node = node.get(key, {})

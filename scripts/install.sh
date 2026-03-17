@@ -48,7 +48,7 @@ Options:
   --skip-frontend        Skip npm install/build (NOT recommended; UI will 404 on /)
   --skip-python          Skip pip install -e .
   --skip-hermes-patch    Skip patching the active Hermes installation with artifact tools
-  --skip-hermes-skins    Skip installing hermilinChat CLI skins into ~/.hermes/skins/
+  --skip-hermes-skins    Skip installing hermelinChat CLI skins into ~/.hermes/skins/
   --skip-hermes-themes   (deprecated alias for --skip-hermes-skins)
 
   -y, --yes              Do not prompt for confirmation
@@ -162,7 +162,7 @@ fi
 # -------------------------------------------------------------------
 # Hermes install sanity check
 # -------------------------------------------------------------------
-# hermilinChat expects Hermes Agent to be installed for the *current user* so
+# hermelinChat expects Hermes Agent to be installed for the *current user* so
 # it can read/write ~/.hermes without sudo and so upgrades don't get blocked.
 if [[ "$DEFAULT_HERMES_EXE" == "hermes" ]]; then
   echo "ERROR: hermes not found in PATH. Install Hermes Agent for this user first." >&2
@@ -190,7 +190,7 @@ if [[ "$ENABLE_HTTPS" -eq 1 ]]; then
     exit 1
   fi
 
-  TLS_DIR="${DEFAULT_HERMES_HOME}/hermilin_tls"
+  TLS_DIR="${DEFAULT_HERMES_HOME}/hermelin_tls"
   SSL_CERTFILE="${TLS_DIR}/cert.pem"
   SSL_KEYFILE="${TLS_DIR}/key.pem"
   OPENSSL_CNF="${TLS_DIR}/openssl.cnf"
@@ -295,7 +295,7 @@ fi
 # -------------------------------------------------------------------
 if [[ "$INSTALL_SERVICE" -eq 0 && "$YES" -eq 0 ]]; then
   if command -v systemctl >/dev/null 2>&1; then
-    read -r -p "Install and start a systemd service for hermilinChat? [y/N] " _svc
+    read -r -p "Install and start a systemd service for hermelinChat? [y/N] " _svc
     if [[ "${_svc,,}" == "y" || "${_svc,,}" == "yes" ]]; then
       INSTALL_SERVICE=1
       read -r -p "Install as user service (no sudo) or system service (sudo)? [u/s] (default: u) " _mode
@@ -308,7 +308,7 @@ if [[ "$INSTALL_SERVICE" -eq 0 && "$YES" -eq 0 ]]; then
   fi
 fi
 
-echo "==> hermilinChat install"
+echo "==> hermelinChat install"
 echo "    root:     $ROOT_DIR"
 echo "    env file: $ENV_FILE"
 echo
@@ -353,7 +353,7 @@ if [[ "$WRITE_ENV" -eq 1 ]]; then
   mkdir -p "$ENV_DIR"
 
   cat >"$ENV_FILE" <<EOF
-# hermilinChat runtime config (gitignored)
+# hermelinChat runtime config (gitignored)
 #
 # This file is compatible with:
 #   - bash:   set -a; source .hermelin.env; set +a
@@ -382,11 +382,11 @@ HERMES_HOME=$DEFAULT_HERMES_HOME
 HERMELIN_HERMES_CMD="$DEFAULT_HERMES_EXE chat --toolsets \"hermes-cli, artifacts\""
 
 # Optional
-# HERMELIN_META_DB_PATH=$DEFAULT_HERMES_HOME/hermilin_meta.db
+# HERMELIN_META_DB_PATH=$DEFAULT_HERMES_HOME/hermelin_meta.db
 # HERMELIN_SPAWN_CWD=$ROOT_DIR
 
 # Built-in HTTPS (self-signed by installer)
-# - If both HERMELIN_SSL_CERTFILE and HERMELIN_SSL_KEYFILE are set, hermilinChat
+# - If both HERMELIN_SSL_CERTFILE and HERMELIN_SSL_KEYFILE are set, hermelinChat
 #   serves HTTPS directly.
 # - Disable by emptying these vars or re-running installer with --no-https.
 HERMELIN_SSL_CERTFILE="$SSL_CERTFILE"
@@ -418,16 +418,16 @@ if [[ -f "$ENV_FILE" ]]; then
   # Ensure env file contains HTTPS settings
   # -------------------------------------------------------------------
   echo "==> ensuring HTTPS settings in env file"
-  HERMILIN_ENV_FILE="$ENV_FILE" \
-    HERMILIN_ENABLE_HTTPS="$ENABLE_HTTPS" \
-    HERMILIN_SSL_CERTFILE="$SSL_CERTFILE" \
-    HERMILIN_SSL_KEYFILE="$SSL_KEYFILE" \
+  HERMELIN_ENV_FILE="$ENV_FILE" \
+    HERMELIN_ENABLE_HTTPS="$ENABLE_HTTPS" \
+    HERMELIN_SSL_CERTFILE="$SSL_CERTFILE" \
+    HERMELIN_SSL_KEYFILE="$SSL_KEYFILE" \
     python3 - <<'PY'
 import os
 import re
 from pathlib import Path
 
-env_file = Path(os.environ["HERMILIN_ENV_FILE"])
+env_file = Path(os.environ["HERMELIN_ENV_FILE"])
 txt = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
 
 def _unquote(s: str) -> str:
@@ -448,9 +448,9 @@ def set_key(key: str, value: str, quote: bool = False):
     else:
         txt = txt.rstrip("\n") + "\n" + desired + "\n"
 
-enable = os.environ.get("HERMILIN_ENABLE_HTTPS", "1") == "1"
-default_cert = os.environ.get("HERMILIN_SSL_CERTFILE", "")
-default_key = os.environ.get("HERMILIN_SSL_KEYFILE", "")
+enable = os.environ.get("HERMELIN_ENABLE_HTTPS", "1") == "1"
+default_cert = os.environ.get("HERMELIN_SSL_CERTFILE", "")
+default_key = os.environ.get("HERMELIN_SSL_KEYFILE", "")
 
 if enable:
     cert = (get("HERMELIN_SSL_CERTFILE") or "").strip()
@@ -486,13 +486,13 @@ PY
   if grep -q '^HERMELIN_HERMES_CMD=' "$ENV_FILE"; then
     if grep -Eq "^HERMELIN_HERMES_CMD=[\"']?hermes([[:space:]]|$)" "$ENV_FILE"; then
       echo "==> updating HERMELIN_HERMES_CMD to absolute path (systemd-safe)"
-      HERMILIN_ENV_FILE="$ENV_FILE" HERMILIN_HERMES_EXE="$DEFAULT_HERMES_EXE" python3 - <<'PY'
+      HERMELIN_ENV_FILE="$ENV_FILE" HERMELIN_HERMES_EXE="$DEFAULT_HERMES_EXE" python3 - <<'PY'
 import os
 import re
 from pathlib import Path
 
-p = Path(os.environ["HERMILIN_ENV_FILE"])
-exe = os.environ["HERMILIN_HERMES_EXE"]
+p = Path(os.environ["HERMELIN_ENV_FILE"])
+exe = os.environ["HERMELIN_HERMES_EXE"]
 
 txt = p.read_text(encoding="utf-8")
 desired = f'HERMELIN_HERMES_CMD="{exe} chat --toolsets hermes-cli,artifacts"'
@@ -556,7 +556,7 @@ else
     exit 1
   fi
 
-  HERMILIN_ENV_FILE="$ENV_FILE" HERMILIN_YES="$YES" "$ROOT_DIR/.venv/bin/python" - <<'PY'
+  HERMELIN_ENV_FILE="$ENV_FILE" HERMELIN_YES="$YES" "$ROOT_DIR/.venv/bin/python" - <<'PY'
 import os
 import re
 import secrets
@@ -566,8 +566,8 @@ from pathlib import Path
 from hermelin.auth import hash_login_password
 
 
-env_file = Path(os.environ["HERMILIN_ENV_FILE"]).expanduser()
-yes = os.environ.get("HERMILIN_YES", "0") == "1"
+env_file = Path(os.environ["HERMELIN_ENV_FILE"]).expanduser()
+yes = os.environ.get("HERMELIN_YES", "0") == "1"
 
 txt = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
 
@@ -618,7 +618,7 @@ else:
     else:
         import getpass
 
-        pw = getpass.getpass("Set hermilinChat UI password (leave blank to generate): ")
+        pw = getpass.getpass("Set hermelinChat UI password (leave blank to generate): ")
         if not pw:
             pw = secrets.token_urlsafe(32)
             generated = True
@@ -660,7 +660,7 @@ install_service_system() {
 
   sudo tee "$unit_path" >/dev/null <<EOF
 [Unit]
-Description=hermilinChat
+Description=hermelinChat
 After=network.target
 
 [Service]
@@ -696,7 +696,7 @@ install_service_user() {
 
   cat >"$unit_path" <<EOF
 [Unit]
-Description=hermilinChat
+Description=hermelinChat
 After=network.target
 
 [Service]

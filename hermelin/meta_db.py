@@ -46,7 +46,7 @@ def _connect(db_path: Path) -> sqlite3.Connection:
 
 
 def ensure_meta_db(db_path: Path) -> None:
-    """Create the hermilin meta DB if missing (idempotent)."""
+    """Create the hermelin meta DB if missing (idempotent)."""
     with _connect(db_path) as conn:
         conn.executescript(_SCHEMA_SQL)
         conn.commit()

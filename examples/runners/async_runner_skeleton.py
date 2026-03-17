@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Example iframe runner (stdlib-only) for hermilinChat Runner Gateway.
+"""Example iframe runner (stdlib-only) for hermelinChat Runner Gateway.
 
 Why this exists
 - Hermes often starts iframe runners bound to 127.0.0.1.
 - If the operator browser is remote, direct iframe src=http://127.0.0.1:PORT
   will not work.
-- hermilinChat fixes this by proxying runners under:
+- hermelinChat fixes this by proxying runners under:
     /r/{tab_id}/_t/{token}/...
   where token is minted by the authenticated UI.
 
 This runner demonstrates:
 - Binding to 127.0.0.1 on a random free port
-- Writing a runner manifest so hermilinChat can discover the port:
+- Writing a runner manifest so hermelinChat can discover the port:
     $HERMES_ARTIFACT_PROJECT_DIR/runner.json
 - Serving:
   - GET /        : minimal HTML UI (uses ONLY relative URLs)
@@ -176,7 +176,7 @@ HTML = """<!doctype html>
 <head>
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-  <title>hermilinChat runner demo</title>
+  <title>hermelinChat runner demo</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; padding: 18px; }
     code { background: #f3f3f6; padding: 2px 6px; border-radius: 6px; }

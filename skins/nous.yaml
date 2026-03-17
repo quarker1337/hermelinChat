@@ -1,4 +1,4 @@
-# nous.yaml — hermilinChat Hermes CLI skin (upstream skin system)
+# nous.yaml — hermelinChat Hermes CLI skin (upstream skin system)
 #
 # Install:
 #   python3 scripts/install_hermes_skins.py --auto
@@ -31,8 +31,8 @@ colors:
   session_border: "#1a3a44"
 
 branding:
-  agent_name: "hermilinChat"
-  welcome: "Welcome to hermilinChat! Type your message or /help for commands."
+  agent_name: "hermelinChat"
+  welcome: "Welcome to hermelinChat! Type your message or /help for commands."
   goodbye: "Goodbye! ⚕"
   response_label: " ⚕ Hermes "
   prompt_symbol: "❯ "

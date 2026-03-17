@@ -7,16 +7,16 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-JOB_NAME = "hermilin-whispers"
+JOB_NAME = "hermelin-whispers"
 
-PROMPT = r'''You are a background cron job that generates tiny UI "whispers" for hermilinChat.
+PROMPT = r'''You are a background cron job that generates tiny UI "whispers" for hermelinChat.
 
 Goal
 - Maintain a pool of short one-liners used by the bottom-right alignment easter egg.
 
 Paths
 - Hermes home: $HERMES_HOME (default: ~/.hermes)
-- hermilin meta DB: $HERMES_HOME/hermilin_meta.db
+- hermelin meta DB: $HERMES_HOME/hermelin_meta.db
 
 Meta DB schema (create if missing)
 - Table: ui_whispers
@@ -38,7 +38,7 @@ Whisper rules
 
 Personalization
 - Include the placeholder {user} in some whispers.
-- Do NOT expand it. hermilinChat will replace {user} with the Linux username.
+- Do NOT expand it. hermelinChat will replace {user} with the Linux username.
 
 What to do each run
 1) Ensure the meta DB + ui_whispers table exist.
@@ -63,7 +63,7 @@ WHISPERS = [
 ]
 
 home = pathlib.Path(os.getenv('HERMES_HOME', str(pathlib.Path.home()/'.hermes'))).expanduser()
-db = home / 'hermilin_meta.db'
+db = home / 'hermelin_meta.db'
 
 def ensure(conn):
     conn.execute("""

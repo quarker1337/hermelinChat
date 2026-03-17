@@ -46,7 +46,7 @@ def _route_for_path(app, path: str):
 
 
 def _write_default_artifact_config(path: Path, **flags):
-    lines = ["hermilin:", "  default_artifacts:"]
+    lines = ["hermelin:", "  default_artifacts:"]
     for key, value in sorted(flags.items()):
         lines.append(f"    {key}: {'true' if value else 'false'}")
     path.parent.mkdir(parents=True, exist_ok=True)

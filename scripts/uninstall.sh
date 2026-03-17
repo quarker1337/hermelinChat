@@ -18,7 +18,7 @@ usage() {
   cat <<EOF
 Usage: ./scripts/uninstall.sh [options]
 
-This removes local hermilinChat runtime artifacts so you can reinstall cleanly.
+This removes local hermelinChat runtime artifacts so you can reinstall cleanly.
 
 Options:
   --service NAME          systemd service name (default: hermelin)
@@ -26,8 +26,8 @@ Options:
   --keep-venv             Do not delete .venv/
   --keep-static           Do not delete hermelin/static/
   --remove-node-modules   Delete frontend/node_modules/
-  --purge-data            Delete hermilinChat data in Hermes home (meta DB + artifacts dir)
-  --remove-cronjobs       Remove hermilinChat-installed Hermes cron jobs (autotitle + whispers)
+  --purge-data            Delete hermelinChat data in Hermes home (meta DB + artifacts dir)
+  --remove-cronjobs       Remove hermelinChat-installed Hermes cron jobs (autotitle + whispers)
   --unpatch-hermes        Undo the Hermes artifact tool patch (render_panel/close_panel)
   -y, --yes               Do not prompt for confirmation
   -h, --help              Show help
@@ -94,7 +94,7 @@ done
 
 cd "$ROOT_DIR"
 
-echo "==> hermilinChat uninstall"
+echo "==> hermelinChat uninstall"
 echo "    root: $ROOT_DIR"
 echo
 
@@ -131,7 +131,7 @@ else
 fi
 
 if [[ "$REMOVE_CRONJOBS" -eq 1 ]]; then
-  echo "  - remove Hermes cronjobs (hermilin-autotitle + hermilin-whispers): yes"
+  echo "  - remove Hermes cronjobs (hermelin-autotitle + hermelin-whispers): yes"
 else
   echo "  - remove Hermes cronjobs: no (pass --remove-cronjobs)"
 fi
@@ -248,8 +248,8 @@ if [[ "$REMOVE_NODE_MODULES" -eq 1 && -d frontend/node_modules ]]; then
 fi
 
 if [[ "$REMOVE_CRONJOBS" -eq 1 ]]; then
-  echo "==> removing hermilinChat Hermes cron jobs"
-  python3 scripts/uninstall_hermilin_cronjobs.py || true
+  echo "==> removing hermelinChat Hermes cron jobs"
+  python3 scripts/uninstall_hermelin_cronjobs.py || true
 fi
 
 if [[ "$UNPATCH_HERMES" -eq 1 ]]; then
@@ -258,7 +258,7 @@ if [[ "$UNPATCH_HERMES" -eq 1 ]]; then
 fi
 
 if [[ "$PURGE_DATA" -eq 1 ]]; then
-  echo "==> purging hermilinChat data in Hermes home"
+  echo "==> purging hermelinChat data in Hermes home"
 
   HERMES_HOME_DIR="${HERMES_HOME:-}"
   META_DB_PATH="${HERMELIN_META_DB_PATH:-}"
@@ -276,7 +276,7 @@ if [[ "$PURGE_DATA" -eq 1 ]]; then
   fi
 
   if [[ -z "$META_DB_PATH" ]]; then
-    META_DB_PATH="$HERMES_HOME_DIR/hermilin_meta.db"
+    META_DB_PATH="$HERMES_HOME_DIR/hermelin_meta.db"
   fi
 
   echo "    HERMES_HOME: $HERMES_HOME_DIR"

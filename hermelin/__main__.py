@@ -60,9 +60,9 @@ def main() -> None:
         "--meta-db",
         default=os.getenv(
             "HERMELIN_META_DB_PATH",
-            str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))) / "hermilin_meta.db"),
+            str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))) / "hermelin_meta.db"),
         ),
-        help="Path to hermilinChat metadata DB (titles, etc.). Default: $HERMES_HOME/hermilin_meta.db",
+        help="Path to hermelinChat metadata DB (titles, etc.). Default: $HERMES_HOME/hermelin_meta.db",
     )
 
     p.add_argument(

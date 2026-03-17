@@ -7,11 +7,11 @@ import os
 import sys
 from pathlib import Path
 
-JOB_NAMES = {"hermilin-autotitle", "hermilin-whispers"}
+JOB_NAMES = {"hermelin-autotitle", "hermelin-whispers"}
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Remove hermilinChat-installed Hermes cron jobs from $HERMES_HOME/cron/jobs.json")
+    p = argparse.ArgumentParser(description="Remove hermelinChat-installed Hermes cron jobs from $HERMES_HOME/cron/jobs.json")
     p.add_argument(
         "--hermes-home",
         default=os.getenv("HERMES_HOME", ""),
@@ -64,7 +64,7 @@ def main() -> int:
             keep.append(job)
 
     if not removed:
-        print("No hermilinChat cron jobs found (nothing to remove).")
+        print("No hermelinChat cron jobs found (nothing to remove).")
         return 0
 
     print("Removing Hermes cron jobs:")

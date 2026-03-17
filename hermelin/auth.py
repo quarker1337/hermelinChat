@@ -124,7 +124,7 @@ def extract_cookie_value(cookie_header: str, name: str) -> Optional[str]:
 # Runner (iframe) proxy tokens
 #
 # These are short-lived bearer tokens intended for sandboxed iframes that cannot
-# send hermilinChat's SameSite=Strict session cookie.
+# send hermelinChat's SameSite=Strict session cookie.
 #
 # Token format matches create_session_token():
 #   base64url(json_payload) + '.' + base64url(hmac_sha256(payload_b64))

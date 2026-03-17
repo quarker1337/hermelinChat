@@ -4,7 +4,7 @@
 Why this exists
 - A common failure mode is writing ONLY the payload (e.g. {"lines": [...]}) into
   ~/.hermes/artifacts/session/{tab_id}.json.
-- hermilinChat expects the full artifact envelope: id, type, title, data, live,
+- hermelinChat expects the full artifact envelope: id, type, title, data, live,
   refresh_seconds, timestamp.
 
 How to use

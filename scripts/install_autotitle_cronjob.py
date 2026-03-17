@@ -7,17 +7,17 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-JOB_NAME = "hermilin-autotitle"
+JOB_NAME = "hermelin-autotitle"
 
 PROMPT = r'''You are a background cron job that generates short, useful titles for Hermes sessions.
 
 Goal
-- Populate a metadata SQLite DB with better session titles for hermilinChat.
+- Populate a metadata SQLite DB with better session titles for hermelinChat.
 
 Paths
 - Hermes home: $HERMES_HOME (default: ~/.hermes)
 - Hermes state DB: $HERMES_HOME/state.db
-- hermilin meta DB: $HERMES_HOME/hermilin_meta.db
+- hermelin meta DB: $HERMES_HOME/hermelin_meta.db
 
 Meta DB schema (create if missing)
 - Table: session_titles
@@ -38,7 +38,7 @@ Title rules
 What to do each run
 1) Find up to 5 recent sessions that:
    - have at least one non-empty user message
-   - are NOT already present in hermilin_meta.db.session_titles
+   - are NOT already present in hermelin_meta.db.session_titles
    - are NOT cron sessions (source != 'cron')
 2) For each candidate, fetch a small context window to title:
    - first user message
@@ -46,7 +46,7 @@ What to do each run
    - second user message (if any)
    Truncate each to ~300 chars and strip newlines.
 3) Generate titles following the rules above.
-4) Insert titles into hermilin_meta.db with source='auto'.
+4) Insert titles into hermelin_meta.db with source='auto'.
 5) Print a short report: how many titles were added and the (session_id -> title) pairs.
 
 Implementation notes
@@ -67,7 +67,7 @@ def trunc(s, n=300):
 
 home = pathlib.Path(os.getenv('HERMES_HOME', str(pathlib.Path.home()/'.hermes'))).expanduser()
 state_db = home / 'state.db'
-meta_db = home / 'hermilin_meta.db'
+meta_db = home / 'hermelin_meta.db'
 
 meta_db.parent.mkdir(parents=True, exist_ok=True)
 mc = sqlite3.connect(str(meta_db))
@@ -139,7 +139,7 @@ titles = [
 ]
 
 home = pathlib.Path(os.getenv('HERMES_HOME', str(pathlib.Path.home()/'.hermes'))).expanduser()
-meta_db = home / 'hermilin_meta.db'
+meta_db = home / 'hermelin_meta.db'
 
 conn = sqlite3.connect(str(meta_db))
 conn.execute("""

@@ -13,13 +13,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = SCRIPT_DIR / "hermes_artifact_patch"
 ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
-# hermilinChat toolset injection
+# hermelinChat toolset injection
 #
-# We install a canonical "artifacts" toolset for hermilinChat's side panel.
+# We install a canonical "artifacts" toolset for hermelinChat's side panel.
 ARTIFACT_TOOLSETS_BLOCK = '''
-    # hermilinChat artifact panel toolsets (installed by hermilinChat patch)
+    # hermelinChat artifact panel toolsets (installed by hermelinChat patch)
     "artifacts": {
-        "description": "Create and manage artifacts in hermilinChat's right-side artifact panel",
+        "description": "Create and manage artifacts in hermelinChat's right-side artifact panel",
         "tools": [
             "list_artifacts",
             "focus_artifact",
@@ -48,7 +48,7 @@ ARTIFACT_TOOLSETS_BLOCK = '''
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Patch the active Hermes installation with hermilinChat artifact tools.",
+        description="Patch the active Hermes installation with hermelinChat artifact tools.",
     )
     parser.add_argument(
         "--hermes-exe",
@@ -248,13 +248,13 @@ def _patch_toolsets(path: Path) -> tuple[bool, str]:
     if anchor not in text:
         raise RuntimeError(f"Could not find insertion anchor in {path}")
 
-    marker_line = "    # hermilinChat artifact panel toolsets (installed by hermilinChat patch)"
+    marker_line = "    # hermelinChat artifact panel toolsets (installed by hermelinChat patch)"
     block = ARTIFACT_TOOLSETS_BLOCK.replace("\n", newline)
     desired = newline + block + anchor
 
     # If already in the desired state, do nothing.
     if desired in text:
-        return False, "toolsets.py already patched with hermilinChat artifacts toolset"
+        return False, "toolsets.py already patched with hermelinChat artifacts toolset"
 
     # Upgrade path: if an older patch block exists, remove it first, then re-insert
     # the canonical artifacts toolset block.
@@ -295,7 +295,7 @@ def _install_artifact_tool(tools_dir: Path) -> tuple[bool, str]:
         except Exception:
             legacy_text = ""
 
-        if "Artifact side-panel tools for hermilinChat" in legacy_text:
+        if "Artifact side-panel tools for hermelinChat" in legacy_text:
             legacy.unlink()
             changed = True
             messages.append("removed legacy render_panel_tool.py")
@@ -357,7 +357,7 @@ def main() -> int:
 
     print()
     print("Next steps")
-    print("  1) restart hermilinChat / Hermes services if they are already running")
+    print("  1) restart hermelinChat / Hermes services if they are already running")
     print("  2) if your Hermes config uses restricted toolsets, make sure 'artifacts' is enabled")
     return 0
 

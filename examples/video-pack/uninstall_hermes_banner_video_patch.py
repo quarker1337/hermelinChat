@@ -9,17 +9,17 @@ import sys
 from pathlib import Path
 
 
-PATCH_START = "    # hermilinChat banner video patch (installed by hermilinChat patch)"
-PATCH_END = "    # end hermilinChat banner video patch"
+PATCH_START = "    # hermelinChat banner video patch (installed by hermelinChat patch)"
+PATCH_END = "    # end hermelinChat banner video patch"
 
 # When unpatching Hermes' project-root cli.py we need a non-indented marker.
-CLI_PATCH_START = "# hermilinChat banner video patch (installed by hermilinChat patch)"
-CLI_PATCH_END = "# end hermilinChat banner video patch"
+CLI_PATCH_START = "# hermelinChat banner video patch (installed by hermelinChat patch)"
+CLI_PATCH_END = "# end hermelinChat banner video patch"
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Undo the hermilinChat banner video patch from the active Hermes installation.",
+        description="Undo the hermelinChat banner video patch from the active Hermes installation.",
     )
     p.add_argument(
         "--hermes-exe",

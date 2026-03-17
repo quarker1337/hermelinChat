@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Artifact side-panel tools for hermilinChat.
+"""Artifact side-panel tools for hermelinChat.
 
 This module is installed into Hermes as: tools/artifact_tool.py
 
@@ -94,7 +94,7 @@ def _load_default_artifact_flags() -> dict[str, bool]:
         return {}
 
     node: Any = data
-    for key in ("hermilin", "default_artifacts"):
+    for key in ("hermelin", "default_artifacts"):
         if not isinstance(node, dict):
             return {}
         node = node.get(key, {})
@@ -576,7 +576,7 @@ def create_artifact(
     refresh_seconds: int = 0,
     task_id: str | None = None,
 ) -> str:
-    """Create or update an artifact for hermilinChat's side panel.
+    """Create or update an artifact for hermelinChat's side panel.
 
     Step 3 behavior:
     - Writes artifacts to ~/.hermes/artifacts/session/ by default
@@ -935,7 +935,7 @@ def list_artifacts(scope: str = "all") -> str:
 
 
 def focus_artifact(tab_id: str) -> str:
-    """Write a focus signal so hermilinChat switches the active artifact tab."""
+    """Write a focus signal so hermelinChat switches the active artifact tab."""
 
     artifact_id = _sanitize_artifact_id(tab_id)
     if not artifact_id:
@@ -982,7 +982,7 @@ def start_runner(
       Example:
         {"scheme": "http", "host": "127.0.0.1", "port": 43123}
 
-    hermilinChat can proxy localhost-bound runners for remote operator browsers.
+    hermelinChat can proxy localhost-bound runners for remote operator browsers.
     If your iframe artifact points at http://127.0.0.1:PORT/, the UI will rewrite it
     to a same-origin, authenticated proxy URL so it works even when the operator is
     on a different machine.
@@ -1353,7 +1353,7 @@ LIST_ARTIFACTS_SCHEMA = {
 FOCUS_ARTIFACT_SCHEMA = {
     "name": "focus_artifact",
     "description": (
-        "Switch hermilinChat's artifact panel to display a specific artifact by its tab_id. "
+        "Switch hermelinChat's artifact panel to display a specific artifact by its tab_id. "
         "Also opens the panel if it is currently closed."
     ),
     "parameters": {
@@ -1372,7 +1372,7 @@ FOCUS_ARTIFACT_SCHEMA = {
 CREATE_ARTIFACT_SCHEMA = {
     "name": "create_artifact",
     "description": (
-        "Create or update an artifact in hermilinChat's side panel. "
+        "Create or update an artifact in hermelinChat's side panel. "
         "Supports types: chart, table, map, logs, html, markdown, iframe. "
         "Set persistent=true for artifacts that should survive across sessions."
         "\n\n"

@@ -2,7 +2,7 @@
 
 These files are here so you can demo / validate the artifact panel without creating ad-hoc scripts inside `scripts/` (which can block `./scripts/update.sh`).
 
-HermilinChat renders artifacts from:
+HermelinChat renders artifacts from:
 - `~/.hermes/artifacts/session/*.json`
 - `~/.hermes/artifacts/persistent/*.json`
 

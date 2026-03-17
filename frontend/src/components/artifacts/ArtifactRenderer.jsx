@@ -45,7 +45,7 @@ for (const [name, loader] of HLJS_LANGS) {
 // Runner gateway helpers
 //
 // Iframe artifacts sometimes point to localhost (127.0.0.1) which breaks when the
-// operator browser is on a different machine. hermilinChat exposes these runners
+// operator browser is on a different machine. hermelinChat exposes these runners
 // via a same-origin proxy under /r/{tab_id}/_t/{token}/...
 // -----------------------------------------------------------------------------
 

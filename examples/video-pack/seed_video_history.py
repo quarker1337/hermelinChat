@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""seed_video_history.py — Wipe + seed hermilinChat sidebar history for video demos.
+"""seed_video_history.py — Wipe + seed hermelinChat sidebar history for video demos.
 
-This script operates ONLY on the Hermes HOME that hermilinChat uses.
+This script operates ONLY on the Hermes HOME that hermelinChat uses.
 
 It will:
 - Back up $HERMES_HOME/state.db (+ state.db-wal/state.db-shm if present)
-- Back up hermilinChat meta DB (titles): $HERMES_HOME/hermilin_meta.db by default
+- Back up hermelinChat meta DB (titles): $HERMES_HOME/hermelin_meta.db by default
 - DELETE all sessions + messages from state.db
 - Insert 15–20 synthetic sessions spread across past days
-- Upsert custom session titles into hermilin_meta.db/session_titles
+- Upsert custom session titles into hermelin_meta.db/session_titles
 
 Restore:
 - Use --restore to restore the most recent backup.
 
 Typical usage on the video machine:
-  cd /path/to/hermilinChat
+  cd /path/to/hermelinChat
   ./.venv/bin/python examples/video-pack/seed_video_history.py --env-file .hermelin.env
 
-Then restart hermilinChat.
+Then restart hermelinChat.
 """
 
 import argparse
@@ -173,7 +173,7 @@ def _backup_files(*, backup_dir: Path, files: Iterable[Path], dry_run: bool) -> 
         copied.append({"src": str(src), "dst": str(dst), "bytes": dst.stat().st_size})
 
     manifest = {
-        "kind": "hermilinChat.video_history_backup",
+        "kind": "hermelinChat.video_history_backup",
         "created_at": _ts_now_iso(),
         "files": copied,
     }
@@ -191,7 +191,7 @@ def _restore_backup(*, backup_dir: Path, hermes_home: Path, meta_db_path: Path, 
         "state.db-wal": hermes_home / "state.db-wal",
         "state.db-shm": hermes_home / "state.db-shm",
         meta_db_path.name: meta_db_path,
-        "hermilin_meta.db": meta_db_path,  # also handle default name
+        "hermelin_meta.db": meta_db_path,  # also handle default name
     }
 
     print(f"Restoring from: {backup_dir}")
@@ -419,7 +419,7 @@ def _seed_state_db(*, db_path: Path, sessions: list[dict], dry_run: bool, vacuum
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Wipe + seed hermilinChat history (state.db + hermilin_meta.db)")
+    p = argparse.ArgumentParser(description="Wipe + seed hermelinChat history (state.db + hermelin_meta.db)")
     p.add_argument(
         "--env-file",
         default=str(REPO_ROOT / ".hermelin.env"),
@@ -433,7 +433,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--meta-db",
         default="",
-        help="Override hermilin meta DB path (otherwise uses HERMELIN_META_DB_PATH from env-file, else $HERMES_HOME/hermilin_meta.db)",
+        help="Override hermelin meta DB path (otherwise uses HERMELIN_META_DB_PATH from env-file, else $HERMES_HOME/hermelin_meta.db)",
     )
     p.add_argument(
         "--count",
@@ -449,7 +449,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--seed-whispers",
         action="store_true",
-        help="Also seed ui_whispers in hermilin_meta.db (video-seed source)",
+        help="Also seed ui_whispers in hermelin_meta.db (video-seed source)",
     )
     p.add_argument(
         "--no-vacuum",
@@ -487,7 +487,7 @@ def main() -> int:
     hermes_home_raw = str(args.hermes_home or env.get("HERMES_HOME") or os.getenv("HERMES_HOME") or _default_hermes_home())
     hermes_home = Path(hermes_home_raw).expanduser()
 
-    meta_db_raw = str(args.meta_db or env.get("HERMELIN_META_DB_PATH") or os.getenv("HERMELIN_META_DB_PATH") or (hermes_home / "hermilin_meta.db"))
+    meta_db_raw = str(args.meta_db or env.get("HERMELIN_META_DB_PATH") or os.getenv("HERMELIN_META_DB_PATH") or (hermes_home / "hermelin_meta.db"))
     meta_db_path = Path(meta_db_raw).expanduser()
 
     state_db_path = hermes_home / "state.db"

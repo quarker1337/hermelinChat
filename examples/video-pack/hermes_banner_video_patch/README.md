@@ -1,6 +1,6 @@
-# hermilinChat video helpers (banner patch + demo history)
+# hermelinChat video helpers (banner patch + demo history)
 
-This folder contains the assets for hermilinChat’s “video mode” Hermes banner patch.
+This folder contains the assets for hermelinChat’s “video mode” Hermes banner patch.
 
 Goal: make recorded terminal footage look clean and non-sensitive (no model/cwd/session identifiers on screen), while keeping your selected Hermes skin ASCII art.
 
@@ -21,7 +21,7 @@ Related scripts (in `examples/video-pack/`):
   Removes the patch from the target Hermes install.
 
 - `seed_video_history.py`
-  Wipes + seeds the hermilinChat sidebar/session history for demos (with automatic backups + restore).
+  Wipes + seeds the hermelinChat sidebar/session history for demos (with automatic backups + restore).
 
 
 ## 1) Hermes banner “video mode” patch
@@ -41,16 +41,16 @@ Implementation detail (for future debugging):
 
 ### Install
 
-From the hermilinChat repo:
+From the hermelinChat repo:
 
   python3 examples/video-pack/install_hermes_banner_video_patch.py
 
-If you have more than one `hermes` on PATH, explicitly target the one hermilinChat uses:
+If you have more than one `hermes` on PATH, explicitly target the one hermelinChat uses:
 
   python3 examples/video-pack/install_hermes_banner_video_patch.py --hermes-exe /full/path/to/hermes
 
 Notes:
-- The installer is idempotent: you can safely re-run it; it removes old hermilinChat patch blocks and re-applies the latest version.
+- The installer is idempotent: you can safely re-run it; it removes old hermelinChat patch blocks and re-applies the latest version.
 - After running `hermes update` (or otherwise upgrading Hermes), you’ll usually need to re-run the installer because the modified files may be overwritten.
 
 
@@ -92,13 +92,13 @@ Or target a specific Hermes binary:
 
 ## 2) Re-seed demo history (sidebar) for recording
 
-Use `examples/video-pack/seed_video_history.py` when you need the hermilinChat sidebar to show a clean, curated “past sessions” list for video.
+Use `examples/video-pack/seed_video_history.py` when you need the hermelinChat sidebar to show a clean, curated “past sessions” list for video.
 
 WARNING: this is destructive (it deletes all sessions + messages from `state.db`) — but it ALWAYS creates a backup first and prints a restore command.
 
-What it touches (inside the Hermes HOME used by hermilinChat):
+What it touches (inside the Hermes HOME used by hermelinChat):
 - `$HERMES_HOME/state.db` (and `state.db-wal` / `state.db-shm` if present)
-- hermilinChat meta DB for titles (defaults to `$HERMES_HOME/hermilin_meta.db`)
+- hermelinChat meta DB for titles (defaults to `$HERMES_HOME/hermelin_meta.db`)
 
 Backups are saved to:
 - `$HERMES_HOME/backups/video-history/<timestamp>/` (includes a `manifest.json`)
@@ -106,15 +106,15 @@ Backups are saved to:
 
 ### Seed (typical)
 
-  cd /path/to/hermilinChat
+  cd /path/to/hermelinChat
   ./.venv/bin/python examples/video-pack/seed_video_history.py --env-file .hermelin.env
 
-Then restart hermilinChat.
+Then restart hermelinChat.
 
 
 ### Restore the most recent backup
 
-  cd /path/to/hermilinChat
+  cd /path/to/hermelinChat
   ./.venv/bin/python examples/video-pack/seed_video_history.py --env-file .hermelin.env --restore
 
 
@@ -127,4 +127,4 @@ Then restart hermilinChat.
 - `--hermes-home ...` / `--meta-db ...` override paths (otherwise uses `.hermelin.env`)
 - `--backup-id ... --restore`     restore a specific backup folder
 
-Tip: stop hermilinChat (and any running Hermes CLI instances) before seeding/restoring so SQLite/WAL files aren’t locked.
+Tip: stop hermelinChat (and any running Hermes CLI instances) before seeding/restoring so SQLite/WAL files aren’t locked.

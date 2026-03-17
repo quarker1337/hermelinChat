@@ -1,4 +1,4 @@
-import HERMILIN_NOT_FLIPPED_RAW from '../assets/hermilin-not-flipped.svg?raw'
+import HERMELIN_NOT_FLIPPED_RAW from '../assets/hermelin-not-flipped.svg?raw'
 import STOUT_MASCOT_RAW from '../assets/stout-mascot.svg?raw'
 import MATRIX_SKULL_RAW from '../assets/matrix-skull.svg?raw'
 import WHITE_RABBIT_RAW from '../assets/white-rabbit.svg?raw'
@@ -9,12 +9,12 @@ import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
 import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
 import SAMARITAN_FAVICON_URL from '../assets/samaritan-favicon.svg'
 
-export const DEFAULT_THEME_ID = 'hermilin'
+export const DEFAULT_THEME_ID = 'hermelin'
 
 export const THEMES = {
-  hermilin: {
-    id: 'hermilin',
-    label: 'Hermilin (amber)',
+  hermelin: {
+    id: 'hermelin',
+    label: 'Hermelin (amber)',
     AMBER: {
       300: '#ffd480',
       400: '#f5b731',
@@ -44,7 +44,7 @@ export const THEMES = {
       faviconHref: '/favicon.svg',
 
       // Topbar session mark.
-      topbarSvgRaw: HERMILIN_NOT_FLIPPED_RAW,
+      topbarSvgRaw: HERMELIN_NOT_FLIPPED_RAW,
 
       // Bottom-right easter egg.
       alignmentSvgRaw: STOUT_MASCOT_RAW,

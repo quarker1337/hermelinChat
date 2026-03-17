@@ -10,7 +10,7 @@ def _env_bool(name: str, default: str = "0") -> bool:
 
 
 _DEFAULT_HERMES_HOME = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
-_DEFAULT_META_DB = _DEFAULT_HERMES_HOME / "hermilin_meta.db"
+_DEFAULT_META_DB = _DEFAULT_HERMES_HOME / "hermelin_meta.db"
 _DEFAULT_SPAWN_CWD = _DEFAULT_HERMES_HOME / "artifacts" / "runners" / "projects"
 
 
@@ -31,7 +31,7 @@ class HermelinConfig:
     # Hermes Agent home (contains state.db, config.yaml, etc.)
     hermes_home: Path = _DEFAULT_HERMES_HOME
 
-    # hermilinChat metadata DB (titles, etc.)
+    # hermelinChat metadata DB (titles, etc.)
     meta_db_path: Path = Path(os.getenv("HERMELIN_META_DB_PATH", str(_DEFAULT_META_DB))).expanduser()
 
     # Working directory to run the hermes CLI in.
@@ -79,7 +79,7 @@ class HermelinConfig:
     # Set to 1 if serving over HTTPS (or behind a TLS-terminating proxy that preserves scheme)
     cookie_secure: bool = _env_bool("HERMELIN_COOKIE_SECURE", "0")
 
-    # Built-in TLS (served directly by uvicorn). If both are set, hermilinChat will
+    # Built-in TLS (served directly by uvicorn). If both are set, hermelinChat will
     # serve HTTPS (not just "behind a reverse proxy").
     ssl_certfile: str = os.getenv("HERMELIN_SSL_CERTFILE", "").strip()
     ssl_keyfile: str = os.getenv("HERMELIN_SSL_KEYFILE", "").strip()

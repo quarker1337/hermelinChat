@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""install_video_pack.py — Install hermilinChat's video demo pack into a Hermes HOME.
+"""install_video_pack.py — Install hermelinChat's video demo pack into a Hermes HOME.
 
 This installer is intentionally *Hermes-home only*:
 - DOES copy demo runner projects into $HERMES_HOME/artifacts/runners/projects/
@@ -9,10 +9,10 @@ This installer is intentionally *Hermes-home only*:
 - DOES NOT patch Hermes code or install artifact tools (do that separately)
 
 Typical usage on the video machine:
-  cd /path/to/hermilinChat
+  cd /path/to/hermelinChat
   ./.venv/bin/python examples/video-pack/install_video_pack.py --env-file .hermelin.env --force
 
-Then restart hermilinChat.
+Then restart hermelinChat.
 
 Uninstall (restore previous config):
   ./.venv/bin/python examples/video-pack/uninstall_video_pack.py --env-file .hermelin.env
@@ -41,7 +41,7 @@ Tone:
 - no exposition, no long explanations
 - don’t ask questions unless the operator asks first
 
-You are driving a video demo inside hermilinChat.
+You are driving a video demo inside hermelinChat.
 
 When the operator sends one of these codewords (case-insensitive):
   GPU / BUILDER / STRUDEL / MONEY
@@ -93,7 +93,7 @@ def _default_hermes_home() -> Path:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Install hermilinChat video pack into a Hermes HOME")
+    p = argparse.ArgumentParser(description="Install hermelinChat video pack into a Hermes HOME")
     p.add_argument(
         "--env-file",
         default=str(REPO_ROOT / ".hermelin.env"),
@@ -155,7 +155,7 @@ def _apply_agent_system_prompt(yaml_text: str, prompt: str) -> tuple[str, bool]:
     def build_block(child_indent: str) -> list[str]:
         value_indent = child_indent + "  "
         block: list[str] = []
-        block.append(f"{child_indent}# hermilinChat video-pack (installed by examples/video-pack/install_video_pack.py)")
+        block.append(f"{child_indent}# hermelinChat video-pack (installed by examples/video-pack/install_video_pack.py)")
         block.append(f"{child_indent}system_prompt: |")
         if not prompt_lines:
             block.append(f"{value_indent}")
@@ -222,7 +222,7 @@ def _apply_agent_system_prompt(yaml_text: str, prompt: str) -> tuple[str, bool]:
 
     # If already installed and identical, do nothing.
     # (We do a best-effort textual check for our marker comment.)
-    marker = f"{child_indent}# hermilinChat video-pack (installed by examples/video-pack/install_video_pack.py)"
+    marker = f"{child_indent}# hermelinChat video-pack (installed by examples/video-pack/install_video_pack.py)"
     if not changed:
         window = "\n".join(lines[agent_idx + 1 : min(end_idx, agent_idx + 25)])
         if marker in window and "system_prompt:" in window:
@@ -266,7 +266,7 @@ def main() -> int:
     config_path = hermes_home / "config.yaml"
     backup_path = hermes_home / BACKUP_NAME
 
-    print("hermilinChat video pack install target")
+    print("hermelinChat video pack install target")
     print(f"  env_file:     {env_path}")
     print(f"  hermes_home:  {hermes_home}")
     print(f"  dst_projects: {dst_projects_root}")
@@ -334,7 +334,7 @@ def main() -> int:
         print(f"ERROR: failed to update config.yaml: {exc}", file=sys.stderr)
         return 2
 
-    print("\nDone. Restart hermilinChat to pick up the new Hermes HOME config.")
+    print("\nDone. Restart hermelinChat to pick up the new Hermes HOME config.")
     return 0
 
 

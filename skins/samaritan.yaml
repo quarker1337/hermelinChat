@@ -1,4 +1,4 @@
-# samaritan.yaml — hermilinChat Hermes CLI skin (upstream skin system)
+# samaritan.yaml — hermelinChat Hermes CLI skin (upstream skin system)
 #
 # Install:
 #   python3 scripts/install_hermes_skins.py --auto
@@ -31,7 +31,7 @@ colors:
   session_border: "#bab8b3"
 
 branding:
-  agent_name: "hermilinChat"
+  agent_name: "hermelinChat"
   welcome: "What are your commands?"
   goodbye: "Goodbye."
   response_label: " ▲ Samaritan "

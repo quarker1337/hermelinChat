@@ -13,15 +13,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = SCRIPT_DIR / "hermes_artifact_patch"
 ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
-# hermilinChat toolset injection
+# hermelinChat toolset injection
 #
 # We remove the toolset block inserted by install_hermes_artifact_patch.py.
-PATCH_MARKER_LINE = "    # hermilinChat artifact panel toolsets (installed by hermilinChat patch)"
+PATCH_MARKER_LINE = "    # hermelinChat artifact panel toolsets (installed by hermelinChat patch)"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Undo the hermilinChat artifact tools patch from the active Hermes installation.",
+        description="Undo the hermelinChat artifact tools patch from the active Hermes installation.",
     )
     parser.add_argument(
         "--hermes-exe",
@@ -199,7 +199,7 @@ def _uninstall_artifact_tool(tools_dir: Path) -> tuple[bool, str]:
         except Exception:
             legacy_text = ""
 
-        if "Artifact side-panel tools for hermilinChat" in legacy_text:
+        if "Artifact side-panel tools for hermelinChat" in legacy_text:
             legacy.unlink()
             changed = True
             messages.append("Removed legacy render_panel_tool.py")
@@ -241,7 +241,7 @@ def _unpatch_toolsets(path: Path) -> tuple[bool, str]:
         return False, "toolsets.py has no Scenario-specific toolsets anchor"
 
     if PATCH_MARKER_LINE not in text:
-        return False, "toolsets.py has no hermilinChat artifacts toolset patch"
+        return False, "toolsets.py has no hermelinChat artifacts toolset patch"
 
     start_token = newline + newline + PATCH_MARKER_LINE
     if start_token in text:
@@ -256,7 +256,7 @@ def _unpatch_toolsets(path: Path) -> tuple[bool, str]:
     end = text.index(anchor, start)
     patched = text[:start] + text[end:]
     _write_text_with_newline(path, patched, newline)
-    return True, "Removed hermilinChat artifacts toolset block"
+    return True, "Removed hermelinChat artifacts toolset block"
 
 
 def main() -> int:

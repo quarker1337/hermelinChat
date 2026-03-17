@@ -1,10 +1,10 @@
-Video pack (hermilinChat)
+Video pack (hermelinChat)
 
 This folder contains static demo runner templates + a small installer intended for video recordings.
 
 Install on a target machine:
-  cd /path/to/hermilinChat
-  ./scripts/update.sh --skip-hermes-patch   # optional; ensure hermilinChat deps
+  cd /path/to/hermelinChat
+  ./scripts/update.sh --skip-hermes-patch   # optional; ensure hermelinChat deps
   ./.venv/bin/python examples/video-pack/install_video_pack.py --env-file .hermelin.env --force
 
 What examples/video-pack/install_video_pack.py does:
@@ -20,7 +20,7 @@ Related video helpers:
 - See `examples/video-pack/hermes_banner_video_patch/README.md` for the banner/video-mode helper docs
 
 After install:
-- Restart hermilinChat
+- Restart hermelinChat
 - In chat, type one of: GPU / BUILDER / STRUDEL / MONEY
 
 Uninstall:

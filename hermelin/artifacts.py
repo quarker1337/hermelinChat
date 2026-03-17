@@ -248,7 +248,7 @@ def delete_artifact(root: Path, artifact_id: str) -> bool:
 def cleanup_session_artifacts(root: Path) -> dict[str, Any]:
     """Best-effort cleanup for session-scoped artifacts.
 
-    When hermilinChat starts a *new* Hermes session, we want to remove old
+    When hermelinChat starts a *new* Hermes session, we want to remove old
     session-only artifacts so they don't persist forever.
 
     Behavior:

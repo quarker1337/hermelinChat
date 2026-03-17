@@ -22,7 +22,7 @@ Options:
   --skip-frontend       Skip npm install/build
   --skip-python         Skip pip install -e .
   --skip-hermes-patch   Skip patching the active Hermes installation with artifact tools
-  --skip-hermes-skins   Skip installing hermilinChat CLI skins into ~/.hermes/skins/
+  --skip-hermes-skins   Skip installing hermelinChat CLI skins into ~/.hermes/skins/
   --skip-hermes-themes  (deprecated alias for --skip-hermes-skins)
   --no-pull             Skip git pull
   -h, --help            Show help
@@ -81,11 +81,11 @@ done
 
 cd "$ROOT_DIR"
 
-echo "==> hermilinChat update"
+echo "==> hermelinChat update"
 echo "    root: $ROOT_DIR"
 
 test -f pyproject.toml || {
-  echo "ERROR: pyproject.toml not found. Are you in the hermilinChat repo?" >&2
+  echo "ERROR: pyproject.toml not found. Are you in the hermelinChat repo?" >&2
   exit 1
 }
 
@@ -178,7 +178,7 @@ if [[ "$SKIP_HERMES_PATCH" -eq 0 ]]; then
 fi
 
 if [[ "$SKIP_HERMES_SKINS" -eq 0 ]]; then
-  echo "==> installing hermilinChat skins into Hermes (~/.hermes/skins/)"
+  echo "==> installing hermelinChat skins into Hermes (~/.hermes/skins/)"
   if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: python3 not found (needed for Hermes skin installer)." >&2
     exit 1

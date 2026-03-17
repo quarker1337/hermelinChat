@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""install_hermes_skins.py — Install hermilinChat skins into Hermes Agent (upstream skin system).
+"""install_hermes_skins.py — Install hermelinChat skins into Hermes Agent (upstream skin system).
 
 Hermes Agent supports data-driven CLI skins natively.
 Custom skins are loaded from:
   ~/.hermes/skins/<name>.yaml
 
-This script copies hermilinChat's bundled skins (repo: ./skins/*.yaml) into the
+This script copies hermelinChat's bundled skins (repo: ./skins/*.yaml) into the
 active Hermes home directory.
 
 Usage:
   python3 scripts/install_hermes_skins.py --auto
   python3 scripts/install_hermes_skins.py --auto --force
-  python3 scripts/install_hermes_skins.py hermilin matrix
+  python3 scripts/install_hermes_skins.py hermelin matrix
 
 Notes:
 - This does NOT patch Hermes' code.
@@ -42,7 +42,7 @@ def _default_hermes_home() -> Path:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Install hermilinChat CLI skins into Hermes Agent")
+    p = argparse.ArgumentParser(description="Install hermelinChat CLI skins into Hermes Agent")
     p.add_argument(
         "--hermes-home",
         default=str(_default_hermes_home()),
@@ -66,7 +66,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "skins",
         nargs="*",
-        help="Optional list of skin names to install (e.g. hermilin matrix)",
+        help="Optional list of skin names to install (e.g. hermelin matrix)",
     )
     return p.parse_args()
 
