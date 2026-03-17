@@ -133,6 +133,73 @@
     overflow: hidden;
   }
 
+  /* ── CODEMIRROR THEME OVERRIDES ──
+     Force CM internals to follow our --theme-* variables
+     so bright skins don't break the editor appearance.
+  */
+  .cm-editor {
+    background: var(--theme-bg) !important;
+    color: var(--theme-text) !important;
+  }
+  .cm-editor .cm-content {
+    color: var(--theme-text) !important;
+    caret-color: var(--theme-accent) !important;
+  }
+  .cm-editor .cm-cursor, .cm-editor .cm-dropCursor {
+    border-left-color: var(--theme-accent) !important;
+  }
+  .cm-editor .cm-gutters {
+    background: var(--theme-surface) !important;
+    color: var(--theme-muted) !important;
+    border-right: 1px solid var(--theme-border) !important;
+  }
+  .cm-editor .cm-activeLineGutter {
+    background: var(--theme-elevated) !important;
+    color: var(--theme-text-bright) !important;
+  }
+  .cm-editor .cm-activeLine {
+    background: var(--theme-elevated) !important;
+  }
+  .cm-editor .cm-selectionBackground,
+  .cm-editor .cm-focused .cm-selectionBackground,
+  ::selection {
+    background: var(--theme-accent-surface) !important;
+  }
+  .cm-editor .cm-matchingBracket {
+    background: var(--theme-accent-surface) !important;
+    color: var(--theme-accent) !important;
+    outline: 1px solid var(--theme-accent-muted);
+  }
+  .cm-editor .cm-searchMatch {
+    background: var(--theme-warning-glow) !important;
+  }
+  .cm-editor .cm-tooltip {
+    background: var(--theme-surface) !important;
+    color: var(--theme-text) !important;
+    border: 1px solid var(--theme-border) !important;
+  }
+  .cm-editor .cm-tooltip-autocomplete ul li[aria-selected] {
+    background: var(--theme-accent-surface) !important;
+    color: var(--theme-text-bright) !important;
+  }
+  .cm-editor .cm-panels {
+    background: var(--theme-surface) !important;
+    color: var(--theme-text) !important;
+  }
+
+  /* ── SYNTAX HIGHLIGHTING ──
+     CM6 syntax tokens use generated scoped classes (ͼ1.ͼc etc.)
+     that beat static CSS specificity. The JS function injectCMOverrides()
+     reads CM's computed colors, classifies each token role, and injects
+     a dynamic <style> with the correct theme colors.
+     The static .cm-editor rules above serve as fallback for chrome elements.
+  */
+
+  /* ── Flash/highlight animation on eval ── */
+  .cm-editor .cm-line.flash {
+    background: var(--theme-accent-glow) !important;
+  }
+
   /* Only touch cm-scroller overflow — nothing else */
   .cm-scroller {
     overflow: auto !important;
@@ -244,6 +311,14 @@ function tryGetAPI() {
           'stop',
         ],
       });
+      // CM is now rendered — re-inject theme overrides after a short delay
+      // so syntax highlight spans exist for classification
+      setTimeout(() => {
+        if (typeof _lastThemeColors !== 'undefined' && _lastThemeColors) {
+          const lum = relativeLuminance(_lastThemeColors.bg);
+          injectCMOverrides(_lastThemeColors, lum > 0.35);
+        }
+      }, 500);
     }
     return true;
   }
@@ -354,6 +429,34 @@ const THEME_DEFAULTS = Object.freeze({
   danger: '#ff7070',
 });
 
+function hexToRgb(hex) {
+  const raw = String(hex || '').trim().replace(/^#/, '');
+  if (!raw) return [128, 128, 128];
+  const normalized = raw.length === 3 ? raw.split('').map((ch) => ch + ch).join('') : raw.slice(0, 6);
+  if (normalized.length !== 6) return [128, 128, 128];
+  const int = Number.parseInt(normalized, 16);
+  if (Number.isNaN(int)) return [128, 128, 128];
+  return [(int >> 16) & 255, (int >> 8) & 255, int & 255];
+}
+
+function relativeLuminance(hex) {
+  const [r, g, b] = hexToRgb(hex).map(c => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function darkenHex(hex, amount) {
+  // amount 0..1, where 0 = no change, 1 = black
+  const [r, g, b] = hexToRgb(hex);
+  const f = 1 - amount;
+  const dr = Math.round(r * f);
+  const dg = Math.round(g * f);
+  const db = Math.round(b * f);
+  return '#' + [dr, dg, db].map(c => c.toString(16).padStart(2, '0')).join('');
+}
+
 function hexToRgba(hex, alpha) {
   const raw = String(hex || '').trim().replace(/^#/, '');
   if (!raw) return `rgba(255, 255, 255, ${alpha})`;
@@ -375,8 +478,11 @@ function normalizeThemeColors(raw) {
   return next;
 }
 
+let _lastThemeColors = null;
+
 function applyHermesTheme(theme) {
   const colors = normalizeThemeColors(theme?.colors);
+  _lastThemeColors = colors;
   const root = document.documentElement;
   root.style.setProperty('--theme-bg', colors.bg);
   root.style.setProperty('--theme-surface', colors.surface);
@@ -402,6 +508,195 @@ function applyHermesTheme(theme) {
   root.style.setProperty('--theme-success-glow', hexToRgba(colors.success, 0.27));
   root.style.setProperty('--theme-warning-glow', hexToRgba(colors.warning, 0.4));
   root.style.setProperty('--theme-danger-glow', hexToRgba(colors.danger, 0.4));
+
+  // ── Detect light vs dark ──
+  const bgLum = relativeLuminance(colors.bg);
+  const isLight = bgLum > 0.35;
+
+  // For light themes, also override the general text variables
+  if (isLight) {
+    root.style.setProperty('--theme-muted',       darkenHex(colors.muted, 0.25));
+    root.style.setProperty('--theme-text',        darkenHex(colors.text, 0.45));
+    root.style.setProperty('--theme-text-bright', darkenHex(colors.textBright, 0.55));
+  }
+
+  // Inject CM overrides after CM has rendered
+  requestAnimationFrame(() => injectCMOverrides(colors, isLight));
+}
+
+// ── Dynamic CM6 style override injection ──
+// CM6 themes use EditorView.theme() which creates generated class names
+// (e.g. .ͼ1 .ͼc for comments, .ͼ1 .ͼe for keywords, etc.)
+// These rules live in adopted stylesheets or injected <style> tags
+// and have specificity we can't reliably beat with static CSS.
+//
+// Our approach:
+// 1. Find every unique class combination on syntax spans inside .cm-line
+// 2. Read the computed color for each
+// 3. Map the computed color to a "role" (is it the comment color? keyword color? etc.)
+//    by comparing against known CM default dark-theme colors
+// 4. Build override rules using the exact same class selectors, with our theme colors
+// 5. Append the <style> after CM's styles so we win on source order at equal specificity
+
+let _cmOverrideStyle = null;
+
+// Known CM default highlight colors (from Strudel's dark theme / one-dark-ish defaults)
+// Used as hints to classify token roles when possible.
+const CM_ROLE_HINTS = {
+  '#7c7c7c': 'comment', '#7f8c98': 'comment', '#6a9955': 'comment', '#808080': 'comment', '#5c6370': 'comment',
+  '#c678dd': 'keyword', '#cc99cd': 'keyword', '#cf8fff': 'keyword', '#c792ea': 'keyword',
+  '#e06c75': 'keyword',
+  '#98c379': 'string', '#a8ff60': 'string', '#c3e88d': 'string', '#9ece6a': 'string', '#e5c07b': 'string',
+  '#d19a66': 'number', '#f78c6c': 'number', '#ffcb6b': 'number',
+  '#61afef': 'definition', '#82aaff': 'definition', '#8be9fd': 'definition',
+  '#abb2bf': 'variable', '#d4d4d4': 'variable', '#e0e0e0': 'variable',
+  '#56b6c2': 'operator', '#89ddff': 'operator',
+};
+
+function colorDistance(hex1, hex2) {
+  const [r1, g1, b1] = hexToRgb(hex1);
+  const [r2, g2, b2] = hexToRgb(hex2);
+  return Math.sqrt((r1-r2)**2 + (g1-g2)**2 + (b1-b2)**2);
+}
+
+function rgbStringToHex(rgb) {
+  if (!rgb) return null;
+  const m = rgb.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/);
+  if (!m) return null;
+  return '#' + [m[1], m[2], m[3]].map(n => parseInt(n).toString(16).padStart(2, '0')).join('');
+}
+
+// WCAG contrast ratio between two hex colors
+function contrastRatio(hex1, hex2) {
+  const l1 = relativeLuminance(hex1);
+  const l2 = relativeLuminance(hex2);
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+// Darken a color progressively until it meets minimum contrast against bg
+function ensureContrast(fgHex, bgHex, minRatio = 4.5) {
+  let fg = fgHex;
+  for (let step = 0; step < 10; step++) {
+    if (contrastRatio(fg, bgHex) >= minRatio) return fg;
+    fg = darkenHex(fg, 0.15); // darken 15% each step
+  }
+  return fg;
+}
+
+// Lighten a color for dark backgrounds if needed
+function lightenHex(hex, amount) {
+  const [r, g, b] = hexToRgb(hex);
+  const f = amount;
+  const lr = Math.min(255, Math.round(r + (255 - r) * f));
+  const lg = Math.min(255, Math.round(g + (255 - g) * f));
+  const lb = Math.min(255, Math.round(b + (255 - b) * f));
+  return '#' + [lr, lg, lb].map(c => c.toString(16).padStart(2, '0')).join('');
+}
+
+function ensureContrastAuto(fgHex, bgHex, minRatio = 4.5) {
+  // If bg is light, darken fg. If bg is dark, lighten fg.
+  const bgLum = relativeLuminance(bgHex);
+  let fg = fgHex;
+  for (let step = 0; step < 12; step++) {
+    if (contrastRatio(fg, bgHex) >= minRatio) return fg;
+    fg = bgLum > 0.5 ? darkenHex(fg, 0.12) : lightenHex(fg, 0.12);
+  }
+  return fg;
+}
+
+function injectCMOverrides(colors, isLight) {
+  const cmEditor = document.querySelector('.cm-editor');
+  if (!cmEditor) return;
+
+  // Remove previous override sheet
+  if (_cmOverrideStyle) {
+    _cmOverrideStyle.remove();
+    _cmOverrideStyle = null;
+  }
+
+  const textColor = isLight ? darkenHex(colors.text, 0.45) : colors.text;
+  const mutedColor = isLight ? darkenHex(colors.muted, 0.25) : colors.muted;
+  const brightColor = isLight ? darkenHex(colors.textBright, 0.55) : colors.textBright;
+  const accentColor = isLight ? darkenHex(colors.accent, 0.50) : colors.accent;
+  const surfaceColor = colors.surface;
+  const borderColor = colors.border;
+  const bgColor = colors.bg;
+  const elevatedColor = colors.elevated;
+
+  // Scan syntax spans: read their computed color, ensure contrast against new bg
+  const classToColor = {};
+  const spans = cmEditor.querySelectorAll('.cm-line span[class]');
+  spans.forEach(span => {
+    const cls = span.className.trim();
+    if (!cls || classToColor[cls] !== undefined) return;
+    if (!/ͼ/.test(cls)) return;
+    const computed = window.getComputedStyle(span).color;
+    const hex = rgbStringToHex(computed);
+    if (!hex) return;
+    // Ensure this color has readable contrast against the new background
+    classToColor[cls] = ensureContrastAuto(hex, bgColor, 4.5);
+  });
+
+  // Build syntax override rules
+  let syntaxRules = '';
+  for (const [cls, color] of Object.entries(classToColor)) {
+    const selector = cls.split(/\s+/).filter(Boolean).map(c => `.${c}`).join('');
+    syntaxRules += `  .cm-editor ${selector} { color: ${color} !important; }\n`;
+  }
+
+  const css = `
+/* ── hermilinChat CM6 theme overrides (injected dynamically) ── */
+
+/* Editor chrome */
+.cm-editor { background: ${bgColor} !important; color: ${textColor} !important; }
+.cm-editor .cm-content { color: ${textColor} !important; caret-color: ${accentColor} !important; }
+.cm-editor .cm-cursor, .cm-editor .cm-dropCursor { border-left-color: ${accentColor} !important; }
+.cm-editor .cm-gutters { background: ${surfaceColor} !important; color: ${mutedColor} !important; border-right: 1px solid ${borderColor} !important; }
+.cm-editor .cm-activeLineGutter { background: ${elevatedColor} !important; color: ${brightColor} !important; }
+.cm-editor .cm-activeLine { background: ${elevatedColor} !important; }
+.cm-editor .cm-selectionBackground { background: ${hexToRgba(colors.accentStrong, 0.22)} !important; }
+.cm-editor .cm-matchingBracket { background: ${hexToRgba(colors.accentStrong, 0.22)} !important; color: ${accentColor} !important; }
+.cm-editor .cm-tooltip { background: ${surfaceColor} !important; color: ${textColor} !important; border: 1px solid ${borderColor} !important; }
+
+/* Syntax highlighting — mapped from CM's generated classes */
+${syntaxRules}
+
+/* Inline visualizations (pianoroll, scope, punchcard, etc.)
+   These render on <canvas> with colors meant for dark backgrounds.
+   On light themes, add a dark backdrop so they stay visible. */
+${isLight ? `
+.cm-editor .cm-widgetBuffer + .cm-line canvas,
+.cm-editor .cm-line canvas,
+.cm-editor .cm-widget canvas,
+.cm-editor canvas {
+  background: rgba(0, 0, 0, 0.75) !important;
+  border-radius: 4px;
+}
+/* Also catch the widget wrapper divs that contain canvases */
+.cm-editor .cm-widgetBuffer + * canvas,
+.cm-editor div[class*="widget"] canvas {
+  background: rgba(0, 0, 0, 0.75) !important;
+  border-radius: 4px;
+}
+` : ''}
+`;
+
+  _cmOverrideStyle = document.createElement('style');
+  _cmOverrideStyle.id = 'hermilin-cm-overrides';
+  _cmOverrideStyle.textContent = css;
+  document.head.appendChild(_cmOverrideStyle);
+
+  // Clear inline styles CM may have set
+  cmEditor.style.backgroundColor = '';
+  cmEditor.style.color = '';
+  const gutters = cmEditor.querySelector('.cm-gutters');
+  if (gutters) { gutters.style.backgroundColor = ''; gutters.style.color = ''; gutters.style.borderRight = ''; }
+  const content = cmEditor.querySelector('.cm-content');
+  if (content) { content.style.color = ''; content.style.caretColor = ''; }
+
+  console.log('[hermilinChat] CM overrides injected, isLight:', isLight, 'overrides:', Object.keys(classToColor).length);
 }
 
 applyHermesTheme({ colors: THEME_DEFAULTS });
