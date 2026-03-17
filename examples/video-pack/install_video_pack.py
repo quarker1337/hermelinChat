@@ -10,12 +10,12 @@ This installer is intentionally *Hermes-home only*:
 
 Typical usage on the video machine:
   cd /path/to/hermilinChat
-  ./.venv/bin/python scripts/install_video_pack.py --env-file .hermelin.env --force
+  ./.venv/bin/python examples/video-pack/install_video_pack.py --env-file .hermelin.env --force
 
 Then restart hermilinChat.
 
 Uninstall (restore previous config):
-  ./.venv/bin/python scripts/uninstall_video_pack.py --env-file .hermelin.env
+  ./.venv/bin/python examples/video-pack/uninstall_video_pack.py --env-file .hermelin.env
 """
 
 import argparse
@@ -27,8 +27,8 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
-VIDEO_PACK_DIR = REPO_ROOT / "examples" / "video-pack"
+REPO_ROOT = SCRIPT_DIR.parent.parent
+VIDEO_PACK_DIR = SCRIPT_DIR
 VIDEO_PROJECTS_DIR = VIDEO_PACK_DIR / "projects"
 
 BACKUP_NAME = "config.yaml.video-pack.bak"
@@ -155,7 +155,7 @@ def _apply_agent_system_prompt(yaml_text: str, prompt: str) -> tuple[str, bool]:
     def build_block(child_indent: str) -> list[str]:
         value_indent = child_indent + "  "
         block: list[str] = []
-        block.append(f"{child_indent}# hermilinChat video-pack (installed by scripts/install_video_pack.py)")
+        block.append(f"{child_indent}# hermilinChat video-pack (installed by examples/video-pack/install_video_pack.py)")
         block.append(f"{child_indent}system_prompt: |")
         if not prompt_lines:
             block.append(f"{value_indent}")
@@ -222,7 +222,7 @@ def _apply_agent_system_prompt(yaml_text: str, prompt: str) -> tuple[str, bool]:
 
     # If already installed and identical, do nothing.
     # (We do a best-effort textual check for our marker comment.)
-    marker = f"{child_indent}# hermilinChat video-pack (installed by scripts/install_video_pack.py)"
+    marker = f"{child_indent}# hermilinChat video-pack (installed by examples/video-pack/install_video_pack.py)"
     if not changed:
         window = "\n".join(lines[agent_idx + 1 : min(end_idx, agent_idx + 25)])
         if marker in window and "system_prompt:" in window:

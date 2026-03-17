@@ -17,7 +17,7 @@ Restore:
 
 Typical usage on the video machine:
   cd /path/to/hermilinChat
-  ./.venv/bin/python scripts/seed_video_history.py --env-file .hermelin.env
+  ./.venv/bin/python examples/video-pack/seed_video_history.py --env-file .hermelin.env
 
 Then restart hermilinChat.
 """
@@ -37,7 +37,7 @@ from typing import Iterable
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
 DEFAULT_TITLES = [
@@ -630,7 +630,7 @@ def main() -> int:
 
     print("Seed complete.")
 
-    restore_parts = ["./.venv/bin/python", "scripts/seed_video_history.py"]
+    restore_parts = ["./.venv/bin/python", "examples/video-pack/seed_video_history.py"]
     if args.hermes_home:
         restore_parts += ["--hermes-home", str(hermes_home), "--meta-db", str(meta_db_path)]
     else:

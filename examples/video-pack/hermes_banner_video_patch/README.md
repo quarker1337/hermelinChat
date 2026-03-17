@@ -12,7 +12,7 @@ Nothing here changes Hermes upstream. The patch is applied ONLY to a local Herme
 - `banner_fake.json`
   Sample “fake” Tools/Skills list for the Hermes welcome banner.
 
-Related scripts (in `scripts/`):
+Related scripts (in `examples/video-pack/`):
 
 - `install_hermes_banner_video_patch.py`
   Installs the patch into the target Hermes install.
@@ -43,11 +43,11 @@ Implementation detail (for future debugging):
 
 From the hermilinChat repo:
 
-  python3 scripts/install_hermes_banner_video_patch.py
+  python3 examples/video-pack/install_hermes_banner_video_patch.py
 
 If you have more than one `hermes` on PATH, explicitly target the one hermilinChat uses:
 
-  python3 scripts/install_hermes_banner_video_patch.py --hermes-exe /full/path/to/hermes
+  python3 examples/video-pack/install_hermes_banner_video_patch.py --hermes-exe /full/path/to/hermes
 
 Notes:
 - The installer is idempotent: you can safely re-run it; it removes old hermilinChat patch blocks and re-applies the latest version.
@@ -58,7 +58,7 @@ Notes:
 
 1) Copy the sample JSON into your Hermes home and edit it:
 
-  cp scripts/hermes_banner_video_patch/banner_fake.json ~/.hermes/banner_fake.json
+  cp examples/video-pack/hermes_banner_video_patch/banner_fake.json ~/.hermes/banner_fake.json
   $EDITOR ~/.hermes/banner_fake.json
 
 2) Point Hermes at it:
@@ -83,16 +83,16 @@ JSON format:
 
 ### Uninstall
 
-  python3 scripts/uninstall_hermes_banner_video_patch.py
+  python3 examples/video-pack/uninstall_hermes_banner_video_patch.py
 
 Or target a specific Hermes binary:
 
-  python3 scripts/uninstall_hermes_banner_video_patch.py --hermes-exe /full/path/to/hermes
+  python3 examples/video-pack/uninstall_hermes_banner_video_patch.py --hermes-exe /full/path/to/hermes
 
 
 ## 2) Re-seed demo history (sidebar) for recording
 
-Use `scripts/seed_video_history.py` when you need the hermilinChat sidebar to show a clean, curated “past sessions” list for video.
+Use `examples/video-pack/seed_video_history.py` when you need the hermilinChat sidebar to show a clean, curated “past sessions” list for video.
 
 WARNING: this is destructive (it deletes all sessions + messages from `state.db`) — but it ALWAYS creates a backup first and prints a restore command.
 
@@ -107,7 +107,7 @@ Backups are saved to:
 ### Seed (typical)
 
   cd /path/to/hermilinChat
-  ./.venv/bin/python scripts/seed_video_history.py --env-file .hermelin.env
+  ./.venv/bin/python examples/video-pack/seed_video_history.py --env-file .hermelin.env
 
 Then restart hermilinChat.
 
@@ -115,7 +115,7 @@ Then restart hermilinChat.
 ### Restore the most recent backup
 
   cd /path/to/hermilinChat
-  ./.venv/bin/python scripts/seed_video_history.py --env-file .hermelin.env --restore
+  ./.venv/bin/python examples/video-pack/seed_video_history.py --env-file .hermelin.env --restore
 
 
 ### Useful flags

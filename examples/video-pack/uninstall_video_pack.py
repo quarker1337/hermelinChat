@@ -10,7 +10,7 @@ What it does:
 
 Usage:
   cd /path/to/hermilinChat
-  ./.venv/bin/python scripts/uninstall_video_pack.py --env-file .hermelin.env
+  ./.venv/bin/python examples/video-pack/uninstall_video_pack.py --env-file .hermelin.env
 """
 
 import argparse
@@ -21,7 +21,7 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
 
 BACKUP_NAME = "config.yaml.video-pack.bak"
 PROJECTS = ["gpu", "builder", "strudel", "money"]

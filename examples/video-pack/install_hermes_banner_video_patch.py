@@ -550,7 +550,7 @@ def main() -> int:
     print("  3) To toggle back to the stock banner without uninstalling,")
     print(f"     edit: {live_paths['banner']}")
     print("     and set: HERMILIN_BANNER_VIDEO_MODE = False")
-    print("     (or run scripts/uninstall_hermes_banner_video_patch.py)")
+    print("     (or run examples/video-pack/uninstall_hermes_banner_video_patch.py)")
 
     return 0
 
