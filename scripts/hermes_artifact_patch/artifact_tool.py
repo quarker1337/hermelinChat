@@ -57,6 +57,19 @@ from tools.registry import registry
 
 ALLOWED_ARTIFACT_TYPES = {"chart", "table", "map", "logs", "html", "markdown", "iframe"}
 
+DEFAULT_ARTIFACT_SUMMARIES = (
+    {
+        "id": "strudel",
+        "type": "iframe",
+        "title": "Strudel",
+        "persistent": False,
+        "live": False,
+        "timestamp": 0.0,
+        "runner_active": False,
+        "default": True,
+    },
+)
+
 
 # -----------------------------------------------------------------------------
 # Runtime directory layout (Step 2)
@@ -785,14 +798,8 @@ def list_artifacts(scope: str = "all") -> str:
     """List artifacts for the model so it can discover existing panel tabs.
 
     scope="all": list from both session/ and persistent/
-    scope="session": list only session/
+    scope="session": list only session/ plus built-in default tabs
     scope="persistent": list only persistent/
-
-    For each artifact file we return a summary:
-    {id, type, title, persistent, live, timestamp, runner_active}
-
-    runner_active is determined by checking for a matching PID file under
-    ~/.hermes/artifacts/pids/ and then verifying the PID still exists.
     """
 
     scope_value = (scope or "all").strip().lower()
@@ -826,7 +833,6 @@ def list_artifacts(scope: str = "all") -> str:
             persistent_flag = path.parent.name == "persistent"
             live_flag = bool(payload.get("live"))
 
-            timestamp_value: float
             if "timestamp" in payload:
                 try:
                     timestamp_value = float(payload.get("timestamp") or 0.0)
@@ -845,20 +851,25 @@ def list_artifacts(scope: str = "all") -> str:
                     pid_value = int(pid_path.read_text(encoding="utf-8").strip())
                 except Exception:
                     pid_value = -1
-
                 runner_active = _is_pid_running(pid_value)
 
-            summaries.append(
-                {
-                    "id": artifact_id,
-                    "type": kind,
-                    "title": title,
-                    "persistent": persistent_flag,
-                    "live": live_flag,
-                    "timestamp": timestamp_value,
-                    "runner_active": runner_active,
-                }
-            )
+            summaries.append({
+                "id": artifact_id,
+                "type": kind,
+                "title": title,
+                "persistent": persistent_flag,
+                "live": live_flag,
+                "timestamp": timestamp_value,
+                "runner_active": runner_active,
+            })
+
+    if scope_value in {"session", "all"}:
+        seen_ids = {str(item.get("id") or "") for item in summaries}
+        for item in DEFAULT_ARTIFACT_SUMMARIES:
+            artifact_id = str(item.get("id") or "").strip()
+            if not artifact_id or artifact_id in seen_ids:
+                continue
+            summaries.append(dict(item))
 
     def _sort_key(item: dict[str, Any]) -> tuple[float, str]:
         try:

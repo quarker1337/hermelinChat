@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hermilinChat › Strudel</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@strudel/repl@latest"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0c0f0e; }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    font-family: 'JetBrains Mono', monospace;
+    color: #b8d4cb;
+  }
+
+  /* ── TOOLBAR ── */
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: #111514;
+    border-bottom: 1px solid #243230;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .tbtn {
+    padding: 5px 14px;
+    border-radius: 5px;
+    border: 1px solid #243230;
+    background: #1a201f;
+    color: #b8d4cb;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tbtn:hover { border-color: #2da565; color: #4dffa1; background: #0a2e1a; }
+  .tbtn:active { transform: scale(0.97); }
+  .tbtn.on { background: #1a6b3f; border-color: #2da565; color: #e2f0ea; box-shadow: 0 0 10px #2da56544; }
+  .tbtn.stopbtn:hover { border-color: #e85050; color: #ff7070; background: #2a101033; }
+  .sep { width: 1px; height: 20px; background: #243230; margin: 0 4px; }
+  .spacer { flex: 1; }
+  .hint { font-size: 10px; color: #5a7a72; }
+  #statusDot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #f0c040; box-shadow: 0 0 6px #f0c04066;
+    margin-right: 6px;
+  }
+  #statusDot.playing { background: #4dffa1; box-shadow: 0 0 8px #4dffa188; }
+
+  /* ── AUDIO METER ── */
+  .meter-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    max-width: 420px;
+    margin: 0 8px;
+  }
+  .meter-label {
+    font-size: 9px;
+    color: #5a7a72;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    flex-shrink: 0;
+  }
+  .meter-track {
+    flex: 1;
+    height: 14px;
+    background: #0a0d0c;
+    border-radius: 3px;
+    border: 1px solid #1a201f;
+    overflow: hidden;
+    display: flex;
+    align-items: stretch;
+    gap: 1px;
+    padding: 2px;
+  }
+  .meter-seg {
+    flex: 1;
+    border-radius: 1px;
+    background: #1a201f;
+    transition: background 0.06s;
+  }
+  .meter-seg.on-green { background: #2da565; box-shadow: 0 0 3px #2da56544; }
+  .meter-seg.on-yellow { background: #d4a017; box-shadow: 0 0 3px #d4a01744; }
+  .meter-seg.on-red { background: #e85050; box-shadow: 0 0 4px #e8505066; }
+  .meter-db {
+    font-size: 10px;
+    color: #5a7a72;
+    min-width: 48px;
+    text-align: right;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── EDITOR CONTAINER ── */
+  #editor-container {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Only touch cm-scroller overflow — nothing else */
+  .cm-scroller {
+    overflow: auto !important;
+    scrollbar-width: thin;
+    scrollbar-color: #2e4340 #111514;
+  }
+  .cm-scroller::-webkit-scrollbar { width: 8px; height: 8px; }
+  .cm-scroller::-webkit-scrollbar-track { background: #111514; }
+  .cm-scroller::-webkit-scrollbar-thumb { background: #2e4340; border-radius: 4px; min-height: 40px; }
+  .cm-scroller::-webkit-scrollbar-thumb:hover { background: #5a7a72; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="toolbar">
+    <span id="statusDot"></span>
+    <button class="tbtn" id="btnPlay" onclick="doPlay()">▶ Play</button>
+    <button class="tbtn stopbtn" id="btnStop" onclick="doStop()">■ Stop</button>
+    <div class="sep"></div>
+    <div class="meter-wrap">
+      <span class="meter-label">out</span>
+      <div class="meter-track" id="meterTrack"></div>
+      <span class="meter-db" id="meterDb">-∞ dB</span>
+    </div>
+  </div>
+
+  <div id="editor-container">
+    <strudel-editor id="repl">
+<!--
+// hermilinChat × Strudel
+// paste your pattern here, press ctrl+enter or ▶ Play
+setcps(0.5)
+
+s("bd sd")
+-->
+    </strudel-editor>
+  </div>
+</div>
+
+<script>
+// Wait for the web component to fully init, then grab the API
+let api = null;
+let isPlaying = false;
+let bridgeReadySent = false;
+
+function emitHermesEvent(eventName, payload = {}, requestId = null) {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: 'hermes:artifact-event',
+        channel: 'strudel',
+        event: eventName,
+        requestId,
+        payload,
+      }, '*');
+    }
+  } catch (e) {
+    console.warn('[hermilinChat] bridge emit failed:', e);
+  }
+}
+
+function currentCode() {
+  try {
+    return api?.editor?.state?.doc?.toString?.() ?? api?.code ?? '';
+  } catch {
+    return api?.code ?? '';
+  }
+}
+
+function currentCodeSummary() {
+  const code = currentCode();
+  return {
+    code_length: code.length,
+    line_count: code === '' ? 0 : code.split(/\r?\n/).length,
+  };
+}
+
+function currentCursor() {
+  try {
+    return Number(api?.getCursorLocation?.() ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+function setPlayUi(playing) {
+  isPlaying = !!playing;
+  document.getElementById('btnPlay').classList.toggle('on', isPlaying);
+  document.getElementById('statusDot').classList.toggle('playing', isPlaying);
+}
+
+function tryGetAPI() {
+  const el = document.getElementById('repl');
+  if (el && el.editor) {
+    api = el.editor;
+    console.log('[hermilinChat] StrudelMirror API ready:', Object.keys(api));
+    if (!bridgeReadySent) {
+      bridgeReadySent = true;
+      emitHermesEvent('ready', {
+        capabilities: [
+          'get-code',
+          'set-code',
+          'append-code',
+          'replace-range',
+          'get-cursor',
+          'set-cursor',
+          'play',
+          'stop',
+        ],
+      });
+    }
+    return true;
+  }
+  return false;
+}
+
+// Poll until ready
+if (!tryGetAPI()) {
+  const iv = setInterval(() => {
+    if (tryGetAPI()) clearInterval(iv);
+  }, 300);
+}
+
+function doPlay() {
+  if (!api) { console.warn('Editor not ready'); return; }
+  try {
+    api.evaluate();
+    setPlayUi(true);
+    emitHermesEvent('playing', { playing: true });
+  } catch(e) { console.error(e); }
+}
+
+function doStop() {
+  if (!api) { console.warn('Editor not ready'); return; }
+  try {
+    api.stop();
+  } catch(e) { console.error(e); }
+  setPlayUi(false);
+  emitHermesEvent('playing', { playing: false });
+}
+
+function handleHermesCommand(message) {
+  if (!api) {
+    emitHermesEvent('error', { message: 'Editor not ready' }, message.requestId || null);
+    return;
+  }
+
+  const command = String(message.command || '').trim();
+  const requestId = message.requestId || null;
+  const payload = message.payload && typeof message.payload === 'object' ? message.payload : {};
+
+  try {
+    switch (command) {
+      case 'get-code': {
+        const code = currentCode();
+        emitHermesEvent('code', { code, ...currentCodeSummary() }, requestId);
+        return;
+      }
+      case 'set-code': {
+        api.setCode(String(payload.code ?? ''));
+        emitHermesEvent('ack', { action: command, ok: true, ...currentCodeSummary() }, requestId);
+        return;
+      }
+      case 'append-code': {
+        api.appendCode(String(payload.text ?? ''));
+        emitHermesEvent('ack', { action: command, ok: true, inserted_length: String(payload.text ?? '').length, ...currentCodeSummary() }, requestId);
+        return;
+      }
+      case 'replace-range': {
+        const text = String(payload.text ?? '');
+        const full = currentCode();
+        const from = Math.max(0, Math.min(full.length, Number(payload.from ?? 0)));
+        const to = Math.max(from, Math.min(full.length, Number(payload.to ?? from)));
+        api.editor.dispatch({ changes: { from, to, insert: text } });
+        emitHermesEvent('ack', { action: command, ok: true, from, to, inserted_length: text.length, ...currentCodeSummary() }, requestId);
+        return;
+      }
+      case 'get-cursor':
+        emitHermesEvent('cursor', { position: currentCursor() }, requestId);
+        return;
+      case 'set-cursor': {
+        const position = Math.max(0, Number(payload.position ?? 0));
+        api.setCursorLocation(position);
+        emitHermesEvent('ack', { action: command, ok: true, position: currentCursor() }, requestId);
+        return;
+      }
+      case 'play':
+        doPlay();
+        emitHermesEvent('ack', { action: command, ok: true, playing: true }, requestId);
+        return;
+      case 'stop':
+        doStop();
+        emitHermesEvent('ack', { action: command, ok: true, playing: false }, requestId);
+        return;
+      default:
+        emitHermesEvent('error', { message: `Unknown command: ${command}` }, requestId);
+    }
+  } catch (err) {
+    console.error(err);
+    emitHermesEvent('error', { message: err?.message || String(err), command }, requestId);
+  }
+}
+
+window.addEventListener('message', (event) => {
+  const message = event.data;
+  if (!message || typeof message !== 'object') return;
+  if (message.type !== 'hermes:artifact-command') return;
+  if (String(message.channel || 'strudel') !== 'strudel') return;
+  handleHermesCommand(message);
+});
+
+// ── AUDIO LEVEL METER ──
+const METER_SEGS = 32;
+const meterTrack = document.getElementById('meterTrack');
+for (let i = 0; i < METER_SEGS; i++) {
+  const seg = document.createElement('div');
+  seg.className = 'meter-seg';
+  meterTrack.appendChild(seg);
+}
+const meterSegs = meterTrack.querySelectorAll('.meter-seg');
+const meterDbEl = document.getElementById('meterDb');
+
+let analyser = null;
+let analyserData = null;
+let meterRunning = false;
+
+// Patch: intercept connections to audio destination so we can meter them
+function setupMeter() {
+  try {
+    const ctx = typeof getAudioContext === 'function' ? getAudioContext() : null;
+    if (!ctx) { setTimeout(setupMeter, 500); return; }
+    if (analyser) return; // already set up
+
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.65;
+    analyserData = new Float32Array(analyser.fftSize);
+
+    // Insert analyser between everything and the destination:
+    // Monkey-patch connect() on all AudioNodes to also feed our analyser
+    const origConnect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function(dest, ...args) {
+      const result = origConnect.call(this, dest, ...args);
+      // If something connects to the final destination, also connect to analyser
+      if (dest === ctx.destination) {
+        try { origConnect.call(this, analyser); } catch(e) {}
+      }
+      return result;
+    };
+
+    if (!meterRunning) {
+      meterRunning = true;
+      meterLoop();
+    }
+    console.log('[hermilinChat] Audio meter ready');
+  } catch(e) {
+    console.warn('[hermilinChat] Meter setup failed:', e);
+  }
+}
+
+function meterLoop() {
+  requestAnimationFrame(meterLoop);
+  if (!analyser || !analyserData) return;
+
+  analyser.getFloatTimeDomainData(analyserData);
+
+  let peak = 0;
+  for (let i = 0; i < analyserData.length; i++) {
+    const v = Math.abs(analyserData[i]);
+    if (v > peak) peak = v;
+  }
+  const db = peak > 0.0001 ? 20 * Math.log10(peak) : -Infinity;
+
+  const minDb = -50;
+  const ratio = Math.max(0, Math.min(1, (db - minDb) / (0 - minDb)));
+  const litSegs = Math.round(ratio * METER_SEGS);
+
+  for (let i = 0; i < METER_SEGS; i++) {
+    if (i < litSegs) {
+      const pos = i / METER_SEGS;
+      if (pos > 0.88) meterSegs[i].className = 'meter-seg on-red';
+      else if (pos > 0.68) meterSegs[i].className = 'meter-seg on-yellow';
+      else meterSegs[i].className = 'meter-seg on-green';
+    } else {
+      meterSegs[i].className = 'meter-seg';
+    }
+  }
+
+  if (db > -100) {
+    meterDbEl.textContent = db.toFixed(1) + ' dB';
+    meterDbEl.style.color = db > -3 ? '#ff7070' : db > -10 ? '#f0c040' : '#5a7a72';
+  } else {
+    meterDbEl.textContent = '-∞ dB';
+    meterDbEl.style.color = '#5a7a72';
+  }
+}
+
+// Init meter early so the patch is in place before strudel connects anything
+setTimeout(setupMeter, 300);
+
+// ── Fix scrollbar: constrain heights via JS after editor renders ──
+function fixEditorScroll() {
+  const container = document.getElementById('editor-container');
+  if (!container) return false;
+  const cmEditor = container.querySelector('.cm-editor');
+  if (!cmEditor) return false;
+
+  // Get the available height
+  const h = container.offsetHeight;
+  if (h < 10) return false; // not laid out yet
+
+  // Set max-height on cm-editor so cm-scroller overflows
+  cmEditor.style.maxHeight = h + 'px';
+  cmEditor.style.overflow = 'hidden';
+
+  // Also constrain the wrapper div between strudel-editor and cm-editor
+  const wrapper = cmEditor.parentElement;
+  if (wrapper && wrapper !== container && wrapper.tagName !== 'STRUDEL-EDITOR') {
+    wrapper.style.maxHeight = h + 'px';
+    wrapper.style.overflow = 'hidden';
+  }
+
+  console.log('[hermilinChat] Scroll fix applied, height:', h);
+  return true;
+}
+
+// Try after a delay, and on resize
+setTimeout(() => {
+  if (!fixEditorScroll()) {
+    const iv2 = setInterval(() => {
+      if (fixEditorScroll()) clearInterval(iv2);
+    }, 500);
+  }
+}, 1000);
+window.addEventListener('resize', () => fixEditorScroll());
+</script>
+</body>
+</html>

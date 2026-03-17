@@ -8,6 +8,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
+from .default_artifacts import load_default_artifacts
+
 
 ARTIFACT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -169,11 +171,21 @@ def list_artifacts(root: Path) -> list[dict[str, Any]]:
             artifacts_by_id[artifact_id] = payload
             continue
 
-        # De-dupe: keep the newest by updated_at/timestamp; if tied, prefer persistent.
         prev_key = (_artifact_updated_ts(prev), 1 if bool(prev.get("persistent")) else 0)
         curr_key = (_artifact_updated_ts(payload), 1 if payload["persistent"] else 0)
         if curr_key > prev_key:
             artifacts_by_id[artifact_id] = payload
+
+    for payload in load_default_artifacts():
+        artifact_id = str(payload.get("id") or "").strip()
+        if not artifact_id or not is_valid_artifact_id(artifact_id):
+            continue
+        if artifact_id in artifacts_by_id:
+            continue
+        payload["id"] = artifact_id
+        payload["persistent"] = bool(payload.get("persistent", False))
+        payload["default"] = True
+        artifacts_by_id[artifact_id] = payload
 
     artifacts = list(artifacts_by_id.values())
     artifacts.sort(key=_artifact_sort_ts, reverse=True)

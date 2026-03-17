@@ -43,6 +43,7 @@ from .auth import (
     verify_session_token,
 )
 from .config import HermelinConfig
+from .default_artifacts import resolve_default_artifact_path
 from .meta_db import ensure_meta_db, get_random_whisper, get_titles_map
 from .pty_handler import PtyProcess
 from .security import extract_client_ip, ip_allowed
@@ -224,6 +225,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     @app.get("/api/artifacts/latest")
     async def api_artifacts_latest():
         return latest_artifact(config.artifact_dir)
+
+    @app.get("/api/default-artifacts/{asset_path:path}")
+    async def api_default_artifact_asset(asset_path: str):
+        resolved = resolve_default_artifact_path(config.static_dir, asset_path)
+        if resolved is None:
+            return JSONResponse({"error": "default artifact asset not found"}, status_code=404)
+        return FileResponse(resolved)
 
     def _artifact_bridge_safe(value: str, fallback: str = "") -> str:
         raw = str(value or "").strip()
