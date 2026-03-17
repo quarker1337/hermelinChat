@@ -61,7 +61,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         # Non-fatal; UI will just fall back to first message titles.
         pass
 
-    app = FastAPI(title="hermelinChat", version="0.12", docs_url="/api/docs", redoc_url=None)
+    app = FastAPI(title="hermelinChat", version="0.13", docs_url="/api/docs", redoc_url=None)
     # CORS: disabled by default (same-origin UI does not need it).
     # To enable (e.g. behind a separate UI origin), set HERMELIN_CORS_ORIGINS to a
     # comma-separated list of origins. Wildcard '*' is intentionally not supported.

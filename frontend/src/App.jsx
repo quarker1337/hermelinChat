@@ -20,7 +20,7 @@ const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
 const BACKGROUND_EFFECT_VALUES = ['auto', 'particles', 'matrix-rain', 'nous-crt', 'samaritan']
 
 // Release version (keep in sync with git tag + backend pyproject).
-const HERMILINCHAT_VERSION = '0.12'
+const HERMILINCHAT_VERSION = '0.13'
 
 const DEFAULT_UI_PREFS = {
   theme: DEFAULT_THEME_ID,
