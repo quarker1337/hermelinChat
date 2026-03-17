@@ -8,14 +8,40 @@
 <script src="https://unpkg.com/@strudel/repl@latest"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0c0f0e; }
+  :root {
+    --theme-bg: #0c0f0e;
+    --theme-surface: #111514;
+    --theme-elevated: #1a201f;
+    --theme-border: #243230;
+    --theme-muted: #5a7a72;
+    --theme-text: #b8d4cb;
+    --theme-text-bright: #e2f0ea;
+    --theme-accent: #4dffa1;
+    --theme-accent-soft: #b7ffd6;
+    --theme-accent-muted: #2da565;
+    --theme-accent-strong: #1a6b3f;
+    --theme-success: #4dffa1;
+    --theme-warning: #f0c040;
+    --theme-danger: #ff7070;
+    --theme-bg-deep: #0a0d0c;
+    --theme-scrollbar: #2e4340;
+    --theme-scrollbar-hover: #5a7a72;
+    --theme-accent-surface: #0a2e1a;
+    --theme-danger-surface: #2a101033;
+    --theme-accent-glow: rgba(45, 165, 101, 0.27);
+    --theme-accent-glow-strong: rgba(77, 255, 161, 0.53);
+    --theme-success-glow: rgba(77, 255, 161, 0.27);
+    --theme-warning-glow: rgba(240, 192, 64, 0.40);
+    --theme-danger-glow: rgba(255, 112, 112, 0.40);
+  }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--theme-bg); }
 
   #app {
     display: flex;
     flex-direction: column;
     height: 100vh;
     font-family: 'JetBrains Mono', monospace;
-    color: #b8d4cb;
+    color: var(--theme-text);
   }
 
   /* ── TOOLBAR ── */
@@ -24,35 +50,35 @@
     align-items: center;
     gap: 6px;
     padding: 8px 14px;
-    background: #111514;
-    border-bottom: 1px solid #243230;
+    background: var(--theme-surface);
+    border-bottom: 1px solid var(--theme-border);
     flex-shrink: 0;
     z-index: 10;
   }
   .tbtn {
     padding: 5px 14px;
     border-radius: 5px;
-    border: 1px solid #243230;
-    background: #1a201f;
-    color: #b8d4cb;
+    border: 1px solid var(--theme-border);
+    background: var(--theme-elevated);
+    color: var(--theme-text);
     font-family: inherit;
     font-size: 11px;
     cursor: pointer;
     transition: all 0.15s;
   }
-  .tbtn:hover { border-color: #2da565; color: #4dffa1; background: #0a2e1a; }
+  .tbtn:hover { border-color: var(--theme-accent-muted); color: var(--theme-accent); background: var(--theme-accent-surface); }
   .tbtn:active { transform: scale(0.97); }
-  .tbtn.on { background: #1a6b3f; border-color: #2da565; color: #e2f0ea; box-shadow: 0 0 10px #2da56544; }
-  .tbtn.stopbtn:hover { border-color: #e85050; color: #ff7070; background: #2a101033; }
-  .sep { width: 1px; height: 20px; background: #243230; margin: 0 4px; }
+  .tbtn.on { background: var(--theme-accent-strong); border-color: var(--theme-accent-muted); color: var(--theme-text-bright); box-shadow: 0 0 10px var(--theme-accent-glow); }
+  .tbtn.stopbtn:hover { border-color: var(--theme-danger); color: var(--theme-danger); background: var(--theme-danger-surface); }
+  .sep { width: 1px; height: 20px; background: var(--theme-border); margin: 0 4px; }
   .spacer { flex: 1; }
-  .hint { font-size: 10px; color: #5a7a72; }
+  .hint { font-size: 10px; color: var(--theme-muted); }
   #statusDot {
     width: 6px; height: 6px; border-radius: 50%;
-    background: #f0c040; box-shadow: 0 0 6px #f0c04066;
+    background: var(--theme-warning); box-shadow: 0 0 6px var(--theme-warning-glow);
     margin-right: 6px;
   }
-  #statusDot.playing { background: #4dffa1; box-shadow: 0 0 8px #4dffa188; }
+  #statusDot.playing { background: var(--theme-success); box-shadow: 0 0 8px var(--theme-success-glow); }
 
   /* ── AUDIO METER ── */
   .meter-wrap {
@@ -65,7 +91,7 @@
   }
   .meter-label {
     font-size: 9px;
-    color: #5a7a72;
+    color: var(--theme-muted);
     text-transform: uppercase;
     letter-spacing: 1px;
     flex-shrink: 0;
@@ -73,9 +99,9 @@
   .meter-track {
     flex: 1;
     height: 14px;
-    background: #0a0d0c;
+    background: var(--theme-bg-deep);
     border-radius: 3px;
-    border: 1px solid #1a201f;
+    border: 1px solid var(--theme-elevated);
     overflow: hidden;
     display: flex;
     align-items: stretch;
@@ -85,15 +111,15 @@
   .meter-seg {
     flex: 1;
     border-radius: 1px;
-    background: #1a201f;
+    background: var(--theme-elevated);
     transition: background 0.06s;
   }
-  .meter-seg.on-green { background: #2da565; box-shadow: 0 0 3px #2da56544; }
-  .meter-seg.on-yellow { background: #d4a017; box-shadow: 0 0 3px #d4a01744; }
-  .meter-seg.on-red { background: #e85050; box-shadow: 0 0 4px #e8505066; }
+  .meter-seg.on-green { background: var(--theme-success); box-shadow: 0 0 3px var(--theme-success-glow); }
+  .meter-seg.on-yellow { background: var(--theme-warning); box-shadow: 0 0 3px var(--theme-warning-glow); }
+  .meter-seg.on-red { background: var(--theme-danger); box-shadow: 0 0 4px var(--theme-danger-glow); }
   .meter-db {
     font-size: 10px;
-    color: #5a7a72;
+    color: var(--theme-muted);
     min-width: 48px;
     text-align: right;
     flex-shrink: 0;
@@ -111,12 +137,12 @@
   .cm-scroller {
     overflow: auto !important;
     scrollbar-width: thin;
-    scrollbar-color: #2e4340 #111514;
+    scrollbar-color: var(--theme-scrollbar) var(--theme-surface);
   }
   .cm-scroller::-webkit-scrollbar { width: 8px; height: 8px; }
-  .cm-scroller::-webkit-scrollbar-track { background: #111514; }
-  .cm-scroller::-webkit-scrollbar-thumb { background: #2e4340; border-radius: 4px; min-height: 40px; }
-  .cm-scroller::-webkit-scrollbar-thumb:hover { background: #5a7a72; }
+  .cm-scroller::-webkit-scrollbar-track { background: var(--theme-surface); }
+  .cm-scroller::-webkit-scrollbar-thumb { background: var(--theme-scrollbar); border-radius: 4px; min-height: 40px; }
+  .cm-scroller::-webkit-scrollbar-thumb:hover { background: var(--theme-scrollbar-hover); }
 </style>
 </head>
 <body>
@@ -311,9 +337,82 @@ function handleHermesCommand(message) {
   }
 }
 
+const THEME_DEFAULTS = Object.freeze({
+  bg: '#0c0f0e',
+  surface: '#111514',
+  elevated: '#1a201f',
+  border: '#243230',
+  muted: '#5a7a72',
+  text: '#b8d4cb',
+  textBright: '#e2f0ea',
+  accent: '#4dffa1',
+  accentSoft: '#b7ffd6',
+  accentMuted: '#2da565',
+  accentStrong: '#1a6b3f',
+  success: '#4dffa1',
+  warning: '#f0c040',
+  danger: '#ff7070',
+});
+
+function hexToRgba(hex, alpha) {
+  const raw = String(hex || '').trim().replace(/^#/, '');
+  if (!raw) return `rgba(255, 255, 255, ${alpha})`;
+  const normalized = raw.length === 3 ? raw.split('').map((ch) => ch + ch).join('') : raw.slice(0, 6);
+  if (normalized.length !== 6) return `rgba(255, 255, 255, ${alpha})`;
+  const int = Number.parseInt(normalized, 16);
+  if (Number.isNaN(int)) return `rgba(255, 255, 255, ${alpha})`;
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function normalizeThemeColors(raw) {
+  const next = { ...THEME_DEFAULTS };
+  for (const [key, value] of Object.entries(raw || {})) {
+    if (typeof value === 'string' && value.trim()) next[key] = value.trim();
+  }
+  return next;
+}
+
+function applyHermesTheme(theme) {
+  const colors = normalizeThemeColors(theme?.colors);
+  const root = document.documentElement;
+  root.style.setProperty('--theme-bg', colors.bg);
+  root.style.setProperty('--theme-surface', colors.surface);
+  root.style.setProperty('--theme-elevated', colors.elevated);
+  root.style.setProperty('--theme-border', colors.border);
+  root.style.setProperty('--theme-muted', colors.muted);
+  root.style.setProperty('--theme-text', colors.text);
+  root.style.setProperty('--theme-text-bright', colors.textBright);
+  root.style.setProperty('--theme-accent', colors.accent);
+  root.style.setProperty('--theme-accent-soft', colors.accentSoft);
+  root.style.setProperty('--theme-accent-muted', colors.accentMuted);
+  root.style.setProperty('--theme-accent-strong', colors.accentStrong);
+  root.style.setProperty('--theme-success', colors.success);
+  root.style.setProperty('--theme-warning', colors.warning);
+  root.style.setProperty('--theme-danger', colors.danger);
+  root.style.setProperty('--theme-bg-deep', hexToRgba(colors.bg, 0.82));
+  root.style.setProperty('--theme-scrollbar', hexToRgba(colors.muted, 0.55));
+  root.style.setProperty('--theme-scrollbar-hover', hexToRgba(colors.muted, 0.8));
+  root.style.setProperty('--theme-accent-surface', hexToRgba(colors.accentStrong, 0.22));
+  root.style.setProperty('--theme-danger-surface', hexToRgba(colors.danger, 0.14));
+  root.style.setProperty('--theme-accent-glow', hexToRgba(colors.accentMuted, 0.27));
+  root.style.setProperty('--theme-accent-glow-strong', hexToRgba(colors.accent, 0.53));
+  root.style.setProperty('--theme-success-glow', hexToRgba(colors.success, 0.27));
+  root.style.setProperty('--theme-warning-glow', hexToRgba(colors.warning, 0.4));
+  root.style.setProperty('--theme-danger-glow', hexToRgba(colors.danger, 0.4));
+}
+
+applyHermesTheme({ colors: THEME_DEFAULTS });
+
 window.addEventListener('message', (event) => {
   const message = event.data;
   if (!message || typeof message !== 'object') return;
+  if (message.type === 'hermes:artifact-theme') {
+    applyHermesTheme(message.theme || null);
+    return;
+  }
   if (message.type !== 'hermes:artifact-command') return;
   if (String(message.channel || 'strudel') !== 'strudel') return;
   handleHermesCommand(message);
@@ -398,10 +497,10 @@ function meterLoop() {
 
   if (db > -100) {
     meterDbEl.textContent = db.toFixed(1) + ' dB';
-    meterDbEl.style.color = db > -3 ? '#ff7070' : db > -10 ? '#f0c040' : '#5a7a72';
+    meterDbEl.style.color = db > -3 ? 'var(--theme-danger)' : db > -10 ? 'var(--theme-warning)' : 'var(--theme-muted)';
   } else {
     meterDbEl.textContent = '-∞ dB';
-    meterDbEl.style.color = '#5a7a72';
+    meterDbEl.style.color = 'var(--theme-muted)';
   }
 }
 

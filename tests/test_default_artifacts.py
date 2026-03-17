@@ -13,6 +13,7 @@ from hermelin.server import create_app
 
 
 DEFAULT_STRUDEL_SRC = "/api/default-artifacts/strudel/index.html"
+ARTIFACT_RENDERER_SRC = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "artifacts" / "ArtifactRenderer.jsx"
 
 
 def _load_artifact_tool_module():
@@ -106,6 +107,15 @@ class DefaultArtifactsTests(unittest.TestCase):
 
         self.assertEqual(asset_response.status_code, 200)
         self.assertIn("<strudel-editor", asset_text)
+        self.assertIn("--theme-bg", asset_text)
+        self.assertIn("applyHermesTheme", asset_text)
+        self.assertIn("message.type === 'hermes:artifact-theme'", asset_text)
+
+    def test_artifact_renderer_posts_theme_messages_to_iframes(self):
+        renderer_text = ARTIFACT_RENDERER_SRC.read_text(encoding="utf-8")
+
+        self.assertIn("getActiveTheme", renderer_text)
+        self.assertIn("type: 'hermes:artifact-theme'", renderer_text)
 
     def test_artifact_tool_lists_default_strudel(self):
         tool_module = _load_artifact_tool_module()

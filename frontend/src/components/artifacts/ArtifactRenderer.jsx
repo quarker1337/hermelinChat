@@ -15,7 +15,7 @@ import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
 import 'highlight.js/styles/github-dark.css'
 
-import { AMBER, SLATE, formatTimestamp, levelColor, semanticColor } from '../../theme/index.js'
+import { AMBER, SLATE, formatTimestamp, getActiveTheme, levelColor, semanticColor } from '../../theme/index.js'
 
 const HLJS_LANGS = [
   ['bash', bash],
@@ -461,6 +461,53 @@ function MarkdownArtifact({ artifact }) {
 
 function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
   const iframeRef = useRef(null)
+  const activeTheme = getActiveTheme()
+  const themeMessage = useMemo(
+    () => ({
+      type: 'hermes:artifact-theme',
+      artifactId: artifactId || null,
+      theme: {
+        id: activeTheme?.id || null,
+        label: activeTheme?.label || null,
+        colors: {
+          bg: SLATE.bg || '#0c0f0e',
+          surface: SLATE.surface || '#111514',
+          elevated: SLATE.elevated || '#1a201f',
+          border: SLATE.border || '#243230',
+          muted: SLATE.muted || '#5a7a72',
+          text: SLATE.text || '#b8d4cb',
+          textBright: SLATE.textBright || '#e2f0ea',
+          accent: SLATE.accent || AMBER[400] || '#4dffa1',
+          accentSoft: AMBER[300] || SLATE.accent || '#b7ffd6',
+          accentMuted: AMBER[500] || SLATE.accent || '#2da565',
+          accentStrong: AMBER[700] || AMBER[600] || SLATE.accent || '#1a6b3f',
+          success: SLATE.success || AMBER[400] || '#4dffa1',
+          warning: AMBER[400] || SLATE.accent || '#f0c040',
+          danger: SLATE.danger || '#ff7070',
+        },
+      },
+    }),
+    [
+      artifactId,
+      activeTheme?.id,
+      activeTheme?.label,
+      SLATE.bg,
+      SLATE.surface,
+      SLATE.elevated,
+      SLATE.border,
+      SLATE.muted,
+      SLATE.text,
+      SLATE.textBright,
+      SLATE.accent,
+      SLATE.success,
+      SLATE.danger,
+      AMBER[300],
+      AMBER[400],
+      AMBER[500],
+      AMBER[600],
+      AMBER[700],
+    ],
+  )
 
   useEffect(() => {
     const removeQueuedCommand = (targetArtifactId, commandId) => {
@@ -553,6 +600,12 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
     }
   }, [artifactId])
 
+  useEffect(() => {
+    const target = iframeRef.current?.contentWindow
+    if (!target) return
+    target.postMessage(themeMessage, '*')
+  }, [themeMessage])
+
   return (
     <div style={{ padding: '12px 14px', height: '100%', minHeight: 360, boxSizing: 'border-box' }}>
       <iframe
@@ -569,6 +622,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
             const queue = store && typeof store === 'object' && Array.isArray(store[key]) ? [...store[key]] : []
             const target = iframeRef.current?.contentWindow
             if (!target) return
+            target.postMessage(themeMessage, '*')
             queue.forEach((command) => {
               target.postMessage(
                 {
