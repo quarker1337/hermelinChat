@@ -136,7 +136,7 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
   if [[ ! -f "$VENV_ACTIVATE" ]]; then
     echo "ERROR: $VENV_ACTIVATE not found. The venv appears corrupted." >&2
     echo "Try: rm -rf $VENV_DIR" >&2
-    echo "On Debian/Ubuntu also ensure: sudo apt install python3-venv (or python3.X-venv)" >&2
+    hermelin_print_python_venv_fix_help
     exit 1
   fi
 
@@ -159,7 +159,10 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
     echo "ERROR: pip is missing in .venv and could not be bootstrapped." >&2
     echo "Fix options:" >&2
     echo "  - Recreate the venv: rm -rf .venv && python3 -m venv .venv" >&2
-    echo "  - On Debian/Ubuntu install: sudo apt install python3-venv" >&2
+    echo "  - Install the required system package(s), then rerun ./scripts/update.sh (or rerun ./scripts/install.sh)." >&2
+    if install_cmd="$(hermelin_python_venv_install_command)"; then
+      echo "    Suggested command: ${install_cmd}" >&2
+    fi
     echo "  - Or install uv (https://docs.astral.sh/uv/) and rerun" >&2
     exit 1
   fi
