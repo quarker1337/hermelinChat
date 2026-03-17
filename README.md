@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/invertelin-banner.svg" alt="hermilinChat" width="420" />
+  <img src="docs/invertelin-banner.svg" alt="hermilinChat" width="620" />
 </p>
 
 <h3 align="center">
