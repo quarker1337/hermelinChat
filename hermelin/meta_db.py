@@ -98,6 +98,22 @@ def upsert_title(db_path: Path, *, session_id: str, title: str, source: str = "a
         conn.commit()
 
 
+def delete_title(db_path: Path, *, session_id: str) -> bool:
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        return False
+
+    with _connect(db_path) as conn:
+        conn.executescript(_SCHEMA_SQL)
+        conn.commit()
+        cur = conn.execute("DELETE FROM session_titles WHERE session_id = ?", (session_id,))
+        conn.commit()
+        try:
+            return bool(cur.rowcount and cur.rowcount > 0)
+        except Exception:
+            return False
+
+
 def insert_whispers(db_path: Path, whispers: Iterable[str], source: str = "auto") -> int:
     source = str(source or "auto").strip() or "auto"
     items: list[str] = []

@@ -1193,8 +1193,10 @@ const HighlightedSnippet = ({ text }) => {
   return <span>{nodes}</span>
 }
 
-const SessionRow = ({ title, preview, right, active, onClick }) => {
+const SessionRow = ({ title, preview, right, active, onClick, onMenu, menuOpen = false }) => {
   const [hovered, setHovered] = useState(false)
+  const hasMenu = typeof onMenu === 'function'
+  const showMenu = hasMenu && (hovered || menuOpen)
 
   return (
     <div
@@ -1224,10 +1226,52 @@ const SessionRow = ({ title, preview, right, active, onClick }) => {
         >
           {title}
         </div>
-        {right && (
-          <div style={{ fontSize: 10, color: SLATE.muted, whiteSpace: 'nowrap' }}>{right}</div>
+
+        {(right || hasMenu) && (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexShrink: 0 }}>
+            {right && <div style={{ fontSize: 10, color: SLATE.muted, whiteSpace: 'nowrap' }}>{right}</div>}
+
+            {hasMenu && (
+              <div
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onMenu?.(e)
+                }}
+                title="Session actions"
+                style={{
+                  width: 22,
+                  height: 18,
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: SLATE.muted,
+                  background: 'transparent',
+                  border: '1px solid transparent',
+                  opacity: showMenu ? 1 : 0,
+                  pointerEvents: showMenu ? 'auto' : 'none',
+                  transition: 'opacity 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
+                  userSelect: 'none',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = SLATE.elevated
+                  e.currentTarget.style.borderColor = SLATE.border
+                  e.currentTarget.style.color = AMBER[400]
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.borderColor = 'transparent'
+                  e.currentTarget.style.color = SLATE.muted
+                }}
+              >
+                ⋯
+              </div>
+            )}
+          </div>
         )}
       </div>
+
       {preview && (
         <div
           style={{
@@ -3784,6 +3828,17 @@ export default function App() {
     }
   }, [])
 
+  const [sessionMenu, setSessionMenu] = useState(null) // { session_id, title, top, left }
+
+  const [renameSession, setRenameSession] = useState(null) // { id, title }
+  const [renameDraft, setRenameDraft] = useState('')
+  const [renameBusy, setRenameBusy] = useState(false)
+  const [renameError, setRenameError] = useState('')
+
+  const [deleteSession, setDeleteSession] = useState(null) // { id, title }
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
   const [auth, setAuth] = useState({ loading: true, enabled: false, authenticated: false })
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
@@ -4170,6 +4225,180 @@ export default function App() {
     setPtySpawnNonce((n) => n + 1)
     setNewSessionStartedAt(Date.now() / 1000)
     closePeek()
+  }
+
+  const closeSessionMenu = useCallback(() => {
+    setSessionMenu(null)
+  }, [])
+
+  const openSessionMenu = useCallback((s, ev) => {
+    if (!s?.id) return
+    if (typeof window === 'undefined') return
+
+    const sid = String(s.id)
+    const title = String(s.title || s.id || sid)
+
+    let left = 12
+    let top = 12
+
+    try {
+      const rect = ev?.currentTarget?.getBoundingClientRect?.()
+      const menuWidth = 180
+      const menuHeight = 84
+      if (rect) {
+        left = rect.right - menuWidth
+        top = rect.bottom + 6
+        left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, left))
+        top = Math.max(8, Math.min(window.innerHeight - menuHeight - 8, top))
+      }
+    } catch {
+      // ignore
+    }
+
+    setSessionMenu({ session_id: sid, title, left, top })
+  }, [])
+
+  const beginRenameSession = useCallback(() => {
+    if (!sessionMenu?.session_id) return
+    const sid = String(sessionMenu.session_id)
+    const found = (sessions || []).find((x) => x?.id === sid)
+    const currentTitle = String(found?.title || sessionMenu.title || sid)
+
+    setRenameSession({ id: sid, title: currentTitle })
+    setRenameDraft(currentTitle)
+    setRenameError('')
+    setRenameBusy(false)
+    setSessionMenu(null)
+  }, [sessionMenu, sessions])
+
+  const beginDeleteSession = useCallback(() => {
+    if (!sessionMenu?.session_id) return
+    const sid = String(sessionMenu.session_id)
+    const found = (sessions || []).find((x) => x?.id === sid)
+    const currentTitle = String(found?.title || sessionMenu.title || sid)
+
+    setDeleteSession({ id: sid, title: currentTitle })
+    setDeleteError('')
+    setDeleteBusy(false)
+    setSessionMenu(null)
+  }, [sessionMenu, sessions])
+
+  const closeRenameModal = useCallback(() => {
+    if (renameBusy) return
+    setRenameSession(null)
+    setRenameError('')
+  }, [renameBusy])
+
+  const closeDeleteModal = useCallback(() => {
+    if (deleteBusy) return
+    setDeleteSession(null)
+    setDeleteError('')
+  }, [deleteBusy])
+
+  const doRenameSession = async () => {
+    if (!renameSession?.id) return
+    if (renameBusy) return
+
+    const sid = String(renameSession.id)
+    const nextTitle = (renameDraft || '').toString().trim()
+
+    if (!nextTitle) {
+      setRenameError('title is required')
+      return
+    }
+    if (nextTitle.length > 200) {
+      setRenameError('title too long')
+      return
+    }
+
+    setRenameBusy(true)
+    setRenameError('')
+
+    try {
+      const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: nextTitle }),
+      })
+
+      if (r.status === 401) {
+        setAuth((a) => ({ ...a, authenticated: false }))
+        return
+      }
+
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        const msg = data?.error || data?.detail || 'rename failed'
+        setRenameError(String(msg))
+        return
+      }
+
+      const finalTitle = String(data?.title || nextTitle).trim() || nextTitle
+
+      setSessions((prev) =>
+        (prev || []).map((s) => (s?.id === sid ? { ...s, title: finalTitle, title_source: 'meta' } : s)),
+      )
+
+      setSearchResults((prev) =>
+        (prev || []).map((hit) => (hit?.session_id === sid ? { ...hit, session_title: finalTitle } : hit)),
+      )
+
+      setPeekContext((prev) => {
+        if (!prev || typeof prev !== 'object') return prev
+        if (prev.session_id !== sid) return prev
+        return { ...prev, session_title: finalTitle }
+      })
+
+      showEggToast('session renamed')
+      setRenameSession(null)
+    } catch {
+      setRenameError('rename failed')
+    } finally {
+      setRenameBusy(false)
+    }
+  }
+
+  const doDeleteSession = async () => {
+    if (!deleteSession?.id) return
+    if (deleteBusy) return
+
+    const sid = String(deleteSession.id)
+
+    setDeleteBusy(true)
+    setDeleteError('')
+
+    try {
+      // If you delete the active session, switch away first (spawn a fresh one).
+      if (activeSessionIdRef.current === sid) {
+        startNewSession()
+      }
+
+      const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/delete`, { method: 'POST' })
+
+      if (r.status === 401) {
+        setAuth((a) => ({ ...a, authenticated: false }))
+        return
+      }
+
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        const msg = data?.error || data?.detail || 'delete failed'
+        setDeleteError(String(msg))
+        return
+      }
+
+      setSessions((prev) => (prev || []).filter((s) => s?.id !== sid))
+      setSearchResults((prev) => (prev || []).filter((hit) => hit?.session_id !== sid))
+
+      if (peekHit?.session_id === sid) closePeek()
+
+      showEggToast('session deleted')
+      setDeleteSession(null)
+    } catch {
+      setDeleteError('delete failed')
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   useEffect(() => {
@@ -4887,6 +5116,8 @@ export default function App() {
                         title={s.title || s.id}
                         right={uiPrefs.timestamps.enabled ? isoToTimeLabel(s.started_at_iso) : null}
                         active={activeSessionId === s.id}
+                        menuOpen={sessionMenu?.session_id === s.id}
+                        onMenu={(e) => openSessionMenu(s, e)}
                         onClick={() => {
                           setSearchQuery('')
                           if (ptyResumeId === null && activeSessionId === s.id) {
@@ -5305,6 +5536,281 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {sessionMenu && (
+        <div
+          onClick={closeSessionMenu}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 60,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: sessionMenu.top,
+              left: sessionMenu.left,
+              width: 180,
+              border: `1px solid ${SLATE.border}`,
+              background: SLATE.surface,
+              borderRadius: 8,
+              overflow: 'hidden',
+              boxShadow: '0 10px 28px rgba(0,0,0,0.55)',
+            }}
+          >
+            <div
+              onClick={beginRenameSession}
+              style={{
+                padding: '10px 12px',
+                fontSize: 12,
+                color: SLATE.textBright,
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = SLATE.elevated
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent'
+              }}
+            >
+              Change title
+            </div>
+            <div
+              onClick={beginDeleteSession}
+              style={{
+                padding: '10px 12px',
+                fontSize: 12,
+                color: SLATE.danger,
+                cursor: 'pointer',
+                userSelect: 'none',
+                borderTop: `1px solid ${SLATE.border}`,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = SLATE.elevated
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent'
+              }}
+            >
+              Delete
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renameSession && (
+        <div
+          onClick={closeRenameModal}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 70,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0,0,0,0.55)',
+            backdropFilter: 'blur(6px)',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 420,
+              border: `1px solid ${SLATE.border}`,
+              background: SLATE.surface,
+              padding: 16,
+              boxShadow: `0 0 30px ${AMBER[900]}55`,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ color: AMBER[400], fontWeight: 700, fontSize: 12 }}>Change title</div>
+              <div style={{ flex: 1 }} />
+              <div
+                onClick={closeRenameModal}
+                style={{
+                  fontSize: 11,
+                  color: SLATE.muted,
+                  cursor: renameBusy ? 'default' : 'pointer',
+                  userSelect: 'none',
+                  opacity: renameBusy ? 0.4 : 1,
+                }}
+                title="Close"
+              >
+                close
+              </div>
+            </div>
+
+            <div style={{ color: SLATE.muted, fontSize: 11, marginBottom: 12 }}>
+              Session: <span style={{ color: AMBER[500] }}>{renameSession.id}</span>
+            </div>
+
+            <input
+              value={renameDraft}
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') doRenameSession()
+                if (e.key === 'Escape') closeRenameModal()
+              }}
+              placeholder="New title"
+              autoFocus
+              disabled={renameBusy}
+              style={{
+                width: '100%',
+                background: SLATE.elevated,
+                border: `1px solid ${SLATE.border}`,
+                color: SLATE.textBright,
+                padding: '10px 10px',
+                fontFamily: "'JetBrains Mono',monospace",
+                fontSize: 12,
+                outline: 'none',
+              }}
+            />
+
+            {renameError && <div style={{ color: SLATE.danger, fontSize: 11, marginTop: 8 }}>{renameError}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
+              <div
+                onClick={closeRenameModal}
+                style={{
+                  padding: '9px 12px',
+                  border: `1px solid ${SLATE.border}`,
+                  background: SLATE.elevated,
+                  color: SLATE.muted,
+                  cursor: renameBusy ? 'default' : 'pointer',
+                  fontSize: 12,
+                  userSelect: 'none',
+                  opacity: renameBusy ? 0.4 : 1,
+                }}
+              >
+                cancel
+              </div>
+              <div
+                onClick={doRenameSession}
+                style={{
+                  padding: '9px 12px',
+                  border: `1px solid ${AMBER[700]}`,
+                  background: `${AMBER[900]}55`,
+                  color: AMBER[400],
+                  cursor: renameBusy ? 'default' : 'pointer',
+                  fontSize: 12,
+                  userSelect: 'none',
+                  opacity: renameBusy ? 0.6 : 1,
+                }}
+              >
+                {renameBusy ? 'saving…' : 'save'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteSession && (
+        <div
+          onClick={closeDeleteModal}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 70,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0,0,0,0.55)',
+            backdropFilter: 'blur(6px)',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 420,
+              border: `1px solid ${SLATE.border}`,
+              background: SLATE.surface,
+              padding: 16,
+              boxShadow: `0 0 30px ${AMBER[900]}55`,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ color: SLATE.danger, fontWeight: 700, fontSize: 12 }}>Delete session</div>
+              <div style={{ flex: 1 }} />
+              <div
+                onClick={closeDeleteModal}
+                style={{
+                  fontSize: 11,
+                  color: SLATE.muted,
+                  cursor: deleteBusy ? 'default' : 'pointer',
+                  userSelect: 'none',
+                  opacity: deleteBusy ? 0.4 : 1,
+                }}
+                title="Close"
+              >
+                close
+              </div>
+            </div>
+
+            <div style={{ color: SLATE.muted, fontSize: 11, marginBottom: 10, lineHeight: 1.45 }}>
+              This will permanently delete the session from Hermes history. This cannot be undone.
+            </div>
+
+            <div style={{ color: SLATE.muted, fontSize: 11, marginBottom: 10 }}>
+              Session: <span style={{ color: AMBER[500] }}>{deleteSession.id}</span>
+            </div>
+
+            <div
+              style={{
+                color: SLATE.textBright,
+                fontSize: 11,
+                padding: '10px 10px',
+                border: `1px solid ${SLATE.border}`,
+                background: SLATE.elevated,
+                marginBottom: 10,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+              title={deleteSession.title}
+            >
+              {deleteSession.title}
+            </div>
+
+            {deleteError && <div style={{ color: SLATE.danger, fontSize: 11, marginTop: 8 }}>{deleteError}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
+              <div
+                onClick={closeDeleteModal}
+                style={{
+                  padding: '9px 12px',
+                  border: `1px solid ${SLATE.border}`,
+                  background: SLATE.elevated,
+                  color: SLATE.muted,
+                  cursor: deleteBusy ? 'default' : 'pointer',
+                  fontSize: 12,
+                  userSelect: 'none',
+                  opacity: deleteBusy ? 0.4 : 1,
+                }}
+              >
+                cancel
+              </div>
+              <div
+                onClick={doDeleteSession}
+                style={{
+                  padding: '9px 12px',
+                  border: `1px solid ${SLATE.danger}`,
+                  background: `${SLATE.danger}22`,
+                  color: SLATE.danger,
+                  cursor: deleteBusy ? 'default' : 'pointer',
+                  fontSize: 12,
+                  userSelect: 'none',
+                  opacity: deleteBusy ? 0.6 : 1,
+                }}
+              >
+                {deleteBusy ? 'deleting…' : 'delete'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {settingsOpen && (
         <SettingsPanel

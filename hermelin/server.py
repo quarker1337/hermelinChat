@@ -44,7 +44,13 @@ from .auth import (
 )
 from .config import HermelinConfig
 from .default_artifacts import resolve_default_artifact_path
-from .meta_db import ensure_meta_db, get_random_whisper, get_titles_map
+from .meta_db import (
+    delete_title,
+    ensure_meta_db,
+    get_random_whisper,
+    get_titles_map,
+    upsert_title,
+)
 from .pty_handler import PtyProcess
 from .security import extract_client_ip, ip_allowed
 from .state_reader import get_message_context, list_sessions, search_messages
@@ -673,6 +679,95 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         except Exception:
             pass
         return "hermes"
+
+    def _hermes_sessions_rename(session_id: str, title: str) -> tuple[bool, str]:
+        sid = str(session_id or "").strip()
+        t = str(title or "").strip()
+        if not sid:
+            return False, "session id is required"
+        if not t:
+            return False, "title is required"
+
+        env = os.environ.copy()
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env["HERMES_HOME"] = str(config.hermes_home)
+
+        cmd = [_hermes_bin(), "sessions", "rename", sid, t]
+        try:
+            r = subprocess.run(
+                cmd,
+                cwd=str(config.spawn_cwd),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except FileNotFoundError:
+            return False, f"executable not found: {cmd[0]}"
+        except subprocess.TimeoutExpired:
+            return False, "timed out"
+        except Exception as e:
+            return False, str(e)
+
+        if r.returncode != 0:
+            msg = (r.stdout or "").strip()
+            err = (r.stderr or "").strip()
+            out = "\n".join([x for x in [msg, err] if x])
+            if not out:
+                out = f"hermes sessions rename failed (code {r.returncode})"
+            if len(out) > 800:
+                out = out[:800] + "…"
+            return False, out
+
+        return True, ""
+
+    def _hermes_sessions_delete(session_id: str) -> tuple[bool, str]:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False, "session id is required"
+
+        env = os.environ.copy()
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env["HERMES_HOME"] = str(config.hermes_home)
+
+        cmd = [_hermes_bin(), "sessions", "delete", sid, "--yes"]
+
+        last_out = ""
+        for attempt in range(3):
+            try:
+                r = subprocess.run(
+                    cmd,
+                    cwd=str(config.spawn_cwd),
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except FileNotFoundError:
+                return False, f"executable not found: {cmd[0]}"
+            except subprocess.TimeoutExpired:
+                last_out = "timed out"
+                continue
+            except Exception as e:
+                return False, str(e)
+
+            if r.returncode == 0:
+                return True, ""
+
+            msg = (r.stdout or "").strip()
+            err = (r.stderr or "").strip()
+            out = "\n".join([x for x in [msg, err] if x]) or f"hermes sessions delete failed (code {r.returncode})"
+            if len(out) > 800:
+                out = out[:800] + "…"
+            last_out = out
+
+            low = out.lower()
+            if "database is locked" in low or "locked" in low:
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            break
+
+        return False, last_out or "delete failed"
 
     def _parse_model_from_config_show(text: str) -> Optional[str]:
         # hermes config show output contains multiple "Model:" lines (e.g. context compression).
@@ -1554,6 +1649,60 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         return {
             "sessions": sessions,
         }
+
+    @app.post("/api/sessions/{session_id}/rename")
+    async def api_session_rename(session_id: str, payload: dict = Body(...)):
+        sid = str(session_id or "").strip()
+        if not is_valid_artifact_id(sid):
+            return JSONResponse({"detail": "invalid session id"}, status_code=400)
+
+        title = str((payload or {}).get("title") or "").strip()
+        if not title:
+            return JSONResponse({"detail": "title required"}, status_code=400)
+        if len(title) > 200:
+            return JSONResponse({"detail": "title too long"}, status_code=400)
+
+        ok, err = await asyncio.to_thread(_hermes_sessions_rename, sid, title)
+        if not ok:
+            return JSONResponse(
+                {
+                    "detail": "failed to rename session",
+                    "error": err,
+                },
+                status_code=500,
+            )
+
+        # Store in meta DB so the UI can display it (we still call hermes sessions rename for parity).
+        try:
+            upsert_title(config.meta_db_path, session_id=sid, title=title, source="ui")
+        except Exception:
+            pass
+
+        return {"ok": True, "session_id": sid, "title": title}
+
+    @app.post("/api/sessions/{session_id}/delete")
+    async def api_session_delete(session_id: str):
+        sid = str(session_id or "").strip()
+        if not is_valid_artifact_id(sid):
+            return JSONResponse({"detail": "invalid session id"}, status_code=400)
+
+        ok, err = await asyncio.to_thread(_hermes_sessions_delete, sid)
+        if not ok:
+            return JSONResponse(
+                {
+                    "detail": "failed to delete session",
+                    "error": err,
+                },
+                status_code=500,
+            )
+
+        # Best-effort cleanup: remove any custom title overlay.
+        try:
+            delete_title(config.meta_db_path, session_id=sid)
+        except Exception:
+            pass
+
+        return {"ok": True, "session_id": sid}
 
     @app.get("/api/search")
     async def api_search(
