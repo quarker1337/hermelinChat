@@ -2194,16 +2194,8 @@ const SettingsPanel = ({
             open={openPanel === 'model'}
             onToggle={() => togglePanel('model')}
           >
-            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
-              This writes Hermes’ default model via <span style={{ color: AMBER[500] }}>hermes config set</span>. Only
-              affects <span style={{ color: AMBER[400] }}>new sessions</span>.
-            </div>
-
-            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <div style={{ color: SLATE.muted }}>saved:</div>
-                <div style={{ color: AMBER[500] }}>{savedModel || '—'}</div>
-              </div>
+            <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 8 }}>
+              new sessions · saved: <span style={{ color: AMBER[500] }}>{savedModel || '—'}</span>
             </div>
 
             <select
@@ -2281,11 +2273,7 @@ const SettingsPanel = ({
             open={openPanel === 'keys'}
             onToggle={() => togglePanel('keys')}
           >
-            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
-              Keys are written to <span style={{ color: AMBER[500] }}>~/.hermes/.env</span> via{' '}
-              <span style={{ color: AMBER[500] }}>hermes config set</span>. Leave fields blank to keep existing values.
-              Changes apply to <span style={{ color: AMBER[400] }}>new sessions</span>.
-            </div>
+            <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 8 }}>~/.hermes/.env · blank = keep current</div>
 
             {keyStatus.loading && (
               <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 10 }}>loading key status…</div>
@@ -2496,17 +2484,9 @@ const SettingsPanel = ({
             open={openPanel === 'agent'}
             onToggle={() => togglePanel('agent')}
           >
-            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
-              These settings write to <span style={{ color: AMBER[500] }}>~/.hermes/config.yaml</span> via{' '}
-              <span style={{ color: AMBER[500] }}>hermes config set</span>. They usually affect{' '}
-              <span style={{ color: AMBER[400] }}>new sessions</span>.
+            <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 8 }} title={agentConfigPath || '~/.hermes/config.yaml'}>
+              config.yaml · mostly new sessions
             </div>
-
-            {agentConfigPath && (
-              <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 10, wordBreak: 'break-all' }}>
-                config: {agentConfigPath}
-              </div>
-            )}
 
             {agentLoading && <div style={{ fontSize: 10, color: SLATE.muted }}>loading agent settings…</div>}
 
@@ -2903,17 +2883,12 @@ const SettingsPanel = ({
             open={openPanel === 'defaultArtifacts'}
             onToggle={() => togglePanel('defaultArtifacts')}
           >
-            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
-              These toggles write to <span style={{ color: AMBER[500] }}>~/.hermes/config.yaml</span> under{' '}
-              <span style={{ color: AMBER[500] }}>hermelin.default_artifacts</span>. Built-in artifacts can appear or disappear
-              on the next artifact refresh without touching your custom artifacts.
+            <div
+              style={{ fontSize: 10, color: SLATE.muted, marginBottom: 8 }}
+              title={defaultArtifactsConfigPath || '~/.hermes/config.yaml'}
+            >
+              built-ins from config.yaml
             </div>
-
-            {defaultArtifactsConfigPath && (
-              <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 10, wordBreak: 'break-all' }}>
-                config: {defaultArtifactsConfigPath}
-              </div>
-            )}
 
             {defaultArtifactsLoading && (
               <div style={{ fontSize: 10, color: SLATE.muted }}>loading default artifacts…</div>
@@ -2969,9 +2944,7 @@ const SettingsPanel = ({
             open={openPanel === 'ui'}
             onToggle={() => togglePanel('ui')}
           >
-            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
-              UI preferences are stored in this browser (localStorage) and apply instantly.
-            </div>
+            <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 8 }}>local to this browser</div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>App name</div>
@@ -3001,9 +2974,8 @@ const SettingsPanel = ({
               />
             </div>
 
-            <div style={{ marginTop: 6, fontSize: 10, color: SLATE.muted, lineHeight: 1.4 }}>
-              Shown in the sidebar header and browser tab title. Leave empty to use{' '}
-              <span style={{ color: AMBER[500] }}>{DEFAULT_UI_PREFS.appName}</span>.
+            <div style={{ marginTop: 6, fontSize: 10, color: SLATE.muted, lineHeight: 1.35 }}>
+              sidebar + browser tab label
             </div>
 
             <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
