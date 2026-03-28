@@ -4141,11 +4141,34 @@ export default function App() {
       .sort((a, b) => Number(b?.timestamp || 0) - Number(a?.timestamp || 0))
   }, [])
 
+  const mergeArtifactsStable = useCallback((prevItems, nextItems) => {
+    const prev = Array.isArray(prevItems) ? prevItems : []
+    const next = Array.isArray(nextItems) ? nextItems : []
+
+    if (!prev.length) return next
+
+    const prevById = new Map(prev.map((item) => [item.id, item]))
+    const nextById = new Map(next.map((item) => [item.id, item]))
+
+    // Keep the existing dropdown/tab order stable for known artifact IDs.
+    // Live artifacts refresh their timestamps constantly, so blindly re-sorting
+    // by timestamp makes the list jump around under the user's mouse.
+    const preserved = []
+    for (const item of prev) {
+      const updated = nextById.get(item.id)
+      if (updated) preserved.push(updated)
+    }
+
+    const newcomers = next.filter((item) => !prevById.has(item.id))
+    return [...newcomers, ...preserved]
+  }, [])
+
   const applyArtifacts = useCallback(
     (items, options = {}) => {
       const openOnChange = options.openOnChange !== false
-      const next = normalizeArtifacts(items)
       const prev = artifactTabsRef.current || []
+      const normalized = normalizeArtifacts(items)
+      const next = mergeArtifactsStable(prev, normalized)
       const prevById = new Map(prev.map((item) => [item.id, item]))
       const nextById = new Map(next.map((item) => [item.id, item]))
 
@@ -4180,7 +4203,7 @@ export default function App() {
         closePeek()
       }
     },
-    [artifactPanelDismissed, normalizeArtifacts],
+    [artifactPanelDismissed, mergeArtifactsStable, normalizeArtifacts],
   )
 
   const refreshArtifacts = useCallback(
