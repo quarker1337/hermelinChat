@@ -53,6 +53,7 @@ def main() -> None:
             "HERMELIN_HERMES_CMD",
             'hermes chat --toolsets "hermes-cli, artifacts"',
         ),
+        help='Hermes command to spawn (add strudel toolset explicitly if you want Strudel controls)',
     )
     p.add_argument("--hermes-home", default=os.getenv("HERMES_HOME", str(Path.home() / ".hermes")))
     p.add_argument("--spawn-cwd", default=os.getenv("HERMELIN_SPAWN_CWD", os.getcwd()))

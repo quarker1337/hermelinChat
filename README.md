@@ -166,17 +166,19 @@ Flags: `--skip-frontend`, `--skip-python`, `--skip-hermes-patch`, `--service NAM
 
 ## Hermes artifact tool patch
 
-The artifact panel depends on tools that aren't upstream yet. This repo ships a local patch that adds them to your Hermes install:
+The artifact panel depends on tools that aren't upstream yet. This repo ships a local patch that adds them to your Hermes install.
 
-`create_artifact` · `remove_artifact` · `clear_artifacts` · `list_artifacts` · `focus_artifact` · `start_runner` · `tail_runner_log` · `stop_runner`
+Toolsets installed by the patch:
+- `artifacts` — generic artifact panel tools (`create_artifact`, `list_artifacts`, runners, focus/remove, etc.)
+- `strudel` — Strudel-specific controls (`strudel_get_code`, `strudel_set_code`, `strudel_play`, etc.)
 
 ```bash
 python3 scripts/install_hermes_artifact_patch.py
 ```
 
-This detects your installed `hermes` interpreter and patches `model_tools.py` + `toolsets.py` to register the `artifacts` toolset. The update script runs this automatically unless you pass `--skip-hermes-patch`.
+This detects your installed `hermes` interpreter and patches `model_tools.py` + `toolsets.py` to register the `artifacts` and `strudel` toolsets. The update script runs this automatically unless you pass `--skip-hermes-patch`.
 
-> If your Hermes config uses restricted toolsets, make sure `artifacts` or `all` is enabled.
+> If your Hermes config uses restricted toolsets, enable `artifacts` for the panel, and add `strudel` only if you want Strudel-specific agent controls.
 
 ---
 
@@ -197,6 +199,11 @@ Behavior notes:
 - No config entry means the built-in Strudel tab is not auto-added.
 - Setting `hermelin.default_artifacts.strudel: true` enables the built-in editor.
 - User/disk artifacts still win over built-ins, so a custom or video-pack Strudel artifact is unaffected.
+- The built-in tab toggle is independent from Hermes toolsets. If you want the agent to control Strudel code/playback too, add `strudel` to your spawned toolsets, for example:
+
+```bash
+HERMELIN_HERMES_CMD='hermes chat --toolsets "hermes-cli, artifacts, strudel"'
+```
 
 ---
 

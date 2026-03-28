@@ -23,6 +23,7 @@ class HermelinConfig:
     # Examples:
     #   hermes
     #   /usr/local/bin/hermes
+    #   hermes chat --toolsets "hermes-cli, artifacts, strudel"
     hermes_cmd: str = os.getenv(
         "HERMELIN_HERMES_CMD",
         'hermes chat --toolsets "hermes-cli, artifacts"',

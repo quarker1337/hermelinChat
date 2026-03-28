@@ -4,6 +4,8 @@
 This module is installed into Hermes as: tools/artifact_tool.py
 
 Provides tools:
+
+artifacts toolset
 - list_artifacts
 - focus_artifact
 - create_artifact
@@ -14,6 +16,8 @@ Provides tools:
 - tail_runner_log
 - artifact_bridge_command
 - artifact_bridge_read_state
+
+strudel toolset
 - strudel_get_code
 - strudel_set_code
 - strudel_load_file

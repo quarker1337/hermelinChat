@@ -15,7 +15,8 @@ ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
 # hermelinChat toolset injection
 #
-# We install a canonical "artifacts" toolset for hermelinChat's side panel.
+# We install a generic "artifacts" toolset for the right-side panel plus an
+# optional "strudel" toolset for Strudel-specific controls.
 ARTIFACT_TOOLSETS_BLOCK = '''
     # hermelinChat artifact panel toolsets (installed by hermelinChat patch)
     "artifacts": {
@@ -30,7 +31,13 @@ ARTIFACT_TOOLSETS_BLOCK = '''
             "tail_runner_log",
             "stop_runner",
             "artifact_bridge_command",
-            "artifact_bridge_read_state",
+            "artifact_bridge_read_state"
+        ],
+        "includes": []
+    },
+    "strudel": {
+        "description": "Control a Strudel artifact in hermelinChat (code, cursor, play/stop)",
+        "tools": [
             "strudel_get_code",
             "strudel_set_code",
             "strudel_load_file",
@@ -358,7 +365,8 @@ def main() -> int:
     print()
     print("Next steps")
     print("  1) restart hermelinChat / Hermes services if they are already running")
-    print("  2) if your Hermes config uses restricted toolsets, make sure 'artifacts' is enabled")
+    print("  2) if your Hermes config uses restricted toolsets, enable 'artifacts' for the panel")
+    print("  3) add 'strudel' only if you want Strudel-specific agent controls")
     return 0
 
 
