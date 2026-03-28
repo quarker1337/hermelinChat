@@ -128,7 +128,8 @@ class DefaultArtifactSettingsTests(unittest.TestCase):
             self.assertIn("# top comment", text)
             self.assertIn("model: foo/bar", text)
             self.assertIn("display:\n  compact: true", text)
-            self.assertIn("hermelin:\n  default_artifacts:\n    strudel: true", text)
+            self.assertIn("default_artifacts:\n    strudel: true", text)
+            self.assertIn("toolsets:\n    strudel: true", text)
 
 
 if __name__ == "__main__":

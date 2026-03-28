@@ -168,17 +168,16 @@ def _update_display_skin_config_text(text: str, skin: str) -> tuple[str, bool]:
     return _join(next_lines), True
 
 
-def _update_default_artifact_flag_config_text(text: str, artifact_id: str, enabled: bool) -> tuple[str, bool]:
+def _update_nested_bool_flag_config_text(text: str, path: tuple[str, ...], enabled: bool) -> tuple[str, bool]:
     raw = text or ""
-    artifact_id = str(artifact_id or "").strip()
-    if not artifact_id:
+    keys = [str(k or "").strip() for k in path if str(k or "").strip()]
+    if not keys:
         return raw, False
 
     newline = "\r\n" if "\r\n" in raw else "\n"
     had_trailing_newline = raw.endswith(("\n", "\r"))
     lines = raw.splitlines()
     scalar = "true" if enabled else "false"
-    artifact_key_re = re.escape(artifact_id)
 
     def _join(next_lines: list[str]) -> str:
         out = newline.join(next_lines)
@@ -186,13 +185,14 @@ def _update_default_artifact_flag_config_text(text: str, artifact_id: str, enabl
             out += newline
         return out
 
+    dotted_key_re = re.escape(".".join(keys))
     for idx, line in enumerate(lines):
         if line[:1].isspace():
             continue
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        m = re.match(rf"^(hermelin\.default_artifacts\.{artifact_key_re}\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", line)
+        m = re.match(rf"^({dotted_key_re}\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", line)
         if not m:
             continue
         updated = f"{m.group(1)}{scalar}{m.group(3) or ''}"
@@ -202,132 +202,278 @@ def _update_default_artifact_flag_config_text(text: str, artifact_id: str, enabl
         next_lines[idx] = updated
         return _join(next_lines), True
 
-    for idx, line in enumerate(lines):
-        if line[:1].isspace():
-            continue
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if not re.match(r"^hermelin\s*:\s*(?:#.*)?$", stripped):
-            continue
-
-        herm_end = len(lines)
-        for j in range(idx + 1, len(lines)):
+    def _find_block_end(start_idx: int, parent_indent_len: int) -> int:
+        end = len(lines)
+        for j in range(start_idx + 1, len(lines)):
             s = lines[j].strip()
             if not s:
                 continue
-            if not lines[j][:1].isspace():
-                herm_end = j
+            indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+            if indent_len <= parent_indent_len:
+                end = j
                 break
+        return end
 
-        child_indent_len = None
-        for j in range(idx + 1, herm_end):
+    def _first_child_indent(start_idx: int, end_idx: int, parent_indent_len: int) -> int:
+        for j in range(start_idx + 1, end_idx):
             s = lines[j].strip()
             if not s or s.startswith("#"):
                 continue
             indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
-            if indent_len > 0:
-                child_indent_len = indent_len
-                break
-        child_indent_len = child_indent_len or 2
-        child_indent = " " * child_indent_len
+            if indent_len > parent_indent_len:
+                return indent_len
+        return parent_indent_len + 2
 
-        default_idx = None
-        for j in range(idx + 1, herm_end):
+    def _find_child_key(parent_idx: int, parent_indent_len: int, key: str) -> tuple[int | None, int, int]:
+        end_idx = _find_block_end(parent_idx, parent_indent_len)
+        child_indent_len = _first_child_indent(parent_idx, end_idx, parent_indent_len)
+        key_re = re.escape(key)
+        for j in range(parent_idx + 1, end_idx):
             s = lines[j].strip()
             if not s or s.startswith("#"):
                 continue
             indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
             if indent_len != child_indent_len:
                 continue
-            if re.match(r"^default_artifacts\s*:\s*(?:#.*)?$", s):
-                default_idx = j
-                break
+            if re.match(rf"^{key_re}\s*:\s*(?:#.*)?$", s):
+                return j, child_indent_len, end_idx
+        return None, child_indent_len, end_idx
 
-        if default_idx is not None:
-            default_end = herm_end
-            for j in range(default_idx + 1, herm_end):
-                s = lines[j].strip()
-                if not s:
-                    continue
-                indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
-                if indent_len <= child_indent_len:
-                    default_end = j
-                    break
+    parent_idx = None
+    parent_indent_len = -1
+    parent_end = len(lines)
 
-            leaf_indent_len = None
-            for j in range(default_idx + 1, default_end):
-                s = lines[j].strip()
-                if not s or s.startswith("#"):
+    for depth, key in enumerate(keys[:-1]):
+        key_re = re.escape(key)
+        found = False
+        for idx, line in enumerate(lines if parent_idx is None else lines[parent_idx + 1:parent_end], start=0 if parent_idx is None else parent_idx + 1):
+            if line[:1].isspace() and parent_idx is None:
+                continue
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            indent_len = len(line) - len(line.lstrip(" "))
+            if parent_idx is None:
+                if indent_len != 0:
                     continue
-                indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
-                if indent_len > child_indent_len:
-                    leaf_indent_len = indent_len
-                    break
-            leaf_indent_len = leaf_indent_len or (child_indent_len + 2)
-            leaf_indent = " " * leaf_indent_len
+            else:
+                child_indent_len = _first_child_indent(parent_idx, parent_end, parent_indent_len)
+                if indent_len != child_indent_len:
+                    continue
+            if not re.match(rf"^{key_re}\s*:\s*(?:#.*)?$", s):
+                continue
+            parent_idx = idx
+            parent_indent_len = indent_len
+            parent_end = _find_block_end(parent_idx, parent_indent_len)
+            found = True
+            break
 
-            for j in range(default_idx + 1, default_end):
-                s = lines[j].strip()
-                if not s or s.startswith("#"):
-                    continue
-                indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
-                if indent_len != leaf_indent_len:
-                    continue
-                m = re.match(rf"^(\s*{artifact_key_re}\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", lines[j])
-                if not m:
-                    continue
-                updated = f"{m.group(1)}{scalar}{m.group(3) or ''}"
-                if updated == lines[j]:
-                    return raw, False
-                next_lines = list(lines)
-                next_lines[j] = updated
-                return _join(next_lines), True
+        if found:
+            continue
 
-            insert_at = default_idx + 1
-            while insert_at < default_end:
-                s = lines[insert_at].strip()
+        next_lines = list(lines)
+        if parent_idx is None:
+            if next_lines and next_lines[-1].strip():
+                next_lines.append("")
+            base_indent = 0
+            insert_at = len(next_lines)
+        else:
+            base_indent = _first_child_indent(parent_idx, parent_end, parent_indent_len)
+            insert_at = parent_idx + 1
+            while insert_at < parent_end:
+                s = next_lines[insert_at].strip()
                 if not s:
                     insert_at += 1
                     continue
-                indent_len = len(lines[insert_at]) - len(lines[insert_at].lstrip(" "))
-                if indent_len > child_indent_len and s.startswith("#"):
+                indent_len = len(next_lines[insert_at]) - len(next_lines[insert_at].lstrip(" "))
+                if indent_len >= base_indent and s.startswith("#"):
                     insert_at += 1
                     continue
                 break
+        block_lines = []
+        current_indent = base_indent
+        for rest_key in keys[depth:-1]:
+            block_lines.append(f"{' ' * current_indent}{rest_key}:")
+            current_indent += 2
+        block_lines.append(f"{' ' * current_indent}{keys[-1]}: {scalar}")
+        next_lines[insert_at:insert_at] = block_lines
+        return _join(next_lines), True
 
+    leaf_key = re.escape(keys[-1])
+    if parent_idx is not None:
+        leaf_indent_len = _first_child_indent(parent_idx, parent_end, parent_indent_len)
+        for j in range(parent_idx + 1, parent_end):
+            s = lines[j].strip()
+            if not s or s.startswith("#"):
+                continue
+            indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+            if indent_len != leaf_indent_len:
+                continue
+            m = re.match(rf"^(\s*{leaf_key}\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", lines[j])
+            if not m:
+                continue
+            updated = f"{m.group(1)}{scalar}{m.group(3) or ''}"
+            if updated == lines[j]:
+                return raw, False
             next_lines = list(lines)
-            next_lines.insert(insert_at, f"{leaf_indent}{artifact_id}: {scalar}")
+            next_lines[j] = updated
             return _join(next_lines), True
 
-        insert_at = idx + 1
-        while insert_at < herm_end:
+        insert_at = parent_idx + 1
+        while insert_at < parent_end:
             s = lines[insert_at].strip()
             if not s:
                 insert_at += 1
                 continue
             indent_len = len(lines[insert_at]) - len(lines[insert_at].lstrip(" "))
-            if indent_len >= child_indent_len and s.startswith("#"):
+            if indent_len > parent_indent_len and s.startswith("#"):
                 insert_at += 1
                 continue
             break
-
         next_lines = list(lines)
-        next_lines[insert_at:insert_at] = [
-            f"{child_indent}default_artifacts:",
-            f"{child_indent}  {artifact_id}: {scalar}",
-        ]
+        next_lines.insert(insert_at, f"{' ' * leaf_indent_len}{keys[-1]}: {scalar}")
         return _join(next_lines), True
 
     next_lines = list(lines)
     if next_lines and next_lines[-1].strip():
         next_lines.append("")
-    next_lines.extend(["hermelin:", "  default_artifacts:", f"    {artifact_id}: {scalar}"])
+    current_indent = 0
+    for key in keys[:-1]:
+        next_lines.append(f"{' ' * current_indent}{key}:")
+        current_indent += 2
+    next_lines.append(f"{' ' * current_indent}{keys[-1]}: {scalar}")
     return _join(next_lines), True
+
+
+def _update_default_artifact_flag_config_text(text: str, artifact_id: str, enabled: bool) -> tuple[str, bool]:
+    return _update_nested_bool_flag_config_text(text, ("hermelin", "default_artifacts", artifact_id), enabled)
+
+
+def _set_command_toolset_enabled(command: str, toolset: str, enabled: bool) -> tuple[str, bool, str | None]:
+    cmd = str(command or "").strip()
+    toolset = str(toolset or "").strip()
+    if not cmd:
+        return command, False, "empty command"
+    if not toolset:
+        return command, False, "empty toolset"
+
+    try:
+        argv = shlex.split(cmd)
+    except Exception as exc:
+        return command, False, str(exc)
+
+    if not argv:
+        return command, False, "empty command"
+
+    next_argv = list(argv)
+    toolsets_idx = None
+    toolsets_raw = None
+    for i, token in enumerate(next_argv):
+        if token == "--toolsets" and i + 1 < len(next_argv):
+            toolsets_idx = i + 1
+            toolsets_raw = next_argv[i + 1]
+            break
+        if token.startswith("--toolsets="):
+            toolsets_idx = i
+            toolsets_raw = token.split("=", 1)[1]
+            break
+
+    if toolsets_raw is None:
+        return command, False, "command has no --toolsets"
+
+    items = [part.strip() for part in str(toolsets_raw).split(",") if part.strip()]
+    if any(item == "all" for item in items):
+        return command, False, None
+
+    had_toolset = toolset in items
+    changed = False
+    if enabled and not had_toolset:
+        items.append(toolset)
+        changed = True
+    elif not enabled and had_toolset:
+        items = [item for item in items if item != toolset]
+        changed = True
+
+    if not changed:
+        return command, False, None
+
+    updated_value = ", ".join(items)
+    if toolsets_idx is None:
+        return command, False, "command has no --toolsets"
+
+    if next_argv[toolsets_idx].startswith("--toolsets="):
+        next_argv[toolsets_idx] = f"--toolsets={updated_value}"
+    else:
+        next_argv[toolsets_idx] = updated_value
+
+    return shlex.join(next_argv), True, None
+
+
+def _update_env_var_text(text: str, key: str, value: str) -> tuple[str, bool]:
+    raw = text or ""
+    key = str(key or "").strip()
+    if not key:
+        return raw, False
+
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    had_trailing_newline = raw.endswith(("\n", "\r"))
+    lines = raw.splitlines()
+    rendered = json.dumps(str(value), ensure_ascii=False)
+    key_re = re.escape(key)
+
+    for idx, line in enumerate(lines):
+        if not re.match(rf"^{key_re}=", line):
+            continue
+        updated = f"{key}={rendered}"
+        if updated == line:
+            return raw, False
+        next_lines = list(lines)
+        next_lines[idx] = updated
+        out = newline.join(next_lines)
+        if next_lines and had_trailing_newline:
+            out += newline
+        return out, True
+
+    next_lines = list(lines)
+    if next_lines and next_lines[-1].strip():
+        next_lines.append("")
+    next_lines.append(f"{key}={rendered}")
+    out = newline.join(next_lines)
+    if next_lines and (had_trailing_newline or not raw):
+        out += newline
+    return out, True
 
 
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
     config = config or HermelinConfig()
+    hermes_cmd_runtime = [config.hermes_cmd]
+
+    def _get_hermes_cmd() -> str:
+        return str(hermes_cmd_runtime[0] or "").strip()
+
+    def _set_hermes_cmd(value: str) -> None:
+        hermes_cmd_runtime[0] = str(value or "").strip()
+
+    def _resolve_hermelin_env_file() -> Path | None:
+        raw = os.getenv("HERMELIN_ENV_FILE", "").strip()
+        if raw:
+            return Path(raw).expanduser()
+
+        cwd_candidate = Path.cwd() / ".hermelin.env"
+        if cwd_candidate.exists():
+            return cwd_candidate
+
+        try:
+            repo_candidate = Path(__file__).resolve().parents[1] / ".hermelin.env"
+            if repo_candidate.exists():
+                return repo_candidate
+        except Exception:
+            pass
+
+        return None
+
+    if hermes_cmd_runtime[0] == "":
+        hermes_cmd_runtime[0] = config.hermes_cmd
 
     # Ensure meta DB exists (titles, etc.)
     try:
@@ -488,7 +634,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         return {
             "default_model": _read_default_model(),
             "spawn_cwd": str(config.spawn_cwd),
-            "hermes_cmd": config.hermes_cmd,
+            "hermes_cmd": _get_hermes_cmd(),
             "hermes_home": str(config.hermes_home),
             "artifact_dir": str(config.artifact_dir),
         }
@@ -942,7 +1088,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     def _hermes_bin() -> str:
         try:
-            argv = shlex.split(config.hermes_cmd)
+            argv = shlex.split(_get_hermes_cmd())
             if argv:
                 return argv[0]
         except Exception:
@@ -1728,6 +1874,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         for artifact_id, enabled in flags.items():
             updated, changed = _update_default_artifact_flag_config_text(updated, artifact_id, bool(enabled))
             changed_any = changed_any or changed
+            updated, changed = _update_nested_bool_flag_config_text(updated, ("hermelin", "toolsets", artifact_id), bool(enabled))
+            changed_any = changed_any or changed
 
         if not changed_any:
             return True, ""
@@ -1737,13 +1885,39 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             cfg_path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path.write_text(updated, encoding="utf-8")
             os.replace(tmp_path, cfg_path)
-            return True, ""
         except Exception as exc:
             try:
                 tmp_path.unlink(missing_ok=True)
             except Exception:
                 pass
             return False, str(exc)
+
+        next_cmd, cmd_changed, cmd_error = _set_command_toolset_enabled(_get_hermes_cmd(), "strudel", bool(flags.get("strudel", False)))
+        if cmd_error:
+            return False, cmd_error
+        if cmd_changed:
+            _set_hermes_cmd(next_cmd)
+            env_path = _resolve_hermelin_env_file()
+            if env_path is not None:
+                try:
+                    env_text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+                except Exception:
+                    env_text = ""
+                updated_env, env_changed = _update_env_var_text(env_text, "HERMELIN_HERMES_CMD", next_cmd)
+                if env_changed:
+                    env_tmp = env_path.with_name(f".{env_path.name}.{int(time.time() * 1000)}.tmp")
+                    try:
+                        env_path.parent.mkdir(parents=True, exist_ok=True)
+                        env_tmp.write_text(updated_env, encoding="utf-8")
+                        os.replace(env_tmp, env_path)
+                    except Exception as exc:
+                        try:
+                            env_tmp.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                        return False, str(exc)
+
+        return True, ""
 
     @app.get("/api/settings/agent")
     async def api_settings_agent():
@@ -2118,7 +2292,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 await websocket.close(code=1008)
                 return
 
-        argv = shlex.split(config.hermes_cmd)
+        argv = shlex.split(_get_hermes_cmd())
 
         # -------------------------------------------------------------
         # hermelinChat UI theme -> Hermes CLI skin (upstream skin system)
