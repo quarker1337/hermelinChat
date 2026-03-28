@@ -1152,6 +1152,45 @@ function isoToTimeLabel(iso) {
   }
 }
 
+function isoToRelativeLabel(iso) {
+  if (!iso) return ''
+  try {
+    const ts = new Date(iso).getTime()
+    if (!Number.isFinite(ts)) return ''
+
+    const now = new Date()
+    const date = new Date(ts)
+    const minute = 60 * 1000
+    const hour = 60 * minute
+    const day = 24 * hour
+    const diffMs = Math.max(0, now.getTime() - ts)
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const startOfThatDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+    const dayDiff = Math.floor((startOfToday - startOfThatDay) / day)
+
+    if (dayDiff <= 0) {
+      if (diffMs < minute) return 'just now'
+      if (diffMs < hour) {
+        const mins = Math.max(1, Math.floor(diffMs / minute))
+        return `${mins} min${mins === 1 ? '' : 's'} ago`
+      }
+      const hours = Math.max(1, Math.floor(diffMs / hour))
+      return `${hours} hr${hours === 1 ? '' : 's'} ago`
+    }
+
+    if (dayDiff === 1) return 'Yesterday'
+    if (dayDiff < 7) return `${dayDiff} day${dayDiff === 1 ? '' : 's'} ago`
+
+    return date.toLocaleDateString([], {
+      month: 'short',
+      day: 'numeric',
+      ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+    })
+  } catch {
+    return ''
+  }
+}
+
 const HighlightedSnippet = ({ text }) => {
   const s = (text || '').toString()
   if (!s) return null
@@ -1193,10 +1232,52 @@ const HighlightedSnippet = ({ text }) => {
   return <span>{nodes}</span>
 }
 
-const SessionRow = ({ title, preview, right, active, onClick, onMenu, menuOpen = false }) => {
+const SessionRow = ({ title, preview, subtitle, subtitleTitle, right, active, onClick, onMenu, menuOpen = false }) => {
   const [hovered, setHovered] = useState(false)
   const hasMenu = typeof onMenu === 'function'
   const showMenu = hasMenu && (hovered || menuOpen)
+  const hasSubtitle = subtitle !== undefined && subtitle !== null && subtitle !== ''
+
+  const renderMenuButton = () => {
+    if (!hasMenu) return null
+    return (
+      <div
+        onClick={(e) => {
+          e.stopPropagation()
+          onMenu?.(e)
+        }}
+        title="Session actions"
+        style={{
+          width: 22,
+          height: 18,
+          borderRadius: 6,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: SLATE.muted,
+          background: 'transparent',
+          border: '1px solid transparent',
+          opacity: showMenu ? 1 : 0,
+          pointerEvents: showMenu ? 'auto' : 'none',
+          transition: 'opacity 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
+          userSelect: 'none',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = SLATE.elevated
+          e.currentTarget.style.borderColor = SLATE.border
+          e.currentTarget.style.color = AMBER[400]
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'transparent'
+          e.currentTarget.style.borderColor = 'transparent'
+          e.currentTarget.style.color = SLATE.muted
+        }}
+      >
+        ⋯
+      </div>
+    )
+  }
 
   return (
     <div
@@ -1212,80 +1293,84 @@ const SessionRow = ({ title, preview, right, active, onClick, onMenu, menuOpen =
         transition: 'all 0.15s ease',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <div
-          style={{
-            flex: 1,
-            fontSize: 12,
-            color: active ? AMBER[400] : hovered ? SLATE.textBright : SLATE.muted,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title={title}
-        >
-          {title}
+      {hasSubtitle ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 12,
+                color: active ? AMBER[400] : hovered ? SLATE.textBright : SLATE.muted,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={title}
+            >
+              {title}
+            </div>
+            <div
+              style={{
+                marginTop: 3,
+                fontSize: 10,
+                color: SLATE.muted,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={subtitleTitle || subtitle}
+            >
+              {subtitle}
+            </div>
+          </div>
+
+          {(right || hasMenu) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              {right && <div style={{ fontSize: 10, color: SLATE.muted, whiteSpace: 'nowrap' }}>{right}</div>}
+              {renderMenuButton()}
+            </div>
+          )}
         </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <div
+              style={{
+                flex: 1,
+                fontSize: 12,
+                color: active ? AMBER[400] : hovered ? SLATE.textBright : SLATE.muted,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={title}
+            >
+              {title}
+            </div>
 
-        {(right || hasMenu) && (
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexShrink: 0 }}>
-            {right && <div style={{ fontSize: 10, color: SLATE.muted, whiteSpace: 'nowrap' }}>{right}</div>}
-
-            {hasMenu && (
-              <div
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onMenu?.(e)
-                }}
-                title="Session actions"
-                style={{
-                  width: 22,
-                  height: 18,
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: SLATE.muted,
-                  background: 'transparent',
-                  border: '1px solid transparent',
-                  opacity: showMenu ? 1 : 0,
-                  pointerEvents: showMenu ? 'auto' : 'none',
-                  transition: 'opacity 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
-                  userSelect: 'none',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = SLATE.elevated
-                  e.currentTarget.style.borderColor = SLATE.border
-                  e.currentTarget.style.color = AMBER[400]
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent'
-                  e.currentTarget.style.borderColor = 'transparent'
-                  e.currentTarget.style.color = SLATE.muted
-                }}
-              >
-                ⋯
+            {(right || hasMenu) && (
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexShrink: 0 }}>
+                {right && <div style={{ fontSize: 10, color: SLATE.muted, whiteSpace: 'nowrap' }}>{right}</div>}
+                {renderMenuButton()}
               </div>
             )}
           </div>
-        )}
-      </div>
 
-      {preview && (
-        <div
-          style={{
-            marginTop: 3,
-            fontSize: 10,
-            color: SLATE.muted,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title={typeof preview === 'string' ? preview : undefined}
-        >
-          {preview}
-        </div>
+          {preview && (
+            <div
+              style={{
+                marginTop: 3,
+                fontSize: 10,
+                color: SLATE.muted,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={typeof preview === 'string' ? preview : undefined}
+            >
+              {preview}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -5114,7 +5199,8 @@ export default function App() {
                       <SessionRow
                         key={s.id}
                         title={s.title || s.id}
-                        right={uiPrefs.timestamps.enabled ? isoToTimeLabel(s.started_at_iso) : null}
+                        subtitle={uiPrefs.timestamps.enabled ? isoToRelativeLabel(s.started_at_iso) : null}
+                        subtitleTitle={uiPrefs.timestamps.enabled ? isoToLocalLabel(s.started_at_iso) : undefined}
                         active={activeSessionId === s.id}
                         menuOpen={sessionMenu?.session_id === s.id}
                         onMenu={(e) => openSessionMenu(s, e)}
