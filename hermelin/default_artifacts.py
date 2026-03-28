@@ -30,6 +30,10 @@ _DEFAULT_ARTIFACT_ENABLED_DEFAULTS: dict[str, bool] = {
     "strudel": False,
 }
 
+_DEFAULT_ARTIFACT_DESCRIPTIONS: dict[str, str] = {
+    "strudel": "Built-in Strudel live-coding editor for music sketches and pattern experiments.",
+}
+
 
 def _default_artifact_config_path(*, artifact_root: Path | None = None, hermes_home: Path | None = None) -> Path | None:
     if hermes_home is not None:
@@ -69,16 +73,35 @@ def _load_default_artifact_flags(*, artifact_root: Path | None = None, hermes_ho
     return flags
 
 
-def load_default_artifacts(*, artifact_root: Path | None = None, hermes_home: Path | None = None) -> list[dict[str, Any]]:
+def list_default_artifact_settings(*, artifact_root: Path | None = None, hermes_home: Path | None = None) -> list[dict[str, Any]]:
     flags = _load_default_artifact_flags(artifact_root=artifact_root, hermes_home=hermes_home)
 
-    enabled_items: list[dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     for item in _DEFAULT_ARTIFACTS:
         artifact_id = str(item.get("id") or "").strip()
         if not artifact_id:
             continue
-        enabled = flags.get(artifact_id, _DEFAULT_ARTIFACT_ENABLED_DEFAULTS.get(artifact_id, True))
-        if not enabled:
+        enabled_by_default = bool(_DEFAULT_ARTIFACT_ENABLED_DEFAULTS.get(artifact_id, True))
+        items.append(
+            {
+                "id": artifact_id,
+                "title": str(item.get("title") or artifact_id),
+                "description": _DEFAULT_ARTIFACT_DESCRIPTIONS.get(artifact_id, ""),
+                "enabled": bool(flags.get(artifact_id, enabled_by_default)),
+                "enabled_by_default": enabled_by_default,
+            }
+        )
+    return items
+
+
+def load_default_artifacts(*, artifact_root: Path | None = None, hermes_home: Path | None = None) -> list[dict[str, Any]]:
+    settings = list_default_artifact_settings(artifact_root=artifact_root, hermes_home=hermes_home)
+    enabled_ids = {str(item.get("id") or "").strip() for item in settings if item.get("enabled")}
+
+    enabled_items: list[dict[str, Any]] = []
+    for item in _DEFAULT_ARTIFACTS:
+        artifact_id = str(item.get("id") or "").strip()
+        if not artifact_id or artifact_id not in enabled_ids:
             continue
         enabled_items.append(copy.deepcopy(item))
     return enabled_items

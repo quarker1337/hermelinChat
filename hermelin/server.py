@@ -44,7 +44,7 @@ from .auth import (
     verify_session_token,
 )
 from .config import HermelinConfig
-from .default_artifacts import resolve_default_artifact_path
+from .default_artifacts import list_default_artifact_settings, resolve_default_artifact_path
 from .meta_db import (
     delete_title,
     ensure_meta_db,
@@ -165,6 +165,164 @@ def _update_display_skin_config_text(text: str, skin: str) -> tuple[str, bool]:
     if next_lines and next_lines[-1].strip():
         next_lines.append("")
     next_lines.extend(["display:", f"  skin: {scalar}"])
+    return _join(next_lines), True
+
+
+def _update_default_artifact_flag_config_text(text: str, artifact_id: str, enabled: bool) -> tuple[str, bool]:
+    raw = text or ""
+    artifact_id = str(artifact_id or "").strip()
+    if not artifact_id:
+        return raw, False
+
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    had_trailing_newline = raw.endswith(("\n", "\r"))
+    lines = raw.splitlines()
+    scalar = "true" if enabled else "false"
+    artifact_key_re = re.escape(artifact_id)
+
+    def _join(next_lines: list[str]) -> str:
+        out = newline.join(next_lines)
+        if next_lines and (had_trailing_newline or not raw):
+            out += newline
+        return out
+
+    for idx, line in enumerate(lines):
+        if line[:1].isspace():
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m = re.match(rf"^(hermelin\.default_artifacts\.{artifact_key_re}\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", line)
+        if not m:
+            continue
+        updated = f"{m.group(1)}{scalar}{m.group(3) or ''}"
+        if updated == line:
+            return raw, False
+        next_lines = list(lines)
+        next_lines[idx] = updated
+        return _join(next_lines), True
+
+    for idx, line in enumerate(lines):
+        if line[:1].isspace():
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not re.match(r"^hermelin\s*:\s*(?:#.*)?$", stripped):
+            continue
+
+        herm_end = len(lines)
+        for j in range(idx + 1, len(lines)):
+            s = lines[j].strip()
+            if not s:
+                continue
+            if not lines[j][:1].isspace():
+                herm_end = j
+                break
+
+        child_indent_len = None
+        for j in range(idx + 1, herm_end):
+            s = lines[j].strip()
+            if not s or s.startswith("#"):
+                continue
+            indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+            if indent_len > 0:
+                child_indent_len = indent_len
+                break
+        child_indent_len = child_indent_len or 2
+        child_indent = " " * child_indent_len
+
+        default_idx = None
+        for j in range(idx + 1, herm_end):
+            s = lines[j].strip()
+            if not s or s.startswith("#"):
+                continue
+            indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+            if indent_len != child_indent_len:
+                continue
+            if re.match(r"^default_artifacts\s*:\s*(?:#.*)?$", s):
+                default_idx = j
+                break
+
+        if default_idx is not None:
+            default_end = herm_end
+            for j in range(default_idx + 1, herm_end):
+                s = lines[j].strip()
+                if not s:
+                    continue
+                indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+                if indent_len <= child_indent_len:
+                    default_end = j
+                    break
+
+            leaf_indent_len = None
+            for j in range(default_idx + 1, default_end):
+                s = lines[j].strip()
+                if not s or s.startswith("#"):
+                    continue
+                indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+                if indent_len > child_indent_len:
+                    leaf_indent_len = indent_len
+                    break
+            leaf_indent_len = leaf_indent_len or (child_indent_len + 2)
+            leaf_indent = " " * leaf_indent_len
+
+            for j in range(default_idx + 1, default_end):
+                s = lines[j].strip()
+                if not s or s.startswith("#"):
+                    continue
+                indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+                if indent_len != leaf_indent_len:
+                    continue
+                m = re.match(rf"^(\s*{artifact_key_re}\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", lines[j])
+                if not m:
+                    continue
+                updated = f"{m.group(1)}{scalar}{m.group(3) or ''}"
+                if updated == lines[j]:
+                    return raw, False
+                next_lines = list(lines)
+                next_lines[j] = updated
+                return _join(next_lines), True
+
+            insert_at = default_idx + 1
+            while insert_at < default_end:
+                s = lines[insert_at].strip()
+                if not s:
+                    insert_at += 1
+                    continue
+                indent_len = len(lines[insert_at]) - len(lines[insert_at].lstrip(" "))
+                if indent_len > child_indent_len and s.startswith("#"):
+                    insert_at += 1
+                    continue
+                break
+
+            next_lines = list(lines)
+            next_lines.insert(insert_at, f"{leaf_indent}{artifact_id}: {scalar}")
+            return _join(next_lines), True
+
+        insert_at = idx + 1
+        while insert_at < herm_end:
+            s = lines[insert_at].strip()
+            if not s:
+                insert_at += 1
+                continue
+            indent_len = len(lines[insert_at]) - len(lines[insert_at].lstrip(" "))
+            if indent_len >= child_indent_len and s.startswith("#"):
+                insert_at += 1
+                continue
+            break
+
+        next_lines = list(lines)
+        next_lines[insert_at:insert_at] = [
+            f"{child_indent}default_artifacts:",
+            f"{child_indent}  {artifact_id}: {scalar}",
+        ]
+        return _join(next_lines), True
+
+    next_lines = list(lines)
+    if next_lines and next_lines[-1].strip():
+        next_lines.append("")
+    next_lines.extend(["hermelin:", "  default_artifacts:", f"    {artifact_id}: {scalar}"])
     return _join(next_lines), True
 
 
@@ -1547,6 +1705,46 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         return True, ""
 
+    def _get_default_artifact_cfg() -> dict:
+        return {
+            "items": list_default_artifact_settings(hermes_home=config.hermes_home),
+            "config_path": str(config.hermes_home / "config.yaml"),
+        }
+
+    def _set_default_artifact_flags(flags: dict[str, bool]) -> tuple[bool, str]:
+        supported_ids = {str(item.get("id") or "").strip() for item in list_default_artifact_settings(hermes_home=config.hermes_home)}
+        unsupported = sorted(key for key in flags.keys() if key not in supported_ids)
+        if unsupported:
+            return False, f"unsupported default artifact(s): {', '.join(unsupported)}"
+
+        cfg_path = config.hermes_home / "config.yaml"
+        try:
+            existing = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
+        except Exception:
+            existing = ""
+
+        updated = existing
+        changed_any = False
+        for artifact_id, enabled in flags.items():
+            updated, changed = _update_default_artifact_flag_config_text(updated, artifact_id, bool(enabled))
+            changed_any = changed_any or changed
+
+        if not changed_any:
+            return True, ""
+
+        tmp_path = cfg_path.with_name(f".{cfg_path.name}.{int(time.time() * 1000)}.tmp")
+        try:
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path.write_text(updated, encoding="utf-8")
+            os.replace(tmp_path, cfg_path)
+            return True, ""
+        except Exception as exc:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False, str(exc)
+
     @app.get("/api/settings/agent")
     async def api_settings_agent():
         return _get_cfg()
@@ -1643,6 +1841,34 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         # Return fresh values
         return {"ok": True, **_get_cfg()}
+
+    @app.get("/api/settings/default-artifacts")
+    async def api_settings_default_artifacts():
+        return _get_default_artifact_cfg()
+
+    @app.post("/api/settings/default-artifacts")
+    async def api_settings_default_artifacts_set(payload: dict = Body(...)):
+        if not isinstance(payload, dict):
+            return JSONResponse({"detail": "invalid payload"}, status_code=400)
+
+        items_in = payload.get("items")
+        if not isinstance(items_in, list):
+            return JSONResponse({"detail": "items list required"}, status_code=400)
+
+        flags: dict[str, bool] = {}
+        for item in items_in:
+            if not isinstance(item, dict):
+                return JSONResponse({"detail": "invalid item"}, status_code=400)
+            artifact_id = str(item.get("id") or "").strip()
+            if not artifact_id:
+                return JSONResponse({"detail": "artifact id required"}, status_code=400)
+            flags[artifact_id] = _as_bool(item.get("enabled"), False)
+
+        ok, err = await asyncio.to_thread(_set_default_artifact_flags, flags)
+        if not ok:
+            return JSONResponse({"detail": "failed to save", "error": err}, status_code=500)
+
+        return {"ok": True, **_get_default_artifact_cfg()}
 
     @app.get("/api/whisper")
     async def api_whisper():

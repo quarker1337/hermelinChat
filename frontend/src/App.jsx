@@ -1772,6 +1772,11 @@ const SettingsPanel = ({
   const [agentSaved, setAgentSaved] = useState(null)
   const [agentDraft, setAgentDraft] = useState(null)
 
+  const [defaultArtifactsLoading, setDefaultArtifactsLoading] = useState(true)
+  const [defaultArtifactsConfigPath, setDefaultArtifactsConfigPath] = useState('')
+  const [defaultArtifactsSaved, setDefaultArtifactsSaved] = useState([])
+  const [defaultArtifactsDraft, setDefaultArtifactsDraft] = useState([])
+
   const normalizeAgentSettings = (raw) => {
     const r = raw && typeof raw === 'object' ? raw : {}
     const agent = r.agent && typeof r.agent === 'object' ? r.agent : {}
@@ -1806,6 +1811,19 @@ const SettingsPanel = ({
         timeout: Math.max(1, Math.min(3600, Number(terminal.timeout ?? 60) || 60)),
       },
     }
+  }
+
+  const normalizeDefaultArtifactSettings = (raw) => {
+    const list = Array.isArray(raw) ? raw : []
+    return list
+      .filter((item) => item && typeof item === 'object' && item.id)
+      .map((item) => ({
+        id: String(item.id),
+        title: (item.title || item.id || 'untitled').toString().trim() || String(item.id),
+        description: (item.description || '').toString().trim(),
+        enabled: !!item.enabled,
+        enabled_by_default: item.enabled_by_default === undefined ? true : !!item.enabled_by_default,
+      }))
   }
 
   useEffect(() => {
@@ -1856,6 +1874,49 @@ const SettingsPanel = ({
 
     const run = async () => {
       if (locked) {
+        if (!cancelled) {
+          setDefaultArtifactsLoading(false)
+          setDefaultArtifactsConfigPath('')
+          setDefaultArtifactsSaved([])
+          setDefaultArtifactsDraft([])
+        }
+        return
+      }
+
+      setDefaultArtifactsLoading(true)
+      try {
+        const r = await fetch('/api/settings/default-artifacts')
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(data?.detail || `http ${r.status}`)
+
+        const normalized = normalizeDefaultArtifactSettings(data?.items)
+        if (!cancelled) {
+          setDefaultArtifactsConfigPath((data?.config_path || '').toString())
+          setDefaultArtifactsSaved(normalized)
+          setDefaultArtifactsDraft(normalized)
+          setDefaultArtifactsLoading(false)
+        }
+      } catch {
+        if (!cancelled) {
+          setDefaultArtifactsConfigPath('')
+          setDefaultArtifactsSaved([])
+          setDefaultArtifactsDraft([])
+          setDefaultArtifactsLoading(false)
+        }
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [locked])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      if (locked) {
         if (!cancelled) setKeyStatus({ loading: false, keys: {} })
         return
       }
@@ -1882,8 +1943,9 @@ const SettingsPanel = ({
   const keyUpdates = Object.entries(draftKeys).filter(([, v]) => (v || '').toString().trim())
   const agentDirty =
     !!agentSaved && !!agentDraft && JSON.stringify(agentSaved) !== JSON.stringify(agentDraft)
+  const defaultArtifactsDirty = JSON.stringify(defaultArtifactsSaved) !== JSON.stringify(defaultArtifactsDraft)
 
-  const dirtyCount = (modelDirty ? 1 : 0) + keyUpdates.length + (agentDirty ? 1 : 0)
+  const dirtyCount = (modelDirty ? 1 : 0) + keyUpdates.length + (agentDirty ? 1 : 0) + (defaultArtifactsDirty ? 1 : 0)
   const dirty = dirtyCount > 0
 
   const attemptClose = useCallback(() => {
@@ -1908,7 +1970,7 @@ const SettingsPanel = ({
     const m = (draftModel || '').trim()
     const updates = keyUpdates.map(([k, v]) => [k, (v || '').toString().trim()])
 
-    if (!modelDirty && updates.length === 0 && !agentDirty) return
+    if (!modelDirty && updates.length === 0 && !agentDirty && !defaultArtifactsDirty) return
 
     if (modelDirty && !m) {
       setStatus({ kind: 'error', text: 'model is required' })
@@ -1958,6 +2020,27 @@ const SettingsPanel = ({
         setAgentConfigPath((data?.config_path || '').toString())
         setAgentSaved(normalized)
         setAgentDraft(normalized)
+        setStatus({ kind: 'ok', text: 'saved' })
+      }
+
+      if (defaultArtifactsDirty) {
+        const r = await fetch('/api/settings/default-artifacts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: defaultArtifactsDraft }),
+        })
+
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) {
+          const msg = data?.error || data?.detail || 'save failed'
+          setStatus({ kind: 'error', text: String(msg) })
+          return
+        }
+
+        const normalized = normalizeDefaultArtifactSettings(data?.items)
+        setDefaultArtifactsConfigPath((data?.config_path || '').toString())
+        setDefaultArtifactsSaved(normalized)
+        setDefaultArtifactsDraft(normalized)
         setStatus({ kind: 'ok', text: 'saved' })
       }
 
@@ -2054,6 +2137,13 @@ const SettingsPanel = ({
 
   const setDraftKey = (name, value) => {
     setDraftKeys((prev) => ({ ...prev, [name]: value }))
+    setStatus({ kind: '', text: '' })
+  }
+
+  const setDefaultArtifactEnabled = (artifactId, enabled) => {
+    setDefaultArtifactsDraft((prev) =>
+      (prev || []).map((item) => (item?.id === artifactId ? { ...item, enabled: !!enabled } : item)),
+    )
     setStatus({ kind: '', text: '' })
   }
 
@@ -2805,6 +2895,72 @@ const SettingsPanel = ({
                   </div>
                 </div>
               </>
+            )}
+          </CollapsiblePanel>
+
+          <CollapsiblePanel
+            title="Default artifacts"
+            open={openPanel === 'defaultArtifacts'}
+            onToggle={() => togglePanel('defaultArtifacts')}
+          >
+            <div style={{ fontSize: 11, color: SLATE.muted, lineHeight: 1.45, marginBottom: 10 }}>
+              These toggles write to <span style={{ color: AMBER[500] }}>~/.hermes/config.yaml</span> under{' '}
+              <span style={{ color: AMBER[500] }}>hermelin.default_artifacts</span>. Built-in artifacts can appear or disappear
+              on the next artifact refresh without touching your custom artifacts.
+            </div>
+
+            {defaultArtifactsConfigPath && (
+              <div style={{ fontSize: 10, color: SLATE.muted, marginBottom: 10, wordBreak: 'break-all' }}>
+                config: {defaultArtifactsConfigPath}
+              </div>
+            )}
+
+            {defaultArtifactsLoading && (
+              <div style={{ fontSize: 10, color: SLATE.muted }}>loading default artifacts…</div>
+            )}
+
+            {!defaultArtifactsLoading && defaultArtifactsDraft.length === 0 && (
+              <div style={{ fontSize: 10, color: SLATE.muted }}>no built-in default artifacts available</div>
+            )}
+
+            {!defaultArtifactsLoading && defaultArtifactsDraft.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {defaultArtifactsDraft.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      border: `1px solid ${SLATE.border}`,
+                      background: `${SLATE.elevated}aa`,
+                      borderRadius: 10,
+                      padding: '10px 12px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>{item.title}</div>
+                      <div style={{ flex: 1 }} />
+                      {!item.enabled_by_default && (
+                        <div style={{ fontSize: 9, color: SLATE.muted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          opt-in
+                        </div>
+                      )}
+                      <input
+                        type="checkbox"
+                        checked={!!item.enabled}
+                        disabled={locked || saving}
+                        onChange={(e) => {
+                          if (locked) return
+                          setDefaultArtifactEnabled(item.id, e.target.checked)
+                        }}
+                        style={{ accentColor: AMBER[400], opacity: locked ? 0.5 : 1 }}
+                      />
+                    </div>
+
+                    {item.description && (
+                      <div style={{ marginTop: 6, fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>{item.description}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </CollapsiblePanel>
 
@@ -5939,7 +6095,10 @@ export default function App() {
           }}
           uiPrefs={uiPrefs}
           onUiPrefsChange={updateUiPrefs}
-          onSaved={() => showEggToast('settings saved')}
+          onSaved={() => {
+            showEggToast('settings saved')
+            refreshArtifacts({ openOnChange: false })
+          }}
         />
       )}
       </div>
