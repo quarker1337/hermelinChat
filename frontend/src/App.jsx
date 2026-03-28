@@ -1237,6 +1237,10 @@ const SessionRow = ({ title, preview, subtitle, subtitleTitle, right, active, on
   const hasMenu = typeof onMenu === 'function'
   const showMenu = hasMenu && (hovered || menuOpen)
   const hasSubtitle = subtitle !== undefined && subtitle !== null && subtitle !== ''
+  const subtitleMutedRgb = hexToRgb(SLATE.muted)
+  const subtitleColor = subtitleMutedRgb
+    ? `rgba(${subtitleMutedRgb.r}, ${subtitleMutedRgb.g}, ${subtitleMutedRgb.b}, 0.72)`
+    : SLATE.muted
 
   const renderMenuButton = () => {
     if (!hasMenu) return null
@@ -1312,7 +1316,7 @@ const SessionRow = ({ title, preview, subtitle, subtitleTitle, right, active, on
               style={{
                 marginTop: 3,
                 fontSize: 10,
-                color: SLATE.muted,
+                color: subtitleColor,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
