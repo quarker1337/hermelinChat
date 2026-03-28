@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import json
 import os
+import re
 import time
 from collections import defaultdict, deque
 import shlex
@@ -55,6 +56,116 @@ from .pty_handler import PtyProcess
 from .security import extract_client_ip, ip_allowed
 from .state_reader import get_message_context, list_sessions, search_messages
 from .runners import discover_runner_upstream
+
+
+def _yaml_inline_scalar(value: str) -> str:
+    dumped = yaml.safe_dump([value], default_flow_style=True, allow_unicode=True, sort_keys=False).strip()
+    if dumped.startswith("[") and dumped.endswith("]"):
+        return dumped[1:-1].strip()
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _update_display_skin_config_text(text: str, skin: str) -> tuple[str, bool]:
+    raw = text or ""
+    skin = str(skin or "").strip()
+    if not skin:
+        return raw, False
+
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    had_trailing_newline = raw.endswith(("\n", "\r"))
+    lines = raw.splitlines()
+    scalar = _yaml_inline_scalar(skin)
+
+    def _join(next_lines: list[str]) -> str:
+        out = newline.join(next_lines)
+        if next_lines and (had_trailing_newline or not raw):
+            out += newline
+        return out
+
+    for idx, line in enumerate(lines):
+        if line[:1].isspace():
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m = re.match(r"^(display\.skin\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", line)
+        if not m:
+            continue
+        updated = f"{m.group(1)}{scalar}{m.group(3) or ''}"
+        if updated == line:
+            return raw, False
+        next_lines = list(lines)
+        next_lines[idx] = updated
+        return _join(next_lines), True
+
+    for idx, line in enumerate(lines):
+        if line[:1].isspace():
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not re.match(r"^display\s*:\s*(?:#.*)?$", stripped):
+            continue
+
+        block_end = len(lines)
+        for j in range(idx + 1, len(lines)):
+            s = lines[j].strip()
+            if not s:
+                continue
+            if not lines[j][:1].isspace():
+                block_end = j
+                break
+
+        child_indent_len = None
+        for j in range(idx + 1, block_end):
+            s = lines[j].strip()
+            if not s or s.startswith("#"):
+                continue
+            indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+            if indent_len > 0:
+                child_indent_len = indent_len
+                break
+        child_indent_len = child_indent_len or 2
+        child_indent = " " * child_indent_len
+
+        for j in range(idx + 1, block_end):
+            s = lines[j].strip()
+            if not s or s.startswith("#"):
+                continue
+            indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+            if indent_len != child_indent_len:
+                continue
+            m = re.match(r"^(\s*skin\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", lines[j])
+            if not m:
+                continue
+            updated = f"{m.group(1)}{scalar}{m.group(3) or ''}"
+            if updated == lines[j]:
+                return raw, False
+            next_lines = list(lines)
+            next_lines[j] = updated
+            return _join(next_lines), True
+
+        insert_at = idx + 1
+        while insert_at < block_end:
+            s = lines[insert_at].strip()
+            if not s:
+                insert_at += 1
+                continue
+            indent_len = len(lines[insert_at]) - len(lines[insert_at].lstrip(" "))
+            if indent_len > 0 and s.startswith("#"):
+                insert_at += 1
+                continue
+            break
+
+        next_lines = list(lines)
+        next_lines.insert(insert_at, f"{child_indent}skin: {scalar}")
+        return _join(next_lines), True
+
+    next_lines = list(lines)
+    if next_lines and next_lines[-1].strip():
+        next_lines.append("")
+    next_lines.extend(["display:", f"  skin: {scalar}"])
+    return _join(next_lines), True
 
 
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
@@ -1285,6 +1396,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         Hermes reads the skin at startup; hermelinChat uses this to auto-sync the
         CLI skin with the UI theme.
+
+        IMPORTANT: update only the display.skin entry (or append it if missing)
+        instead of round-tripping the whole YAML document. That preserves unrelated
+        config keys, comments, and manual formatting in the user's config.yaml.
         """
 
         skin = str(skin or "").strip()
@@ -1292,31 +1407,26 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return False
 
         cfg_path = config.hermes_home / "config.yaml"
-        data = _read_config_yaml()
+        try:
+            existing = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
+        except Exception:
+            existing = ""
 
-        display = data.get("display") if isinstance(data.get("display"), dict) else {}
-        if not isinstance(display, dict):
-            display = {}
-
-        if str(display.get("skin") or "").strip() == skin:
+        updated, changed = _update_display_skin_config_text(existing, skin)
+        if not changed:
             return False
 
-        display["skin"] = skin
-        data["display"] = display
-
+        tmp_path = cfg_path.with_name(f".{cfg_path.name}.{int(time.time() * 1000)}.tmp")
         try:
             cfg_path.parent.mkdir(parents=True, exist_ok=True)
-            cfg_path.write_text(
-                yaml.safe_dump(
-                    data,
-                    sort_keys=False,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                ),
-                encoding="utf-8",
-            )
+            tmp_path.write_text(updated, encoding="utf-8")
+            os.replace(tmp_path, cfg_path)
             return True
         except Exception:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
             return False
 
     def _as_bool(v, default: bool = False) -> bool:
