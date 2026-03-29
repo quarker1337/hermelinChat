@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>hermelinChat › Strudel</title>
+<title>hermilinChat › Strudel</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@strudel/repl@latest"></script>
 <style>
@@ -70,9 +70,241 @@
   .tbtn:active { transform: scale(0.97); }
   .tbtn.on { background: var(--theme-accent-strong); border-color: var(--theme-accent-muted); color: var(--theme-text-bright); box-shadow: 0 0 10px var(--theme-accent-glow); }
   .tbtn.stopbtn:hover { border-color: var(--theme-danger); color: var(--theme-danger); background: var(--theme-danger-surface); }
+  .tbtn.recbtn.recording { background: var(--theme-danger); border-color: var(--theme-danger); color: #fff; box-shadow: 0 0 12px var(--theme-danger-glow); animation: rec-pulse 1s ease-in-out infinite; }
+  @keyframes rec-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
   .sep { width: 1px; height: 20px; background: var(--theme-border); margin: 0 4px; }
   .spacer { flex: 1; }
   .hint { font-size: 10px; color: var(--theme-muted); }
+
+  /* ── CPS / BPM CONTROL ── */
+  .tempo-wrap {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  .tempo-wrap label {
+    font-size: 9px;
+    color: var(--theme-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .tempo-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 64px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--theme-elevated);
+    outline: none;
+    cursor: pointer;
+  }
+  .tempo-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--theme-accent);
+    border: 1px solid var(--theme-accent-muted);
+    cursor: pointer;
+  }
+  .tempo-slider::-moz-range-thumb {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--theme-accent);
+    border: 1px solid var(--theme-accent-muted);
+    cursor: pointer;
+  }
+  .tempo-val {
+    font-size: 10px;
+    color: var(--theme-text);
+    min-width: 52px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .tempo-val .bpm-num { color: var(--theme-text-bright); font-weight: 500; }
+
+  /* ── VOLUME CONTROL ── */
+  .vol-wrap {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  .vol-label {
+    font-size: 9px;
+    color: var(--theme-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .vol-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 52px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--theme-elevated);
+    outline: none;
+    cursor: pointer;
+  }
+  .vol-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--theme-text);
+    border: 1px solid var(--theme-muted);
+    cursor: pointer;
+  }
+  .vol-slider::-moz-range-thumb {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--theme-text);
+    border: 1px solid var(--theme-muted);
+    cursor: pointer;
+  }
+  .vol-val {
+    font-size: 10px;
+    color: var(--theme-muted);
+    min-width: 22px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── EQ PANEL ── */
+  #eq-panel {
+    display: none;
+    background: var(--theme-surface);
+    border-bottom: 1px solid var(--theme-border);
+    padding: 8px 14px 6px;
+    flex-shrink: 0;
+    z-index: 9;
+    flex-direction: column;
+    gap: 6px;
+  }
+  #eq-panel.open { display: flex; }
+  /* Top row: knobs + spectrum + reset */
+  .eq-top-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .eq-title {
+    font-size: 9px;
+    color: var(--theme-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    flex-shrink: 0;
+  }
+  .eq-bands {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  .eq-band {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    cursor: default;
+  }
+  .eq-knob-wrap {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    cursor: grab;
+  }
+  .eq-knob-wrap:active { cursor: grabbing; }
+  .eq-knob-wrap svg { display: block; }
+  .eq-db {
+    font-size: 9px;
+    color: var(--theme-text);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    font-weight: 500;
+    min-width: 36px;
+  }
+  .eq-db.boosted { color: var(--theme-accent); }
+  .eq-db.cut { color: var(--theme-warning); }
+  .eq-freq {
+    font-size: 9px;
+    color: var(--theme-text-bright);
+    font-variant-numeric: tabular-nums;
+  }
+  .eq-label {
+    font-size: 7px;
+    color: var(--theme-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .eq-sep {
+    width: 1px;
+    height: 52px;
+    background: var(--theme-border);
+    flex-shrink: 0;
+  }
+  /* EQ spectrum analyzer */
+  .eq-spectrum {
+    flex: 1;
+    min-width: 120px;
+    height: 56px;
+    background: var(--theme-bg-deep);
+    border: 1px solid var(--theme-border);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+  .eq-spectrum canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .eq-reset {
+    padding: 4px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--theme-border);
+    background: var(--theme-elevated);
+    color: var(--theme-muted);
+    font-family: inherit;
+    font-size: 9px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .eq-reset:hover {
+    border-color: var(--theme-accent-muted);
+    color: var(--theme-accent);
+    background: var(--theme-accent-surface);
+  }
+
+  /* ── Record time display ── */
+  .rec-time {
+    font-size: 10px;
+    color: var(--theme-danger);
+    font-variant-numeric: tabular-nums;
+    min-width: 36px;
+    margin-left: 2px;
+  }
+
+  /* ── Small icon button ── */
+  .ibtn {
+    padding: 4px 7px;
+    border-radius: 4px;
+    border: 1px solid var(--theme-border);
+    background: var(--theme-elevated);
+    color: var(--theme-muted);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+  .ibtn:hover { border-color: var(--theme-accent-muted); color: var(--theme-accent); }
+  .ibtn.on { color: var(--theme-accent); border-color: var(--theme-accent-muted); background: var(--theme-accent-surface); }
+
   #statusDot {
     width: 6px; height: 6px; border-radius: 50%;
     background: var(--theme-warning); box-shadow: 0 0 6px var(--theme-warning-glow);
@@ -132,6 +364,76 @@
     min-height: 0;
     overflow: hidden;
   }
+
+  /* ── BOTTOM INFO PANEL ── */
+  #bottom-panel {
+    display: none;
+    flex-shrink: 0;
+    background: var(--theme-surface);
+    border-top: 1px solid var(--theme-border);
+    font-size: 11px;
+    max-height: 160px;
+    overflow: hidden;
+  }
+  #bottom-panel.open { display: flex; flex-direction: column; }
+  #panel-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--theme-border);
+    flex-shrink: 0;
+  }
+  .panel-tab {
+    padding: 5px 14px;
+    font-size: 10px;
+    font-family: inherit;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--theme-muted);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .panel-tab:hover { color: var(--theme-text); }
+  .panel-tab.active { color: var(--theme-accent); border-bottom-color: var(--theme-accent); }
+  .panel-tab-close {
+    margin-left: auto;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--theme-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .panel-tab-close:hover { color: var(--theme-danger); }
+  .panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--theme-scrollbar) var(--theme-surface);
+  }
+  .panel-body::-webkit-scrollbar { width: 6px; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--theme-scrollbar); border-radius: 3px; }
+
+  /* Console log entries */
+  .log-entry { padding: 2px 0; border-bottom: 1px solid var(--theme-border); color: var(--theme-text); word-break: break-all; }
+  .log-entry.error { color: var(--theme-danger); }
+  .log-entry.warn { color: var(--theme-warning); }
+  .log-entry .log-time { color: var(--theme-muted); font-size: 9px; margin-right: 6px; }
+
+  /* Pattern info */
+  .info-grid {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 4px 0;
+  }
+  .info-item { display: flex; flex-direction: column; gap: 2px; }
+  .info-label { font-size: 9px; color: var(--theme-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .info-value { font-size: 14px; color: var(--theme-text-bright); font-weight: 500; font-variant-numeric: tabular-nums; }
 
   /* ── CODEMIRROR THEME OVERRIDES ──
      Force CM internals to follow our --theme-* variables
@@ -220,23 +522,74 @@
     <button class="tbtn" id="btnPlay" onclick="doPlay()">▶ Play</button>
     <button class="tbtn stopbtn" id="btnStop" onclick="doStop()">■ Stop</button>
     <div class="sep"></div>
+    <button class="tbtn recbtn" id="btnRec" onclick="toggleRecord()">⏺ Rec</button>
+    <span class="rec-time" id="recTime"></span>
+    <div class="sep"></div>
+    <div class="tempo-wrap">
+      <label>bpm</label>
+      <input type="range" class="tempo-slider" id="tempoSlider" min="30" max="300" value="120" oninput="onTempoSlider(this.value)">
+      <span class="tempo-val" id="tempoVal"><span class="bpm-num">120</span></span>
+    </div>
+    <div class="sep"></div>
     <div class="meter-wrap">
       <span class="meter-label">out</span>
       <div class="meter-track" id="meterTrack"></div>
       <span class="meter-db" id="meterDb">-∞ dB</span>
+    </div>
+    <div class="sep"></div>
+    <div class="vol-wrap">
+      <span class="vol-label">vol</span>
+      <input type="range" class="vol-slider" id="volSlider" min="0" max="100" value="80" oninput="onVolSlider(this.value)">
+      <span class="vol-val" id="volVal">80</span>
+    </div>
+    <div class="sep"></div>
+    <button class="ibtn" id="btnEq" onclick="toggleEq()" title="Equalizer">EQ</button>
+    <button class="ibtn" id="btnPanel" onclick="togglePanel()" title="Info panel">☰</button>
+  </div>
+
+  <!-- ── EQ PANEL ── -->
+  <div id="eq-panel">
+    <div class="eq-top-row">
+      <span class="eq-title">EQ</span>
+      <div class="eq-bands" id="eqBands"></div>
+      <div class="eq-sep"></div>
+      <div class="eq-spectrum">
+        <canvas id="spectrumCanvas"></canvas>
+      </div>
+      <button class="eq-reset" onclick="resetEq()">Reset</button>
     </div>
   </div>
 
   <div id="editor-container">
     <strudel-editor id="repl">
 <!--
-// hermelinChat × Strudel
+// hermilinChat × Strudel
 // paste your pattern here, press ctrl+enter or ▶ Play
 setcps(0.5)
 
 s("bd sd")
 -->
     </strudel-editor>
+  </div>
+
+  <div id="bottom-panel">
+    <div id="panel-tabs">
+      <button class="panel-tab active" onclick="switchTab('console')">Console</button>
+      <button class="panel-tab" onclick="switchTab('info')">Info</button>
+      <button class="panel-tab-close" onclick="togglePanel()">✕</button>
+    </div>
+    <div class="panel-body" id="panelConsole">
+      <div class="log-entry" style="color:var(--theme-muted);font-style:italic;">Waiting for eval…</div>
+    </div>
+    <div class="panel-body" id="panelInfo" style="display:none;">
+      <div class="info-grid">
+        <div class="info-item"><span class="info-label">BPM</span><span class="info-value" id="infoBpm">—</span></div>
+        <div class="info-item"><span class="info-label">CPS</span><span class="info-value" id="infoCps">—</span></div>
+        <div class="info-item"><span class="info-label">Cycle</span><span class="info-value" id="infoCycle">—</span></div>
+        <div class="info-item"><span class="info-label">Lines</span><span class="info-value" id="infoLines">—</span></div>
+        <div class="info-item"><span class="info-label">Status</span><span class="info-value" id="infoStatus">stopped</span></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -258,7 +611,7 @@ function emitHermesEvent(eventName, payload = {}, requestId = null) {
       }, '*');
     }
   } catch (e) {
-    console.warn('[hermelinChat] bridge emit failed:', e);
+    console.warn('[hermilinChat] bridge emit failed:', e);
   }
 }
 
@@ -296,7 +649,7 @@ function tryGetAPI() {
   const el = document.getElementById('repl');
   if (el && el.editor) {
     api = el.editor;
-    console.log('[hermelinChat] StrudelMirror API ready:', Object.keys(api));
+    console.log('[hermilinChat] StrudelMirror API ready:', Object.keys(api));
     if (!bridgeReadySent) {
       bridgeReadySent = true;
       emitHermesEvent('ready', {
@@ -309,6 +662,9 @@ function tryGetAPI() {
           'set-cursor',
           'play',
           'stop',
+          'get-audio-snapshot',
+          'get-eq-state',
+          'set-eq',
         ],
       });
       // CM is now rendered — re-inject theme overrides after a short delay
@@ -348,7 +704,1059 @@ function doStop() {
   } catch(e) { console.error(e); }
   setPlayUi(false);
   emitHermesEvent('playing', { playing: false });
+  updateInfoPanel();
 }
+
+// ── RECORDING ──
+let mediaRecorder = null;
+let recordedChunks = [];
+let recStartTime = 0;
+let recTimerInterval = null;
+let recDest = null; // MediaStreamDestination — kept alive during recording
+
+function toggleRecord() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+function startRecording() {
+  try {
+    const ctx = typeof getAudioContext === 'function' ? getAudioContext() : null;
+    if (!ctx) { addLog('No audio context available', 'error'); return; }
+
+    if (!analyser) {
+      addLog('Audio meter not ready — try playing first', 'warn');
+      return;
+    }
+
+    // Create a MediaStreamDestination and connect analyser to it
+    // This doesn't interfere with the existing audio routing
+    recDest = ctx.createMediaStreamDestination();
+    analyser.connect(recDest);
+
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(recDest.stream, {
+      mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm'
+    });
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      clearInterval(recTimerInterval);
+      document.getElementById('btnRec').classList.remove('recording');
+      document.getElementById('recTime').textContent = '';
+
+      // Disconnect rec destination (doesn't affect main audio path)
+      try { analyser.disconnect(recDest); } catch(e) {}
+      recDest = null;
+
+      if (recordedChunks.length === 0) { addLog('Recording empty', 'warn'); return; }
+
+      addLog('Converting to WAV…');
+
+      try {
+        // Decode webm blob to raw PCM via OfflineAudioContext
+        const webmBlob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+        const arrayBuf = await webmBlob.arrayBuffer();
+        const audioCtx = typeof getAudioContext === 'function' ? getAudioContext() : new AudioContext();
+        const decoded = await audioCtx.decodeAudioData(arrayBuf);
+
+        const numChannels = decoded.numberOfChannels;
+        const sampleRate = decoded.sampleRate;
+        const length = decoded.length;
+
+        // Interleave channels
+        const interleaved = new Float32Array(length * numChannels);
+        for (let i = 0; i < length; i++) {
+          for (let ch = 0; ch < numChannels; ch++) {
+            interleaved[i * numChannels + ch] = decoded.getChannelData(ch)[i];
+          }
+        }
+
+        // Encode WAV
+        const wavBlob = encodeWAV(interleaved, sampleRate, numChannels);
+        const url = URL.createObjectURL(wavBlob);
+        const a = document.createElement('a');
+        const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.href = url;
+        a.download = `strudel-${dateStr}.wav`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        const sizeMB = (wavBlob.size / (1024 * 1024)).toFixed(1);
+        const durSec = (length / sampleRate).toFixed(1);
+        addLog(`WAV saved: ${durSec}s, ${sizeMB} MB, ${sampleRate} Hz, ${numChannels}ch`);
+      } catch (e) {
+        console.error('WAV conversion failed:', e);
+        addLog('WAV conversion failed, saving as webm instead…', 'warn');
+        // Fallback: just save the webm
+        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.href = url;
+        a.download = `strudel-${dateStr}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        addLog(`Webm fallback saved (${(blob.size / 1024).toFixed(1)} KB)`);
+      }
+    };
+
+    mediaRecorder.start(100);
+    recStartTime = Date.now();
+    document.getElementById('btnRec').classList.add('recording');
+
+    recTimerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
+      const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+      const s = String(elapsed % 60).padStart(2, '0');
+      document.getElementById('recTime').textContent = `${m}:${s}`;
+    }, 500);
+
+    addLog('Recording started…');
+  } catch (e) {
+    console.error(e);
+    addLog('Record failed: ' + e.message, 'error');
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    addLog('Recording stopped, converting…');
+  }
+}
+
+function encodeWAV(samples, sampleRate, numChannels) {
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  const dataSize = samples.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    let s = Math.max(-1, Math.min(1, samples[i]));
+    s = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    view.setInt16(offset, s | 0, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+// ── TEMPO / CPS CONTROL ──
+let currentCps = 0.5; // default
+
+function onTempoSlider(bpm) {
+  bpm = Number(bpm);
+  const cps = bpm / 60 / 4; // Strudel: 1 cycle = 4 beats by convention
+  currentCps = cps;
+  document.getElementById('tempoVal').innerHTML = `<span class="bpm-num">${bpm}</span>`;
+  // Inject setcps into the audio context
+  try {
+    if (typeof setcps === 'function') {
+      setcps(cps);
+    }
+  } catch(e) { console.warn('setcps:', e); }
+  updateInfoPanel();
+}
+
+// Sync slider from code if code contains setcps()
+function syncTempoFromCode() {
+  const code = currentCode();
+  const m = code.match(/setcps\(\s*([\d.]+)\s*\)/);
+  if (m) {
+    const cps = parseFloat(m[1]);
+    if (!isNaN(cps) && cps > 0) {
+      currentCps = cps;
+      const bpm = Math.round(cps * 60 * 4);
+      const slider = document.getElementById('tempoSlider');
+      const clampedBpm = Math.max(30, Math.min(300, bpm));
+      slider.value = clampedBpm;
+      document.getElementById('tempoVal').innerHTML = `<span class="bpm-num">${clampedBpm}</span>`;
+    }
+  }
+}
+
+// ── VOLUME CONTROL ──
+let masterGain = null;
+
+function onVolSlider(val) {
+  val = Number(val);
+  document.getElementById('volVal').textContent = val;
+  if (masterGain) {
+    // Quadratic curve for more natural volume feel
+    masterGain.gain.value = (val / 100) * (val / 100);
+  }
+}
+
+// ── EQUALIZER ──
+const EQ_BANDS = [
+  { freq: 80,   type: 'lowshelf',  Q: 0.7, label: 'LOW'  },
+  { freq: 500,  type: 'peaking',   Q: 1.0, label: 'LO-M' },
+  { freq: 2000, type: 'peaking',   Q: 1.0, label: 'HI-M' },
+  { freq: 6000, type: 'highshelf', Q: 0.7, label: 'HIGH'  },
+];
+let eqFilters = [];
+let eqOpen = false;
+let eqCurveRAF = null;
+let spectrumAnalyser = null;
+let spectrumData = null;
+let spectrumRunning = false;
+
+function disconnectNodeSafe(node) {
+  if (!node) return;
+  try { node.disconnect(); } catch(e) {}
+}
+
+function rebuildPostFxChain() {
+  if (!audioCtxRef || !postFxInput || !masterGain || eqFilters.length === 0) return;
+  disconnectNodeSafe(postFxInput);
+  eqFilters.forEach(disconnectNodeSafe);
+  disconnectNodeSafe(masterGain);
+
+  postFxInput.connect(eqFilters[0]);
+  for (let i = 0; i < eqFilters.length - 1; i++) {
+    eqFilters[i].connect(eqFilters[i + 1]);
+  }
+  eqFilters[eqFilters.length - 1].connect(masterGain);
+  masterGain.connect(audioCtxRef.destination);
+  masterGain.connect(analyser);
+  // Also feed spectrum analyser if it exists
+  if (spectrumAnalyser) {
+    try { masterGain.connect(spectrumAnalyser); } catch(e) {}
+  }
+  if (scopeAnalyser) {
+    try { masterGain.connect(scopeAnalyser); } catch(e) {}
+  }
+}
+
+function setupEqFilters(ctx = null) {
+  if (eqFilters.length > 0) return;
+  try {
+    const resolvedCtx = ctx || (typeof getAudioContext === 'function' ? getAudioContext() : null);
+    if (!resolvedCtx) return;
+
+    eqFilters = EQ_BANDS.map(band => {
+      const f = resolvedCtx.createBiquadFilter();
+      f.type = band.type;
+      f.frequency.value = band.freq;
+      f.Q.value = band.Q;
+      f.gain.value = 0;
+      return f;
+    });
+
+    if (postFxInput && masterGain && analyser) rebuildPostFxChain();
+
+    console.log('[hermilinChat] EQ filters ready');
+  } catch(e) {
+    console.warn('[hermilinChat] EQ setup failed:', e);
+  }
+}
+
+function toggleEq() {
+  eqOpen = !eqOpen;
+  document.getElementById('eq-panel').classList.toggle('open', eqOpen);
+  document.getElementById('btnEq').classList.toggle('on', eqOpen);
+  if (eqOpen) {
+    setupEqFilters();
+    buildEqKnobs();
+    startSpectrum();
+  } else {
+    stopSpectrum();
+  }
+  setTimeout(fixEditorScroll, 50);
+}
+
+// ── EQ KNOB RENDERING ──
+const eqKnobValues = [0, 0, 0, 0]; // current dB per band
+const EQ_KNOB_MIN = -12;
+const EQ_KNOB_MAX = 12;
+const EQ_KNOB_ARC_START = 225; // degrees, rotated so 0dB = top
+const EQ_KNOB_ARC_END = 495;
+const EQ_KNOB_ARC_RANGE = 270; // total sweep
+
+function buildEqKnobs() {
+  const container = document.getElementById('eqBands');
+  if (container.children.length > 0) return; // already built
+
+  EQ_BANDS.forEach((band, i) => {
+    const bandEl = document.createElement('div');
+    bandEl.className = 'eq-band';
+    bandEl.dataset.band = i;
+
+    const freqStr = band.freq >= 1000 ? (band.freq / 1000) + ' kHz' : band.freq + ' Hz';
+
+    // Build tick marks SVG — ticks every 1 dB from -12 to +12 (25 ticks)
+    // Longer/brighter at 0, ±6, ±12
+    const cx = 22, cy = 22, arcStart = 225;
+    let ticksSvg = '';
+    const tickCount = 25; // -12 to +12 inclusive
+    for (let t = 0; t < tickCount; t++) {
+      const dbVal = EQ_KNOB_MIN + t * (EQ_KNOB_MAX - EQ_KNOB_MIN) / (tickCount - 1);
+      const norm = t / (tickCount - 1);
+      const angle = arcStart + norm * EQ_KNOB_ARC_RANGE;
+      const rad = degToRad(angle - 90);
+
+      const isMajor = Math.abs(dbVal) < 0.01 || Math.abs(Math.abs(dbVal) - 6) < 0.01 || Math.abs(Math.abs(dbVal) - 12) < 0.01;
+      const isCenter = Math.abs(dbVal) < 0.01;
+
+      const outerR = 20.5;
+      const innerR = isMajor ? 16.5 : 17.8;
+      const x1 = cx + innerR * Math.cos(rad);
+      const y1 = cy + innerR * Math.sin(rad);
+      const x2 = cx + outerR * Math.cos(rad);
+      const y2 = cy + outerR * Math.sin(rad);
+
+      const sw = isCenter ? 1.5 : isMajor ? 1 : 0.5;
+      const color = isCenter ? 'var(--theme-text-bright)' : 'var(--theme-border)';
+
+      ticksSvg += `<line class="knob-tick" data-db="${dbVal.toFixed(1)}" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="${color}" stroke-width="${sw}" stroke-linecap="round"/>`;
+    }
+
+    bandEl.innerHTML = `
+      <span class="eq-db" id="eqDb${i}">0 dB</span>
+      <div class="eq-knob-wrap" id="eqKnob${i}">
+        <svg viewBox="0 0 44 44" width="44" height="44">
+          <!-- track arc (background) -->
+          <path class="knob-track" d="" fill="none" stroke="var(--theme-elevated)" stroke-width="3" stroke-linecap="round"/>
+          <!-- tick marks -->
+          <g class="knob-ticks">${ticksSvg}</g>
+          <!-- value arc -->
+          <path class="knob-value" d="" fill="none" stroke="var(--theme-accent-muted)" stroke-width="3" stroke-linecap="round"/>
+          <!-- knob body -->
+          <circle cx="22" cy="22" r="13" fill="var(--theme-elevated)" stroke="var(--theme-border)" stroke-width="1"/>
+          <!-- indicator line -->
+          <line class="knob-indicator" x1="22" y1="22" x2="22" y2="12" stroke="var(--theme-text-bright)" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="eq-freq">${freqStr}</span>
+      <span class="eq-label">${band.label}</span>
+    `;
+    container.appendChild(bandEl);
+    renderKnob(i, 0);
+    setupKnobDrag(i);
+  });
+}
+
+function degToRad(d) { return d * Math.PI / 180; }
+
+function describeArc(cx, cy, r, startAngle, endAngle) {
+  const s = degToRad(startAngle - 90);
+  const e = degToRad(endAngle - 90);
+  const x1 = cx + r * Math.cos(s);
+  const y1 = cy + r * Math.sin(s);
+  const x2 = cx + r * Math.cos(e);
+  const y2 = cy + r * Math.sin(e);
+  const sweep = endAngle - startAngle;
+  const largeArc = Math.abs(sweep) > 180 ? 1 : 0;
+  const sweepFlag = sweep > 0 ? 1 : 0;
+  return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} ${sweepFlag} ${x2} ${y2}`;
+}
+
+function renderKnob(band, dbVal) {
+  const wrap = document.getElementById('eqKnob' + band);
+  if (!wrap) return;
+  const svg = wrap.querySelector('svg');
+  const trackPath = svg.querySelector('.knob-track');
+  const valuePath = svg.querySelector('.knob-value');
+  const indicator = svg.querySelector('.knob-indicator');
+  const body = svg.querySelector('circle');
+  const ticks = svg.querySelectorAll('.knob-tick');
+
+  const cx = 22, cy = 22, r = 18;
+  const arcStart = 225;
+  const arcEnd = 495;
+  trackPath.setAttribute('d', describeArc(cx, cy, r, arcStart, arcEnd));
+
+  // Value arc from center (0dB) to current
+  const norm = (dbVal - EQ_KNOB_MIN) / (EQ_KNOB_MAX - EQ_KNOB_MIN);
+  const centerNorm = 0.5;
+  const currentAngle = arcStart + norm * EQ_KNOB_ARC_RANGE;
+  const centerAngle = arcStart + centerNorm * EQ_KNOB_ARC_RANGE;
+
+  if (Math.abs(dbVal) > 0.01) {
+    const vStart = Math.min(centerAngle, currentAngle);
+    const vEnd = Math.max(centerAngle, currentAngle);
+    valuePath.setAttribute('d', describeArc(cx, cy, r, vStart, vEnd));
+    valuePath.setAttribute('stroke', dbVal > 0 ? 'var(--theme-accent)' : 'var(--theme-warning)');
+  } else {
+    valuePath.setAttribute('d', '');
+  }
+
+  // Rotate indicator line
+  const indR1 = 5;
+  const indR2 = 11.5;
+  const rad = degToRad(currentAngle - 90);
+  indicator.setAttribute('x1', (cx + indR1 * Math.cos(rad)).toFixed(2));
+  indicator.setAttribute('y1', (cy + indR1 * Math.sin(rad)).toFixed(2));
+  indicator.setAttribute('x2', (cx + indR2 * Math.cos(rad)).toFixed(2));
+  indicator.setAttribute('y2', (cy + indR2 * Math.sin(rad)).toFixed(2));
+
+  // Light up ticks that are "passed" by the value
+  const isBoost = dbVal > 0.01;
+  const isCut = dbVal < -0.01;
+  const activeColor = isBoost ? 'var(--theme-accent)' : 'var(--theme-warning)';
+
+  ticks.forEach(tick => {
+    const tickDb = parseFloat(tick.dataset.db);
+    const isCenter = Math.abs(tickDb) < 0.01;
+    const isMajor = isCenter || Math.abs(Math.abs(tickDb) - 6) < 0.01 || Math.abs(Math.abs(tickDb) - 12) < 0.01;
+
+    let lit = false;
+    if (isBoost && tickDb > 0.01 && tickDb <= dbVal + 0.01) lit = true;
+    if (isCut && tickDb < -0.01 && tickDb >= dbVal - 0.01) lit = true;
+
+    if (lit) {
+      tick.setAttribute('stroke', activeColor);
+      tick.setAttribute('stroke-width', isMajor ? 1.5 : 1);
+      tick.setAttribute('opacity', '1');
+    } else if (isCenter) {
+      tick.setAttribute('stroke', 'var(--theme-text-bright)');
+      tick.setAttribute('stroke-width', '1.5');
+      tick.setAttribute('opacity', '1');
+    } else {
+      tick.setAttribute('stroke', isMajor ? 'var(--theme-muted)' : 'var(--theme-border)');
+      tick.setAttribute('stroke-width', isMajor ? 1 : 0.5);
+      tick.setAttribute('opacity', isMajor ? '0.7' : '0.4');
+    }
+  });
+
+  // Knob body glow on active
+  if (Math.abs(dbVal) > 0.01) {
+    body.setAttribute('stroke', 'var(--theme-accent-muted)');
+    indicator.setAttribute('stroke', isBoost ? 'var(--theme-accent)' : 'var(--theme-warning)');
+  } else {
+    body.setAttribute('stroke', 'var(--theme-border)');
+    indicator.setAttribute('stroke', 'var(--theme-text-bright)');
+  }
+}
+
+function setupKnobDrag(band) {
+  const wrap = document.getElementById('eqKnob' + band);
+  if (!wrap) return;
+
+  let dragging = false;
+  let startY = 0;
+  let startVal = 0;
+
+  function onPointerDown(e) {
+    e.preventDefault();
+    dragging = true;
+    startY = e.clientY;
+    startVal = eqKnobValues[band];
+    wrap.setPointerCapture(e.pointerId);
+  }
+
+  function onPointerMove(e) {
+    if (!dragging) return;
+    const dy = startY - e.clientY; // up = positive
+    const sensitivity = e.shiftKey ? 0.05 : 0.15; // finer with shift
+    let newVal = startVal + dy * sensitivity;
+    // Snap to 0.5 steps
+    newVal = Math.round(newVal * 2) / 2;
+    newVal = Math.max(EQ_KNOB_MIN, Math.min(EQ_KNOB_MAX, newVal));
+    setEqBand(band, newVal);
+  }
+
+  function onPointerUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    wrap.releasePointerCapture(e.pointerId);
+  }
+
+  wrap.addEventListener('pointerdown', onPointerDown);
+  wrap.addEventListener('pointermove', onPointerMove);
+  wrap.addEventListener('pointerup', onPointerUp);
+  wrap.addEventListener('pointercancel', onPointerUp);
+
+  // Double-click to reset
+  wrap.addEventListener('dblclick', () => {
+    setEqBand(band, 0);
+  });
+
+  // Mouse wheel
+  wrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const step = e.shiftKey ? 0.5 : 1;
+    const dir = e.deltaY < 0 ? 1 : -1;
+    let newVal = eqKnobValues[band] + dir * step;
+    newVal = Math.round(newVal * 2) / 2;
+    newVal = Math.max(EQ_KNOB_MIN, Math.min(EQ_KNOB_MAX, newVal));
+    setEqBand(band, newVal);
+  }, { passive: false });
+}
+
+function setEqBand(band, val) {
+  eqKnobValues[band] = val;
+  renderKnob(band, val);
+
+  const dbEl = document.getElementById('eqDb' + band);
+  const sign = val > 0 ? '+' : '';
+  dbEl.textContent = `${sign}${val.toFixed(val % 1 === 0 ? 0 : 1)} dB`;
+  dbEl.className = 'eq-db' + (val > 0 ? ' boosted' : val < 0 ? ' cut' : '');
+
+  if (eqFilters[band]) {
+    eqFilters[band].gain.value = val;
+  }
+  drawEqCurve();
+}
+
+function onEqSlider(band, val) {
+  // Legacy compat — redirect to knob system
+  setEqBand(band, Number(val));
+}
+
+function resetEq() {
+  for (let i = 0; i < EQ_BANDS.length; i++) {
+    setEqBand(i, 0);
+  }
+}
+
+// ── SPECTRUM ANALYZER ──
+
+function ensureSpectrumAnalyser() {
+  if (spectrumAnalyser) return true;
+  try {
+    const ctx = audioCtxRef || (typeof getAudioContext === 'function' ? getAudioContext() : null);
+    if (!ctx) return false;
+    spectrumAnalyser = ctx.createAnalyser();
+    spectrumAnalyser.fftSize = 1024;
+    spectrumAnalyser.smoothingTimeConstant = 0.75;
+    spectrumData = new Float32Array(spectrumAnalyser.frequencyBinCount);
+    // Tap it off the masterGain (post-EQ signal)
+    if (masterGain) {
+      masterGain.connect(spectrumAnalyser);
+    }
+    return true;
+  } catch(e) {
+    console.warn('[hermilinChat] Spectrum analyser setup failed:', e);
+    return false;
+  }
+}
+
+// Bar count and frequency band mapping — dynamic based on canvas width
+const SPECTRUM_BAR_TARGET_W = 8; // target bar width in CSS px, bands scale to fill
+// Map bands to log-spaced frequency ranges (20Hz – 20kHz)
+function getSpectrumBandRanges(numBands, sampleRate, binCount) {
+  const minF = 30, maxF = Math.min(18000, sampleRate / 2);
+  const bands = [];
+  for (let i = 0; i < numBands; i++) {
+    const f0 = minF * Math.pow(maxF / minF, i / numBands);
+    const f1 = minF * Math.pow(maxF / minF, (i + 1) / numBands);
+    const bin0 = Math.max(0, Math.floor(f0 / (sampleRate / 2) * binCount));
+    const bin1 = Math.min(binCount - 1, Math.ceil(f1 / (sampleRate / 2) * binCount));
+    bands.push({ f0, f1, bin0, bin1 });
+  }
+  return bands;
+}
+
+let spectrumPeaks = new Float32Array(128);
+let spectrumSmoothed = new Float32Array(128);
+let lastSpectrumBands = 0;
+
+function drawSpectrum() {
+  if (!eqOpen) { spectrumRunning = false; return; }
+  requestAnimationFrame(drawSpectrum);
+
+  const canvas = document.getElementById('spectrumCanvas');
+  if (!canvas) return;
+
+  // Size canvas to actual pixel dimensions
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(rect.width * dpr);
+  const h = Math.round(rect.height * dpr);
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+
+  // Get theme colors
+  const cs = getComputedStyle(document.documentElement);
+  const accentHex = cs.getPropertyValue('--theme-accent').trim() || '#4dffa1';
+  const elevatedHex = cs.getPropertyValue('--theme-elevated').trim() || '#1a201f';
+  const mutedHex = cs.getPropertyValue('--theme-muted').trim() || '#5a7a72';
+
+  // Calculate number of bands to fill width
+  const gapPx = 1.5 * dpr;
+  const numBands = Math.max(8, Math.floor(w / (SPECTRUM_BAR_TARGET_W * dpr + gapPx)));
+  const barW = (w - (numBands - 1) * gapPx) / numBands;
+
+  // Resize smoothing arrays if band count changed
+  if (numBands !== lastSpectrumBands) {
+    spectrumPeaks = new Float32Array(numBands);
+    spectrumSmoothed = new Float32Array(numBands);
+    lastSpectrumBands = numBands;
+  }
+
+  if (!spectrumAnalyser || !spectrumData) {
+    // Draw empty state — dim bars
+    for (let i = 0; i < numBands; i++) {
+      const x = i * (barW + gapPx);
+      ctx.fillStyle = elevatedHex;
+      ctx.fillRect(x, h * 0.85, barW, h * 0.15);
+    }
+    return;
+  }
+
+  spectrumAnalyser.getFloatFrequencyData(spectrumData);
+
+  const sampleRate = spectrumAnalyser.context.sampleRate;
+  const binCount = spectrumAnalyser.frequencyBinCount;
+  const bands = getSpectrumBandRanges(numBands, sampleRate, binCount);
+
+  const segH = Math.max(1, Math.round(2 * dpr));
+  const segGap = Math.max(1, Math.round(1.2 * dpr));
+  const maxSegs = Math.floor(h / (segH + segGap));
+  const minDb = -70, maxDb = -5;
+
+  // Parse accent color for gradient
+  const [ar, ag, ab] = hexToRgb(accentHex);
+
+  for (let i = 0; i < numBands; i++) {
+    const band = bands[i];
+    if (!band) continue;
+
+    // Average dB in this band's bin range
+    let sum = 0, count = 0;
+    for (let b = band.bin0; b <= band.bin1; b++) {
+      if (b < spectrumData.length) {
+        sum += spectrumData[b];
+        count++;
+      }
+    }
+    const avgDb = count > 0 ? sum / count : -100;
+
+    // Normalize 0..1
+    const raw = Math.max(0, Math.min(1, (avgDb - minDb) / (maxDb - minDb)));
+
+    // Smooth
+    spectrumSmoothed[i] += (raw - spectrumSmoothed[i]) * 0.35;
+    const val = spectrumSmoothed[i];
+
+    // Peak hold with decay
+    if (val > spectrumPeaks[i]) spectrumPeaks[i] = val;
+    else spectrumPeaks[i] = Math.max(0, spectrumPeaks[i] - 0.012);
+
+    const litSegs = Math.round(val * maxSegs);
+    const peakSeg = Math.round(spectrumPeaks[i] * maxSegs);
+    const x = i * (barW + gapPx);
+
+    // Draw segments bottom to top
+    for (let s = 0; s < maxSegs; s++) {
+      const y = h - (s + 1) * (segH + segGap);
+      if (s < litSegs) {
+        const ratio = s / maxSegs;
+        let r, g, b;
+        if (ratio < 0.6) {
+          const t = ratio / 0.6;
+          r = ar + Math.round((220 - ar) * t * 0.3);
+          g = ag;
+          b = ab - Math.round(ab * t * 0.5);
+        } else if (ratio < 0.82) {
+          const t = (ratio - 0.6) / 0.22;
+          r = Math.round(ar + (240 - ar) * t);
+          g = Math.round(ag + (192 - ag) * t * 0.5);
+          b = Math.round(ab * (1 - t));
+        } else {
+          r = 255;
+          g = Math.round(112 + (0 - 112) * ((ratio - 0.82) / 0.18));
+          b = Math.round(70 * (1 - (ratio - 0.82) / 0.18));
+        }
+        const alpha = 0.7 + 0.3 * ratio;
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+      } else if (s === peakSeg && peakSeg > 0) {
+        ctx.fillStyle = mutedHex;
+      } else {
+        ctx.fillStyle = `rgba(${parseInt(elevatedHex.slice(1,3),16)},${parseInt(elevatedHex.slice(3,5),16)},${parseInt(elevatedHex.slice(5,7),16)},0.35)`;
+      }
+      ctx.fillRect(x, y, barW, segH);
+    }
+  }
+}
+
+function drawEqCurve() {
+  // Now a no-op — spectrum runs on rAF loop instead
+}
+
+// ── SCROLLING WAVEFORM ──
+let scopeAnalyser = null;
+let scopeData = null;
+const WAVEFORM_COLS = 600; // number of columns in the scrolling buffer
+let waveformBuffer = []; // each entry: { peak, rms } for one time slice
+let waveformPlayhead = 0;
+
+function ensureScopeAnalyser() {
+  if (scopeAnalyser) return true;
+  try {
+    const ctx = audioCtxRef || (typeof getAudioContext === 'function' ? getAudioContext() : null);
+    if (!ctx) return false;
+    scopeAnalyser = ctx.createAnalyser();
+    scopeAnalyser.fftSize = 1024;
+    scopeAnalyser.smoothingTimeConstant = 0.3;
+    scopeData = new Float32Array(scopeAnalyser.fftSize);
+    if (masterGain) {
+      masterGain.connect(scopeAnalyser);
+    }
+    return true;
+  } catch(e) {
+    console.warn('[hermilinChat] Scope analyser setup failed:', e);
+    return false;
+  }
+}
+
+function captureWaveformSlice() {
+  if (!scopeAnalyser || !scopeData) return;
+  scopeAnalyser.getFloatTimeDomainData(scopeData);
+
+  let peak = 0, sumSq = 0;
+  for (let i = 0; i < scopeData.length; i++) {
+    const v = Math.abs(scopeData[i]);
+    if (v > peak) peak = v;
+    sumSq += scopeData[i] * scopeData[i];
+  }
+  const rms = Math.sqrt(sumSq / scopeData.length);
+
+  waveformBuffer.push({ peak: Math.min(1, peak), rms: Math.min(1, rms) });
+  if (waveformBuffer.length > WAVEFORM_COLS) {
+    waveformBuffer.shift();
+  }
+}
+
+function drawWaveform() {
+  const canvas = document.getElementById('scopeCanvas');
+  if (!canvas) return;
+
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(rect.width * dpr);
+  const h = Math.round(rect.height * dpr);
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+
+  const cs = getComputedStyle(document.documentElement);
+  const accentHex = cs.getPropertyValue('--theme-accent').trim() || '#4dffa1';
+  const elevatedHex = cs.getPropertyValue('--theme-elevated').trim() || '#1a201f';
+  const [ar, ag, ab] = hexToRgb(accentHex);
+
+  // Center line
+  ctx.strokeStyle = elevatedHex;
+  ctx.lineWidth = dpr;
+  ctx.beginPath();
+  ctx.moveTo(0, h / 2);
+  ctx.lineTo(w, h / 2);
+  ctx.stroke();
+
+  const bufLen = waveformBuffer.length;
+  if (bufLen === 0) return;
+
+  // How many columns to draw — map buffer onto canvas width
+  const colW = w / WAVEFORM_COLS;
+
+  // Draw from right (newest) to left (oldest)
+  for (let i = 0; i < bufLen; i++) {
+    const slice = waveformBuffer[i];
+    // Position: rightmost = newest
+    const x = w - (bufLen - i) * colW;
+    if (x + colW < 0) continue;
+
+    const cy = h / 2;
+
+    // RMS bar (filled, brighter)
+    const rmsH = slice.rms * h * 0.9;
+    ctx.fillStyle = `rgba(${ar},${ag},${ab},0.55)`;
+    ctx.fillRect(x, cy - rmsH / 2, Math.max(1, colW - 0.5 * dpr), rmsH);
+
+    // Peak bar (taller, dimmer)
+    const peakH = slice.peak * h * 0.95;
+    ctx.fillStyle = `rgba(${ar},${ag},${ab},0.2)`;
+    ctx.fillRect(x, cy - peakH / 2, Math.max(1, colW - 0.5 * dpr), peakH);
+  }
+
+  // Playhead line at right edge
+  ctx.strokeStyle = accentHex;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.moveTo(w - 1, 0);
+  ctx.lineTo(w - 1, h);
+  ctx.stroke();
+}
+
+function startSpectrum() {
+  if (spectrumRunning) return;
+  ensureSpectrumAnalyser();
+  spectrumRunning = true;
+  drawSpectrum();
+}
+
+function stopSpectrum() {
+  spectrumRunning = false;
+}
+
+// ── BOTTOM PANEL ──
+let panelOpen = false;
+let activeTab = 'console';
+
+function togglePanel() {
+  panelOpen = !panelOpen;
+  document.getElementById('bottom-panel').classList.toggle('open', panelOpen);
+  document.getElementById('btnPanel').classList.toggle('on', panelOpen);
+  if (panelOpen) {
+    updateInfoPanel();
+    fixEditorScroll();
+  } else {
+    fixEditorScroll();
+  }
+}
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.panel-tab[onclick*="${tab}"]`)?.classList.add('active');
+  document.getElementById('panelConsole').style.display = tab === 'console' ? '' : 'none';
+  document.getElementById('panelInfo').style.display = tab === 'info' ? '' : 'none';
+}
+
+// ── CONSOLE LOG ──
+const MAX_LOG_ENTRIES = 100;
+
+function addLog(msg, level = 'info') {
+  const container = document.getElementById('panelConsole');
+  // Remove the "Waiting" placeholder if it's there
+  const placeholder = container.querySelector('[style*="italic"]');
+  if (placeholder) placeholder.remove();
+
+  const entry = document.createElement('div');
+  entry.className = 'log-entry' + (level === 'error' ? ' error' : level === 'warn' ? ' warn' : '');
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  entry.innerHTML = `<span class="log-time">${ts}</span>${escapeHtml(String(msg))}`;
+  container.appendChild(entry);
+
+  // Trim old entries
+  while (container.children.length > MAX_LOG_ENTRIES) {
+    container.removeChild(container.firstChild);
+  }
+
+  // Auto-scroll
+  container.scrollTop = container.scrollHeight;
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Intercept console.error/warn to capture eval errors
+const _origError = console.error;
+const _origWarn = console.warn;
+console.error = function(...args) {
+  _origError.apply(console, args);
+  addLog(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '), 'error');
+};
+console.warn = function(...args) {
+  _origWarn.apply(console, args);
+  // Only capture strudel-related warnings, not our own
+  const msg = args.join(' ');
+  if (!msg.includes('[hermilinChat]')) {
+    addLog(msg, 'warn');
+  }
+};
+
+// Also catch global errors (eval failures etc.)
+window.addEventListener('error', (e) => {
+  addLog(`${e.message} (${e.filename}:${e.lineno})`, 'error');
+});
+window.addEventListener('unhandledrejection', (e) => {
+  addLog(`Unhandled: ${e.reason}`, 'error');
+});
+
+// ── INFO PANEL ──
+function updateInfoPanel() {
+  const bpm = Math.round(currentCps * 60 * 4);
+  document.getElementById('infoBpm').textContent = bpm;
+  document.getElementById('infoCps').textContent = currentCps.toFixed(3);
+  document.getElementById('infoLines').textContent = currentCodeSummary().line_count;
+  document.getElementById('infoStatus').textContent = isPlaying ? 'playing' : 'stopped';
+  document.getElementById('infoStatus').style.color = isPlaying ? 'var(--theme-success)' : 'var(--theme-muted)';
+}
+
+// Periodically update cycle info while playing
+setInterval(() => {
+  if (isPlaying) {
+    try {
+      const ctx = typeof getAudioContext === 'function' ? getAudioContext() : null;
+      if (ctx && currentCps > 0) {
+        const cycle = (ctx.currentTime * currentCps).toFixed(1);
+        document.getElementById('infoCycle').textContent = cycle;
+      }
+    } catch(e) {}
+    updateInfoPanel();
+  }
+}, 250);
+
+// Sync tempo when play is pressed
+const _origDoPlayFn = doPlay;
+doPlay = function() {
+  _origDoPlayFn();
+  syncTempoFromCode();
+  updateInfoPanel();
+};
+
+// ── AUDIO TELEMETRY ──
+// Captures a spectral + level snapshot for the AI agent
+
+function captureAudioSnapshot() {
+  const result = {
+    timestamp: Date.now(),
+    playing: isPlaying,
+    bpm: parseInt(document.getElementById('tempoSlider')?.value || '120'),
+    volume: parseInt(document.getElementById('volSlider')?.value || '80'),
+    eq: getEqState(),
+    spectrum: null,
+    levels: null,
+  };
+
+  // Spectrum data — average energy in musical frequency ranges
+  if (spectrumAnalyser && spectrumData) {
+    try {
+      spectrumAnalyser.getFloatFrequencyData(spectrumData);
+      const sr = spectrumAnalyser.context.sampleRate;
+      const binCount = spectrumAnalyser.frequencyBinCount;
+
+      // Musical ranges in Hz
+      const ranges = [
+        { name: 'sub',       lo: 20,    hi: 60    },
+        { name: 'bass',      lo: 60,    hi: 250   },
+        { name: 'low_mid',   lo: 250,   hi: 500   },
+        { name: 'mid',       lo: 500,   hi: 2000  },
+        { name: 'upper_mid', lo: 2000,  hi: 4000  },
+        { name: 'presence',  lo: 4000,  hi: 6000  },
+        { name: 'brilliance',lo: 6000,  hi: 12000 },
+        { name: 'air',       lo: 12000, hi: 20000 },
+      ];
+
+      const spectrum = {};
+      for (const range of ranges) {
+        const bin0 = Math.max(0, Math.floor(range.lo / (sr / 2) * binCount));
+        const bin1 = Math.min(binCount - 1, Math.ceil(range.hi / (sr / 2) * binCount));
+        let sum = 0, count = 0, peak = -Infinity;
+        for (let b = bin0; b <= bin1; b++) {
+          const val = spectrumData[b];
+          sum += val;
+          if (val > peak) peak = val;
+          count++;
+        }
+        spectrum[range.name] = {
+          avg_db: count > 0 ? Math.round((sum / count) * 10) / 10 : -100,
+          peak_db: Math.round(peak * 10) / 10,
+        };
+      }
+      result.spectrum = spectrum;
+    } catch(e) {
+      result.spectrum = null;
+    }
+  }
+
+  // Overall peak/RMS from the meter analyser
+  if (analyser && analyserData) {
+    try {
+      analyser.getFloatTimeDomainData(analyserData);
+      let peak = 0, sumSq = 0;
+      for (let i = 0; i < analyserData.length; i++) {
+        const v = Math.abs(analyserData[i]);
+        if (v > peak) peak = v;
+        sumSq += analyserData[i] * analyserData[i];
+      }
+      const rms = Math.sqrt(sumSq / analyserData.length);
+      const peakDb = peak > 0.0001 ? 20 * Math.log10(peak) : -100;
+      const rmsDb = rms > 0.0001 ? 20 * Math.log10(rms) : -100;
+      result.levels = {
+        peak_db: Math.round(peakDb * 10) / 10,
+        rms_db: Math.round(rmsDb * 10) / 10,
+        peak_linear: Math.round(peak * 1000) / 1000,
+        headroom_db: Math.round(-peakDb * 10) / 10,
+      };
+    } catch(e) {
+      result.levels = null;
+    }
+  }
+
+  return result;
+}
+
+function getEqState() {
+  return {
+    bands: EQ_BANDS.map((band, i) => ({
+      index: i,
+      freq: band.freq,
+      type: band.type,
+      label: band.label,
+      gain_db: eqKnobValues[i] || 0,
+    })),
+    any_active: eqKnobValues.some(v => Math.abs(v) > 0.01),
+  };
+}
+
+// ── AUTO-TELEMETRY: emit snapshot after each eval ──
+let telemetryEnabled = true;
+let lastEvalTime = 0;
+
+function emitPostEvalSnapshot() {
+  if (!telemetryEnabled || !isPlaying) return;
+  // Wait a moment for audio to settle, then capture
+  setTimeout(() => {
+    if (!isPlaying) return;
+    const snapshot = captureAudioSnapshot();
+    snapshot.trigger = 'post-eval';
+    emitHermesEvent('audio-snapshot', snapshot);
+  }, 1500);
+}
+
+// Hook into doPlay to auto-emit
+const _origDoPlay = doPlay;
+doPlay = function() {
+  _origDoPlay();
+  lastEvalTime = Date.now();
+  emitPostEvalSnapshot();
+};
 
 function handleHermesCommand(message) {
   if (!api) {
@@ -403,6 +1811,34 @@ function handleHermesCommand(message) {
         doStop();
         emitHermesEvent('ack', { action: command, ok: true, playing: false }, requestId);
         return;
+
+      case 'get-audio-snapshot': {
+        const snapshot = captureAudioSnapshot();
+        emitHermesEvent('audio-snapshot', snapshot, requestId);
+        return;
+      }
+
+      case 'get-eq-state': {
+        const eqState = getEqState();
+        emitHermesEvent('eq-state', eqState, requestId);
+        return;
+      }
+
+      case 'set-eq': {
+        // payload: { bands: [{ band: 0, gain: 3.5 }, ...] }
+        if (Array.isArray(payload.bands)) {
+          for (const b of payload.bands) {
+            if (typeof b.band === 'number' && typeof b.gain === 'number') {
+              const idx = Math.max(0, Math.min(EQ_BANDS.length - 1, b.band));
+              const gain = Math.max(EQ_KNOB_MIN, Math.min(EQ_KNOB_MAX, b.gain));
+              setEqBand(idx, gain);
+            }
+          }
+        }
+        emitHermesEvent('ack', { action: command, ok: true, eq: getEqState() }, requestId);
+        return;
+      }
+
       default:
         emitHermesEvent('error', { message: `Unknown command: ${command}` }, requestId);
     }
@@ -647,7 +2083,7 @@ function injectCMOverrides(colors, isLight) {
   }
 
   const css = `
-/* ── hermelinChat CM6 theme overrides (injected dynamically) ── */
+/* ── hermilinChat CM6 theme overrides (injected dynamically) ── */
 
 /* Editor chrome */
 .cm-editor { background: ${bgColor} !important; color: ${textColor} !important; }
@@ -684,7 +2120,7 @@ ${isLight ? `
 `;
 
   _cmOverrideStyle = document.createElement('style');
-  _cmOverrideStyle.id = 'hermelin-cm-overrides';
+  _cmOverrideStyle.id = 'hermilin-cm-overrides';
   _cmOverrideStyle.textContent = css;
   document.head.appendChild(_cmOverrideStyle);
 
@@ -696,7 +2132,7 @@ ${isLight ? `
   const content = cmEditor.querySelector('.cm-content');
   if (content) { content.style.color = ''; content.style.caretColor = ''; }
 
-  console.log('[hermelinChat] CM overrides injected, isLight:', isLight, 'overrides:', Object.keys(classToColor).length);
+  console.log('[hermilinChat] CM overrides injected, isLight:', isLight, 'overrides:', Object.keys(classToColor).length);
 }
 
 applyHermesTheme({ colors: THEME_DEFAULTS });
@@ -727,6 +2163,9 @@ const meterDbEl = document.getElementById('meterDb');
 let analyser = null;
 let analyserData = null;
 let meterRunning = false;
+let postFxInput = null;
+let audioCtxRef = null;
+let audioRoutingPatched = false;
 
 // Patch: intercept connections to audio destination so we can meter them
 function setupMeter() {
@@ -735,30 +2174,43 @@ function setupMeter() {
     if (!ctx) { setTimeout(setupMeter, 500); return; }
     if (analyser) return; // already set up
 
+    audioCtxRef = ctx;
     analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.65;
     analyserData = new Float32Array(analyser.fftSize);
 
-    // Insert analyser between everything and the destination:
-    // Monkey-patch connect() on all AudioNodes to also feed our analyser
-    const origConnect = AudioNode.prototype.connect;
-    AudioNode.prototype.connect = function(dest, ...args) {
-      const result = origConnect.call(this, dest, ...args);
-      // If something connects to the final destination, also connect to analyser
-      if (dest === ctx.destination) {
-        try { origConnect.call(this, analyser); } catch(e) {}
-      }
-      return result;
-    };
+    if (!masterGain) {
+      masterGain = ctx.createGain();
+      masterGain.gain.value = 0.64; // (80/100)^2 = 0.64, matches slider default of 80
+    }
+    if (!postFxInput) {
+      postFxInput = ctx.createGain();
+    }
+
+    setupEqFilters(ctx);
+    rebuildPostFxChain();
+
+    if (!audioRoutingPatched) {
+      const origConnect = AudioNode.prototype.connect;
+      AudioNode.prototype.connect = function(dest, ...args) {
+        const isInternal = this === masterGain || this === analyser || this === postFxInput || eqFilters.includes(this);
+        if (!isInternal && (dest === ctx.destination || dest === masterGain)) {
+          try { origConnect.call(this, postFxInput); } catch(e) {}
+          return dest;
+        }
+        return origConnect.call(this, dest, ...args);
+      };
+      audioRoutingPatched = true;
+    }
 
     if (!meterRunning) {
       meterRunning = true;
       meterLoop();
     }
-    console.log('[hermelinChat] Audio meter ready');
+    console.log('[hermilinChat] Audio meter + EQ + master gain ready');
   } catch(e) {
-    console.warn('[hermelinChat] Meter setup failed:', e);
+    console.warn('[hermilinChat] Meter setup failed:', e);
   }
 }
 
@@ -824,7 +2276,7 @@ function fixEditorScroll() {
     wrapper.style.overflow = 'hidden';
   }
 
-  console.log('[hermelinChat] Scroll fix applied, height:', h);
+  console.log('[hermilinChat] Scroll fix applied, height:', h);
   return true;
 }
 
