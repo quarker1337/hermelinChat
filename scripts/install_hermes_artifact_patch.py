@@ -20,7 +20,7 @@ ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 ARTIFACT_TOOLSETS_BLOCK = '''
     # hermelinChat artifact panel toolsets (installed by hermelinChat patch)
     "artifacts": {
-        "description": "Create and manage artifacts in hermelinChat's right-side artifact panel",
+        "description": "Create and manage artifacts in hermelinChat's right-side panel. Prefer artifacts over terminal output for large/rich content (tables, reports, logs, dashboards, code).",
         "tools": [
             "list_artifacts",
             "focus_artifact",
