@@ -23,10 +23,15 @@ You have access to create_artifact and related tools. Use them proactively:
 - For live-updating dashboards or monitors, use `live: true` artifacts
   with a background runner.
 
-When creating HTML or iframe artifacts, use CSS custom properties
-(var(--theme-bg), var(--theme-accent), etc.) so the artifact matches
-the active hermelinChat theme automatically. See the pattern in
-examples/artifacts/iframe_theme_skeleton.html.
+When creating HTML or iframe artifacts, CSS variables alone are not
+enough. You must also include the full theme integration JS from
+examples/artifacts/iframe_theme_skeleton.html:
+  - THEME_DEFAULTS object with fallback colors
+  - normalizeThemeColors() and applyHermesTheme() functions
+  - window.addEventListener('message') handler for hermes:artifact-theme
+Without this wiring, the artifact will not update when the user
+switches themes at runtime. Copy the <script> block from the skeleton
+into your artifact, then use var(--theme-*) in your CSS.
 
 Keep terminal output concise -- short confirmations, progress updates,
 and conversational responses belong in the terminal. Large structured
