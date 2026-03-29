@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>hermilinChat › Strudel</title>
+<title>hermelinChat › Strudel</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@strudel/repl@latest"></script>
 <style>
@@ -563,7 +563,7 @@
   <div id="editor-container">
     <strudel-editor id="repl">
 <!--
-// hermilinChat × Strudel
+// hermelinChat × Strudel
 // paste your pattern here, press ctrl+enter or ▶ Play
 setcps(0.5)
 
@@ -611,7 +611,7 @@ function emitHermesEvent(eventName, payload = {}, requestId = null) {
       }, '*');
     }
   } catch (e) {
-    console.warn('[hermilinChat] bridge emit failed:', e);
+    console.warn('[hermelinChat] bridge emit failed:', e);
   }
 }
 
@@ -649,7 +649,7 @@ function tryGetAPI() {
   const el = document.getElementById('repl');
   if (el && el.editor) {
     api = el.editor;
-    console.log('[hermilinChat] StrudelMirror API ready:', Object.keys(api));
+    console.log('[hermelinChat] StrudelMirror API ready:', Object.keys(api));
     if (!bridgeReadySent) {
       bridgeReadySent = true;
       emitHermesEvent('ready', {
@@ -977,9 +977,9 @@ function setupEqFilters(ctx = null) {
 
     if (postFxInput && masterGain && analyser) rebuildPostFxChain();
 
-    console.log('[hermilinChat] EQ filters ready');
+    console.log('[hermelinChat] EQ filters ready');
   } catch(e) {
-    console.warn('[hermilinChat] EQ setup failed:', e);
+    console.warn('[hermelinChat] EQ setup failed:', e);
   }
 }
 
@@ -1259,7 +1259,7 @@ function ensureSpectrumAnalyser() {
     }
     return true;
   } catch(e) {
-    console.warn('[hermilinChat] Spectrum analyser setup failed:', e);
+    console.warn('[hermelinChat] Spectrum analyser setup failed:', e);
     return false;
   }
 }
@@ -1433,7 +1433,7 @@ function ensureScopeAnalyser() {
     }
     return true;
   } catch(e) {
-    console.warn('[hermilinChat] Scope analyser setup failed:', e);
+    console.warn('[hermelinChat] Scope analyser setup failed:', e);
     return false;
   }
 }
@@ -1595,7 +1595,7 @@ console.warn = function(...args) {
   _origWarn.apply(console, args);
   // Only capture strudel-related warnings, not our own
   const msg = args.join(' ');
-  if (!msg.includes('[hermilinChat]')) {
+  if (!msg.includes('[hermelinChat]')) {
     addLog(msg, 'warn');
   }
 };
@@ -2083,7 +2083,7 @@ function injectCMOverrides(colors, isLight) {
   }
 
   const css = `
-/* ── hermilinChat CM6 theme overrides (injected dynamically) ── */
+/* ── hermelinChat CM6 theme overrides (injected dynamically) ── */
 
 /* Editor chrome */
 .cm-editor { background: ${bgColor} !important; color: ${textColor} !important; }
@@ -2120,7 +2120,7 @@ ${isLight ? `
 `;
 
   _cmOverrideStyle = document.createElement('style');
-  _cmOverrideStyle.id = 'hermilin-cm-overrides';
+  _cmOverrideStyle.id = 'hermelin-cm-overrides';
   _cmOverrideStyle.textContent = css;
   document.head.appendChild(_cmOverrideStyle);
 
@@ -2132,7 +2132,7 @@ ${isLight ? `
   const content = cmEditor.querySelector('.cm-content');
   if (content) { content.style.color = ''; content.style.caretColor = ''; }
 
-  console.log('[hermilinChat] CM overrides injected, isLight:', isLight, 'overrides:', Object.keys(classToColor).length);
+  console.log('[hermelinChat] CM overrides injected, isLight:', isLight, 'overrides:', Object.keys(classToColor).length);
 }
 
 applyHermesTheme({ colors: THEME_DEFAULTS });
@@ -2208,9 +2208,9 @@ function setupMeter() {
       meterRunning = true;
       meterLoop();
     }
-    console.log('[hermilinChat] Audio meter + EQ + master gain ready');
+    console.log('[hermelinChat] Audio meter + EQ + master gain ready');
   } catch(e) {
-    console.warn('[hermilinChat] Meter setup failed:', e);
+    console.warn('[hermelinChat] Meter setup failed:', e);
   }
 }
 
@@ -2276,7 +2276,7 @@ function fixEditorScroll() {
     wrapper.style.overflow = 'hidden';
   }
 
-  console.log('[hermilinChat] Scroll fix applied, height:', h);
+  console.log('[hermelinChat] Scroll fix applied, height:', h);
   return true;
 }
 
