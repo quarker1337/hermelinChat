@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hermelinChat › Artifact</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ── Theme CSS variables ──
+     These are the defaults (matrix theme).
+     hermelinChat will override them at runtime via postMessage when the
+     user switches themes. Your CSS should reference these variables
+     instead of hard-coding colors.
+  */
+  :root {
+    --theme-bg: #0c0f0e;
+    --theme-surface: #111514;
+    --theme-elevated: #1a201f;
+    --theme-border: #243230;
+    --theme-muted: #5a7a72;
+    --theme-text: #b8d4cb;
+    --theme-text-bright: #e2f0ea;
+    --theme-accent: #4dffa1;
+    --theme-accent-soft: #b7ffd6;
+    --theme-accent-muted: #2da565;
+    --theme-accent-strong: #1a6b3f;
+    --theme-success: #4dffa1;
+    --theme-warning: #f0c040;
+    --theme-danger: #ff7070;
+    /* Derived (computed by applyHermesTheme) */
+    --theme-bg-deep: #0a0d0c;
+    --theme-scrollbar: #2e4340;
+    --theme-scrollbar-hover: #5a7a72;
+    --theme-accent-surface: #0a2e1a;
+    --theme-danger-surface: #2a101033;
+    --theme-accent-glow: rgba(45, 165, 101, 0.27);
+    --theme-accent-glow-strong: rgba(77, 255, 161, 0.53);
+    --theme-success-glow: rgba(77, 255, 161, 0.27);
+    --theme-warning-glow: rgba(240, 192, 64, 0.40);
+    --theme-danger-glow: rgba(255, 112, 112, 0.40);
+  }
+
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: var(--theme-bg);
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--theme-text);
+  }
+
+  /* ── Example styles using theme variables ── */
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--theme-surface);
+    border-bottom: 1px solid var(--theme-border);
+    flex-shrink: 0;
+  }
+
+  .toolbar-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--theme-accent);
+  }
+
+  .btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--theme-border);
+    background: var(--theme-elevated);
+    color: var(--theme-text);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn:hover {
+    border-color: var(--theme-accent-muted);
+    color: var(--theme-accent);
+    background: var(--theme-accent-surface);
+  }
+
+  .content {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+  }
+
+  .card {
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+
+  .card-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--theme-text-bright);
+    margin-bottom: 8px;
+  }
+
+  .card-body {
+    font-size: 11px;
+    color: var(--theme-muted);
+    line-height: 1.5;
+  }
+
+  .status-ok { color: var(--theme-success); }
+  .status-warn { color: var(--theme-warning); }
+  .status-error { color: var(--theme-danger); }
+
+  .footer {
+    padding: 8px 14px;
+    font-size: 10px;
+    color: var(--theme-muted);
+    border-top: 1px solid var(--theme-border);
+    background: var(--theme-surface);
+    flex-shrink: 0;
+  }
+
+  /* Scrollbar theming */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--theme-scrollbar); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--theme-scrollbar-hover); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="toolbar">
+    <div class="toolbar-title">My Artifact</div>
+    <div style="flex:1"></div>
+    <button class="btn" onclick="alert('clicked')">Action</button>
+  </div>
+
+  <div class="content">
+    <div class="card">
+      <div class="card-title">Theme-aware card</div>
+      <div class="card-body">
+        This card uses <code>--theme-surface</code>, <code>--theme-border</code>,
+        and <code>--theme-text-bright</code>. It will automatically adapt when
+        hermelinChat sends a theme update.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Status colors</div>
+      <div class="card-body">
+        <span class="status-ok">● success</span> &nbsp;
+        <span class="status-warn">● warning</span> &nbsp;
+        <span class="status-error">● danger</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    theme: <span id="theme-label">default</span>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// hermelinChat theme integration
+//
+// Copy this block into any iframe artifact. It:
+//   1. Defines sensible default colors (matrix theme)
+//   2. Listens for `hermes:artifact-theme` messages from the parent
+//   3. Updates all CSS custom properties so your styles adapt instantly
+//
+// Your CSS should only use var(--theme-*) — never hard-code colors.
+// ═══════════════════════════════════════════════════════════════════
+
+const THEME_DEFAULTS = Object.freeze({
+  bg: '#0c0f0e',
+  surface: '#111514',
+  elevated: '#1a201f',
+  border: '#243230',
+  muted: '#5a7a72',
+  text: '#b8d4cb',
+  textBright: '#e2f0ea',
+  accent: '#4dffa1',
+  accentSoft: '#b7ffd6',
+  accentMuted: '#2da565',
+  accentStrong: '#1a6b3f',
+  success: '#4dffa1',
+  warning: '#f0c040',
+  danger: '#ff7070',
+});
+
+function hexToRgba(hex, alpha) {
+  const raw = String(hex || '').trim().replace(/^#/, '');
+  if (!raw) return `rgba(128, 128, 128, ${alpha})`;
+  const n = raw.length === 3
+    ? raw.split('').map(c => c + c).join('')
+    : raw.slice(0, 6);
+  if (n.length !== 6) return `rgba(128, 128, 128, ${alpha})`;
+  const int = Number.parseInt(n, 16);
+  if (Number.isNaN(int)) return `rgba(128, 128, 128, ${alpha})`;
+  return `rgba(${(int >> 16) & 255}, ${(int >> 8) & 255}, ${int & 255}, ${alpha})`;
+}
+
+function normalizeThemeColors(raw) {
+  const next = { ...THEME_DEFAULTS };
+  for (const [key, value] of Object.entries(raw || {})) {
+    if (typeof value === 'string' && value.trim()) next[key] = value.trim();
+  }
+  return next;
+}
+
+function applyHermesTheme(theme) {
+  const colors = normalizeThemeColors(theme?.colors);
+  const root = document.documentElement;
+
+  // Core palette
+  root.style.setProperty('--theme-bg', colors.bg);
+  root.style.setProperty('--theme-surface', colors.surface);
+  root.style.setProperty('--theme-elevated', colors.elevated);
+  root.style.setProperty('--theme-border', colors.border);
+  root.style.setProperty('--theme-muted', colors.muted);
+  root.style.setProperty('--theme-text', colors.text);
+  root.style.setProperty('--theme-text-bright', colors.textBright);
+  root.style.setProperty('--theme-accent', colors.accent);
+  root.style.setProperty('--theme-accent-soft', colors.accentSoft);
+  root.style.setProperty('--theme-accent-muted', colors.accentMuted);
+  root.style.setProperty('--theme-accent-strong', colors.accentStrong);
+  root.style.setProperty('--theme-success', colors.success);
+  root.style.setProperty('--theme-warning', colors.warning);
+  root.style.setProperty('--theme-danger', colors.danger);
+
+  // Derived
+  root.style.setProperty('--theme-bg-deep', hexToRgba(colors.bg, 0.82));
+  root.style.setProperty('--theme-scrollbar', hexToRgba(colors.muted, 0.55));
+  root.style.setProperty('--theme-scrollbar-hover', hexToRgba(colors.muted, 0.8));
+  root.style.setProperty('--theme-accent-surface', hexToRgba(colors.accentStrong, 0.22));
+  root.style.setProperty('--theme-danger-surface', hexToRgba(colors.danger, 0.14));
+  root.style.setProperty('--theme-accent-glow', hexToRgba(colors.accentMuted, 0.27));
+  root.style.setProperty('--theme-accent-glow-strong', hexToRgba(colors.accent, 0.53));
+  root.style.setProperty('--theme-success-glow', hexToRgba(colors.success, 0.27));
+  root.style.setProperty('--theme-warning-glow', hexToRgba(colors.warning, 0.4));
+  root.style.setProperty('--theme-danger-glow', hexToRgba(colors.danger, 0.4));
+
+  // Update UI label (optional, remove in your artifact)
+  const label = document.getElementById('theme-label');
+  if (label) label.textContent = theme?.id || theme?.label || 'custom';
+}
+
+// Apply defaults immediately
+applyHermesTheme({ colors: THEME_DEFAULTS });
+
+// Listen for live theme updates from hermelinChat
+window.addEventListener('message', (event) => {
+  const msg = event.data;
+  if (!msg || typeof msg !== 'object') return;
+  if (msg.type === 'hermes:artifact-theme') {
+    applyHermesTheme(msg.theme || null);
+  }
+});
+</script>
+</body>
+</html>
