@@ -8,6 +8,7 @@ import ArtifactPanel from './components/ArtifactPanel.jsx'
 import VideoFxOverlay from './components/VideoFxOverlay.jsx'
 
 import { AMBER, SLATE, DEFAULT_THEME_ID, THEME_OPTIONS, THEMES, normalizeThemeId, setActiveThemeId, hexToRgb } from './theme/index.js'
+import './fonts.css'
 
 // ─── UI PREFS (LOCAL) ───────────────────────────────────────────────
 // Stored in localStorage and applied instantly (no backend required).
@@ -20,7 +21,7 @@ const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
 const BACKGROUND_EFFECT_VALUES = ['auto', 'particles', 'matrix-rain', 'nous-crt', 'samaritan']
 
 // Release version (keep in sync with git tag + backend pyproject).
-const HERMELINCHAT_VERSION = '0.13'
+const HERMELINCHAT_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.13'
 
 const DEFAULT_UI_PREFS = {
   theme: DEFAULT_THEME_ID,
@@ -4975,7 +4976,6 @@ export default function App() {
       }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 4px }
         ::-webkit-scrollbar-track { background: transparent }
@@ -4993,6 +4993,9 @@ export default function App() {
         .xterm .composition-view {
           background: transparent !important;
         }
+
+        button.hm-btn { background: none; border: none; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: inherit; display: inline-flex; align-items: center; }
+        button.hm-btn:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
       `}</style>
 
       <div
@@ -5051,14 +5054,15 @@ export default function App() {
           )}
 
           {sidebarCollapsed ? (
-            <div
+            <button
+              className="hm-btn"
               onClick={() => setSidebarCollapsed(false)}
+              aria-label="Expand sidebar"
               title="Expand sidebar"
               style={{
                 width: 24,
                 height: 24,
                 borderRadius: 6,
-                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -5069,17 +5073,18 @@ export default function App() {
               onMouseLeave={(e) => (e.currentTarget.style.color = SLATE.muted)}
             >
               <SidebarDockIcon expand />
-            </div>
+            </button>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div
+              <button
+                className="hm-btn"
                 onClick={() => setSettingsOpen(true)}
+                aria-label="Settings"
                 title="Settings"
                 style={{
                   width: 24,
                   height: 24,
                   borderRadius: 6,
-                  cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -5090,15 +5095,16 @@ export default function App() {
                 onMouseLeave={(e) => (e.currentTarget.style.color = SLATE.muted)}
               >
                 <SettingsIcon />
-              </div>
-              <div
+              </button>
+              <button
+                className="hm-btn"
                 onClick={() => setSidebarCollapsed(true)}
+                aria-label="Collapse sidebar"
                 title="Collapse sidebar"
                 style={{
                   width: 24,
                   height: 24,
                   borderRadius: 6,
-                  cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -5109,7 +5115,7 @@ export default function App() {
                 onMouseLeave={(e) => (e.currentTarget.style.color = SLATE.muted)}
               >
                 <SidebarDockIcon />
-              </div>
+              </button>
             </div>
           )}
         </div>
@@ -5124,9 +5130,12 @@ export default function App() {
               gap: 10,
             }}
           >
-            <div
+            <button
+              className="hm-btn"
               onClick={startNewSession}
+              aria-label={auth.authenticated ? 'New session' : 'Login required'}
               title={auth.authenticated ? 'New session' : 'Login required'}
+              disabled={!auth.authenticated}
               style={{
                 width: 32,
                 height: 32,
@@ -5155,10 +5164,12 @@ export default function App() {
               }}
             >
               <PlusIcon size={18} />
-            </div>
+            </button>
 
-            <div
+            <button
+              className="hm-btn"
               onClick={() => setSettingsOpen(true)}
+              aria-label="Settings"
               title="Settings"
               style={{
                 width: 32,
@@ -5167,7 +5178,6 @@ export default function App() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                cursor: 'pointer',
                 color: SLATE.muted,
                 background: 'transparent',
                 border: '1px solid transparent',
@@ -5186,7 +5196,7 @@ export default function App() {
               }}
             >
               <SettingsIcon size={18} />
-            </div>
+            </button>
           </div>
         )}
 

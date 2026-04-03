@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import signal
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .default_artifacts import load_default_artifacts
+
+logger = logging.getLogger("hermelin.artifacts")
 
 
 ARTIFACT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -295,6 +298,7 @@ def cleanup_session_artifacts(root: Path) -> dict[str, Any]:
             try:
                 pid = int(pid_path.read_text(encoding="utf-8").strip())
             except Exception:
+                logger.warning("failed to read PID file %s", pid_path, exc_info=True)
                 pid = None
 
             if pid is not None and pid > 0:
@@ -315,14 +319,17 @@ def cleanup_session_artifacts(root: Path) -> dict[str, Any]:
                 except ProcessLookupError:
                     pass
                 except PermissionError:
+                    logger.warning("permission denied killing runner pid=%d", pid)
                     pass
                 except Exception:
+                    logger.warning("failed to kill runner pid=%d", pid, exc_info=True)
                     pass
 
             try:
                 pid_path.unlink()
                 pid_files_removed += 1
             except Exception:
+                logger.warning("failed to remove PID file %s", pid_path, exc_info=True)
                 pass
 
         runner_path = runners_dir / f"{artifact_id}_runner.py"
@@ -331,6 +338,7 @@ def cleanup_session_artifacts(root: Path) -> dict[str, Any]:
                 runner_path.unlink()
                 runner_scripts_removed += 1
             except Exception:
+                logger.warning("failed to remove runner script %s", runner_path, exc_info=True)
                 pass
 
     removed_artifacts = 0
@@ -341,6 +349,7 @@ def cleanup_session_artifacts(root: Path) -> dict[str, Any]:
             removed_artifacts += 1
             removed_ids.append(path.stem)
         except Exception:
+            logger.warning("failed to remove session artifact %s", path, exc_info=True)
             pass
 
     latest_removed = False
@@ -350,6 +359,7 @@ def cleanup_session_artifacts(root: Path) -> dict[str, Any]:
             latest_path.unlink()
             latest_removed = True
     except Exception:
+        logger.warning("failed to remove _latest.json", exc_info=True)
         pass
 
     return {

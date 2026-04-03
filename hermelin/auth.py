@@ -64,6 +64,7 @@ def create_session_token(*, secret: bytes, ttl_seconds: int) -> str:
     now = int(time.time())
     payload = {
         "v": 1,
+        "jti": secrets.token_hex(16),
         "iat": now,
         "exp": now + int(ttl_seconds),
     }
@@ -76,7 +77,7 @@ def create_session_token(*, secret: bytes, ttl_seconds: int) -> str:
     return f"{payload_b64}.{sig_b64}"
 
 
-def verify_session_token(*, token: str, secret: bytes) -> bool:
+def verify_session_token(*, token: str, secret: bytes, revoked_jtis: set | None = None) -> bool:
     if not token:
         return False
 
@@ -100,7 +101,26 @@ def verify_session_token(*, token: str, secret: bytes) -> bool:
     if exp <= int(time.time()):
         return False
 
+    jti = payload.get("jti")
+    if jti and revoked_jtis is not None and jti in revoked_jtis:
+        return False
+
     return True
+
+
+def extract_session_jti(*, token: str, secret: bytes) -> str | None:
+    """Extract JTI from a valid session token without full verification."""
+    if not token or "." not in token:
+        return None
+    payload_b64, sig_b64 = token.split(".", 1)
+    expected_sig = hmac.new(secret, payload_b64.encode("utf-8"), hashlib.sha256).digest()
+    if not hmac.compare_digest(_b64url_encode(expected_sig), sig_b64):
+        return None
+    try:
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+    except Exception:
+        return None
+    return payload.get("jti")
 
 
 def extract_cookie_value(cookie_header: str, name: str) -> Optional[str]:

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 from typing import Mapping
+
+logger = logging.getLogger("hermelin.security")
 
 
 def parse_allowlist(spec: str) -> list[ipaddress._BaseNetwork]:
@@ -30,17 +33,18 @@ def parse_allowlist(spec: str) -> list[ipaddress._BaseNetwork]:
                     nets.append(ipaddress.ip_network(f"{token}/128", strict=False))
         except ValueError:
             # Ignore bad entries; safer than accidentally allowing everything.
+            logger.warning("invalid IP allowlist entry ignored: %r", token)
             continue
 
     return nets
 
 
-def ip_allowed(ip: str, spec: str) -> bool:
+def ip_allowed(ip: str, spec: str, *, _nets: list | None = None) -> bool:
     spec = (spec or "").strip()
     if spec == "*":
         return True
 
-    nets = parse_allowlist(spec)
+    nets = _nets if _nets is not None else parse_allowlist(spec)
     if not nets:
         return False
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
@@ -454,13 +455,14 @@ function MarkdownArtifact({ artifact }) {
           border-radius: 6px;
         }
       `}</style>
-      <div className="artifact-markdown" dangerouslySetInnerHTML={{ __html: html }} />
+      <div className="artifact-markdown" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
     </div>
   )
 }
 
 function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
   const iframeRef = useRef(null)
+  const targetOrigin = src ? window.location.origin : '*'
   const activeTheme = getActiveTheme()
   const themeMessage = useMemo(
     () => ({
@@ -537,7 +539,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
           requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
           payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
         },
-        '*',
+        targetOrigin,
       )
       const commandId = command.command_id || command.commandId || null
       removeQueuedCommand(targetArtifactId || artifactId, commandId)
@@ -561,6 +563,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
       const frame = iframeRef.current
       const target = frame?.contentWindow
       if (!target || event.source !== target) return
+      if (src && event.origin !== window.location.origin) return
       const data = event.data
       if (!data || typeof data !== 'object' || data.type !== 'hermes:artifact-event') return
       const channel = String(data.channel || 'strudel')
@@ -603,7 +606,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
   useEffect(() => {
     const target = iframeRef.current?.contentWindow
     if (!target) return
-    target.postMessage(themeMessage, '*')
+    target.postMessage(themeMessage, targetOrigin)
   }, [themeMessage])
 
   return (
@@ -622,7 +625,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
             const queue = store && typeof store === 'object' && Array.isArray(store[key]) ? [...store[key]] : []
             const target = iframeRef.current?.contentWindow
             if (!target) return
-            target.postMessage(themeMessage, '*')
+            target.postMessage(themeMessage, targetOrigin)
             queue.forEach((command) => {
               target.postMessage(
                 {
@@ -633,7 +636,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
                   requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
                   payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
                 },
-                '*',
+                targetOrigin,
               )
             })
             if (store && typeof store === 'object') {
