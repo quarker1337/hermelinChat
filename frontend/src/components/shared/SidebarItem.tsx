@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { AMBER, SLATE } from '../../theme/index.js'
 
 interface SidebarItemProps {
-  label: string
+  label: React.ReactNode
   active?: boolean
   onClick?: () => void
 }

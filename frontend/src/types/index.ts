@@ -6,6 +6,7 @@ export interface Session {
   title_source?: string
   model?: string | null
   started_at?: number
+  started_at_iso?: string | null
 }
 
 export interface GroupedSessions {
@@ -23,7 +24,9 @@ export interface SearchHit {
   session_model?: string | null
   role?: string
   text?: string
+  snippet?: string
   timestamp?: number
+  timestamp_iso?: string | null
 }
 
 export interface SearchGroup {
@@ -97,16 +100,20 @@ export interface RuntimeInfo {
 
 // ─── Peek ──────────────────────────────────────────────────────────
 
+export interface PeekMessage {
+  id: string
+  role: string
+  content: string
+  content_truncated?: boolean
+  timestamp_iso?: string | null
+  is_target?: boolean
+}
+
 export interface PeekContext {
   session_id?: string
   session_title?: string
   session_model?: string | null
-  messages?: Array<{
-    id: string
-    role: string
-    text: string
-    timestamp?: number
-  }>
+  messages?: PeekMessage[]
 }
 
 export interface PeekState {
