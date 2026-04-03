@@ -26,9 +26,8 @@ import { SessionContextMenu } from './modals/SessionContextMenu'
 import { RenameSessionModal } from './modals/RenameSessionModal'
 import { DeleteSessionModal } from './modals/DeleteSessionModal'
 
-// Still .jsx — will be converted in Task 18
-import ArtifactPanel from './ArtifactPanel.jsx'
-import VideoFxOverlay from './VideoFxOverlay.jsx'
+import ArtifactPanel from './ArtifactPanel'
+import VideoFxOverlay from './VideoFxOverlay'
 
 // ─── Types ─────────────────────────────────────────────────────────
 import type { Session, SessionMenu } from '../types'

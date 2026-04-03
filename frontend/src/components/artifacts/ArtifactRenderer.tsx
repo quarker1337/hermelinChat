@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
+import type { Token } from 'marked'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
 import css from 'highlight.js/lib/languages/css'
@@ -16,9 +17,70 @@ import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
 import 'highlight.js/styles/github-dark.css'
 
-import { AMBER, SLATE, formatTimestamp, getActiveTheme, levelColor, semanticColor } from '../../theme/index'
+import { AMBER, SLATE, formatTimestamp, getActiveTheme, levelColor, semanticColor } from '../../theme/index.js'
+import type { ArtifactTab } from '../../types'
 
-const HLJS_LANGS = [
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface ArtifactProps {
+  artifact: ArtifactTab
+}
+
+interface HtmlLikeFrameProps {
+  srcDoc?: string
+  src?: string
+  title: string
+  artifactId?: string
+}
+
+interface ArtifactEmptyProps {
+  title: string
+  detail: string
+}
+
+interface JsonPreviewProps {
+  value: unknown
+}
+
+interface BridgeCommand {
+  artifact_id?: string
+  artifactId?: string
+  id?: string
+  tab_id?: string
+  channel?: string
+  command?: string
+  action?: string
+  request_id?: string
+  requestId?: string
+  command_id?: string
+  commandId?: string
+  payload?: Record<string, unknown>
+}
+
+interface RunnerTokenResult {
+  token: string
+  expiresAt: number
+  basePath: string
+}
+
+interface RunnerCacheEntry extends RunnerTokenResult {
+  pending?: undefined
+}
+
+interface RunnerCachePending {
+  pending: Promise<RunnerTokenResult>
+  token?: undefined
+}
+
+type RunnerCacheValue = RunnerCacheEntry | RunnerCachePending
+
+// ---------------------------------------------------------------------------
+// hljs setup
+// ---------------------------------------------------------------------------
+
+const HLJS_LANGS: [string, unknown][] = [
   ['bash', bash],
   ['css', css],
   ['go', go],
@@ -35,7 +97,7 @@ const HLJS_LANGS = [
 for (const [name, loader] of HLJS_LANGS) {
   try {
     if (!hljs.getLanguage(name)) {
-      hljs.registerLanguage(name, loader)
+      hljs.registerLanguage(name, loader as Parameters<typeof hljs.registerLanguage>[1])
     }
   } catch {
     // ignore
@@ -53,9 +115,15 @@ for (const [name, loader] of HLJS_LANGS) {
 const RUNNER_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '0.0.0.0', '::1'])
 
 // tab_id -> { token, expiresAt, basePath } OR { pending: Promise<...> }
-const runnerTokenCache = new Map()
+const runnerTokenCache = new Map<string, RunnerCacheValue>()
 
-function parseLocalRunnerSrc(src) {
+interface LocalRunnerParts {
+  path: string
+  search: string
+  hash: string
+}
+
+function parseLocalRunnerSrc(src: string): LocalRunnerParts | null {
   if (!src || typeof src !== 'string') return null
   try {
     const u = new URL(src)
@@ -71,13 +139,13 @@ function parseLocalRunnerSrc(src) {
   }
 }
 
-async function mintRunnerToken(tabId) {
+async function mintRunnerToken(tabId: string): Promise<RunnerTokenResult> {
   const now = Date.now() / 1000
   const cached = runnerTokenCache.get(tabId)
 
   if (cached && cached.token && cached.expiresAt && cached.basePath) {
     if (cached.expiresAt - now > 20) {
-      return cached
+      return cached as RunnerTokenResult
     }
   }
 
@@ -85,12 +153,12 @@ async function mintRunnerToken(tabId) {
     return await cached.pending
   }
 
-  const pending = (async () => {
+  const pending: Promise<RunnerTokenResult> = (async () => {
     const r = await fetch(`/api/runners/${encodeURIComponent(tabId)}/token`, { method: 'POST' })
-    const data = await r.json().catch(() => ({}))
-    if (!r.ok) throw new Error(data?.detail || `http ${r.status}`)
+    const data = await r.json().catch(() => ({})) as Record<string, unknown>
+    if (!r.ok) throw new Error((data?.detail as string) || `http ${r.status}`)
 
-    const out = {
+    const out: RunnerTokenResult = {
       token: String(data?.token || ''),
       expiresAt: Number(data?.expires_at || 0),
       basePath: String(data?.base_path || ''),
@@ -112,7 +180,11 @@ async function mintRunnerToken(tabId) {
   }
 }
 
-function ArtifactEmpty({ title, detail }) {
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function ArtifactEmpty({ title, detail }: ArtifactEmptyProps) {
   return (
     <div
       style={{
@@ -128,7 +200,7 @@ function ArtifactEmpty({ title, detail }) {
   )
 }
 
-function JsonPreview({ value }) {
+function JsonPreview({ value }: JsonPreviewProps) {
   return (
     <pre
       style={{
@@ -147,37 +219,44 @@ function JsonPreview({ value }) {
   )
 }
 
-function normalizeColumnsAndRows(data) {
-  const columns = Array.isArray(data?.columns) ? data.columns.map((col) => String(col)) : []
-  const rawRows = Array.isArray(data?.rows) ? data.rows : []
+interface NormalizedTableData {
+  columns: string[]
+  rows: unknown[][]
+}
+
+function normalizeColumnsAndRows(data: Record<string, unknown>): NormalizedTableData {
+  const columns = Array.isArray(data?.columns) ? (data.columns as unknown[]).map((col) => String(col)) : []
+  const rawRows = Array.isArray(data?.rows) ? (data.rows as unknown[]) : []
 
   if (!columns.length && rawRows.length && rawRows.every((row) => row && typeof row === 'object' && !Array.isArray(row))) {
     const inferredColumns = Array.from(
-      rawRows.reduce((set, row) => {
-        Object.keys(row).forEach((key) => set.add(key))
+      rawRows.reduce((set: Set<string>, row) => {
+        Object.keys(row as Record<string, unknown>).forEach((key) => set.add(key))
         return set
-      }, new Set()),
+      }, new Set<string>()),
     )
     return {
       columns: inferredColumns,
-      rows: rawRows.map((row) => inferredColumns.map((key) => row?.[key] ?? '')),
+      rows: rawRows.map((row) => inferredColumns.map((key) => (row as Record<string, unknown>)?.[key] ?? '')),
     }
   }
 
   return {
     columns,
     rows: rawRows.map((row) => {
-      if (Array.isArray(row)) return row
-      if (row && typeof row === 'object') return columns.map((key) => row?.[key] ?? '')
+      if (Array.isArray(row)) return row as unknown[]
+      if (row && typeof row === 'object') return columns.map((key) => (row as Record<string, unknown>)?.[key] ?? '')
       return [String(row ?? '')]
     }),
   }
 }
 
-function TableArtifact({ artifact }) {
-  const data = artifact?.data || {}
+function TableArtifact({ artifact }: ArtifactProps) {
+  const data = (artifact?.data as Record<string, unknown>) || {}
   const { columns, rows } = normalizeColumnsAndRows(data)
-  const highlightRules = data?.highlight_rules && typeof data.highlight_rules === 'object' ? data.highlight_rules : {}
+  const highlightRules = data?.highlight_rules && typeof data.highlight_rules === 'object'
+    ? (data.highlight_rules as Record<string, Record<string, string>>)
+    : {}
 
   if (!columns.length) {
     return <ArtifactEmpty title="Invalid table artifact" detail="Expected data.columns and data.rows." />
@@ -260,7 +339,7 @@ function TableArtifact({ artifact }) {
   )
 }
 
-function escapeHtml(text) {
+function escapeHtml(text: string): string {
   return String(text ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -273,7 +352,7 @@ function escapeHtml(text) {
 // Markdown rendering (marked + highlight.js)
 // ---------------------------------------------------------------------------
 
-const MARKDOWN_LANG_ALIASES = {
+const MARKDOWN_LANG_ALIASES: Record<string, string> = {
   sh: 'bash',
   shell: 'bash',
   zsh: 'bash',
@@ -285,13 +364,13 @@ const MARKDOWN_LANG_ALIASES = {
   html: 'xml',
 }
 
-function normalizeMarkdownLanguage(lang) {
+function normalizeMarkdownLanguage(lang: string): string {
   const raw = String(lang || '').trim().toLowerCase()
   if (!raw) return ''
   return MARKDOWN_LANG_ALIASES[raw] || raw
 }
 
-function sanitizeUrl(href) {
+function sanitizeUrl(href: string): string {
   const raw = String(href || '').trim()
   if (!raw) return ''
   const lower = raw.toLowerCase()
@@ -301,12 +380,12 @@ function sanitizeUrl(href) {
 
 const MARKDOWN_RENDERER = new marked.Renderer()
 
-MARKDOWN_RENDERER.html = ({ text }) => {
+MARKDOWN_RENDERER.html = ({ text }: { text: string }) => {
   // Disallow raw HTML passthrough.
   return escapeHtml(text)
 }
 
-MARKDOWN_RENDERER.link = function ({ href, title, tokens }) {
+MARKDOWN_RENDERER.link = function ({ href, title, tokens }: { href: string; title?: string | null; tokens: Token[] }) {
   const inner = this.parser.parseInline(tokens)
   const safe = sanitizeUrl(href)
   if (!safe) return inner
@@ -315,7 +394,7 @@ MARKDOWN_RENDERER.link = function ({ href, title, tokens }) {
   return `<a href="${escapeHtml(safe)}"${titleAttr} target="_blank" rel="noreferrer noopener">${inner}</a>`
 }
 
-MARKDOWN_RENDERER.image = ({ href, title, text }) => {
+MARKDOWN_RENDERER.image = ({ href, title, text }: { href: string; title?: string | null; text: string }) => {
   const safe = sanitizeUrl(href)
   const alt = escapeHtml(text || '')
   if (!safe) return alt
@@ -324,8 +403,8 @@ MARKDOWN_RENDERER.image = ({ href, title, text }) => {
   return `<img src="${escapeHtml(safe)}" alt="${alt}"${titleAttr} loading="lazy" />`
 }
 
-MARKDOWN_RENDERER.code = ({ text, lang }) => {
-  const language = normalizeMarkdownLanguage(lang)
+MARKDOWN_RENDERER.code = ({ text, lang }: { text: string; lang?: string }) => {
+  const language = normalizeMarkdownLanguage(lang || '')
   let highlighted = ''
 
   if (language && hljs.getLanguage(language)) {
@@ -342,23 +421,22 @@ MARKDOWN_RENDERER.code = ({ text, lang }) => {
   return `<pre><code class="hljs ${className}">${highlighted}</code></pre>`
 }
 
-function markdownToHtml(markdown) {
+function markdownToHtml(markdown: string): string {
   const source = String(markdown || '')
   try {
     return marked.parse(source, {
       renderer: MARKDOWN_RENDERER,
       gfm: true,
       breaks: false,
-      headerIds: false,
-      mangle: false,
-    })
+    }) as string
   } catch {
     return `<pre><code>${escapeHtml(source)}</code></pre>`
   }
 }
 
-function MarkdownArtifact({ artifact }) {
-  const content = String(artifact?.data?.content || '')
+function MarkdownArtifact({ artifact }: ArtifactProps) {
+  const data = artifact?.data as Record<string, unknown> | undefined
+  const content = String(data?.content || '')
   const html = useMemo(() => markdownToHtml(content), [content])
 
   if (!content) {
@@ -460,8 +538,8 @@ function MarkdownArtifact({ artifact }) {
   )
 }
 
-function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
-  const iframeRef = useRef(null)
+function HtmlLikeFrame({ srcDoc, src, title, artifactId }: HtmlLikeFrameProps) {
+  const iframeRef = useRef<HTMLIFrameElement>(null)
   const targetOrigin = src ? window.location.origin : '*'
   const activeTheme = getActiveTheme()
   const themeMessage = useMemo(
@@ -512,19 +590,19 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
   )
 
   useEffect(() => {
-    const removeQueuedCommand = (targetArtifactId, commandId) => {
+    const removeQueuedCommand = (targetArtifactId: string, commandId: string | null) => {
       if (typeof window === 'undefined' || !targetArtifactId || !commandId) return
-      const store = window.__hermesArtifactBridgeCommands
+      const store = (window as Window & { __hermesArtifactBridgeCommands?: Record<string, BridgeCommand[]> }).__hermesArtifactBridgeCommands
       if (!store || typeof store !== 'object') return
       const key = String(targetArtifactId)
-      const queue = Array.isArray(store[key]) ? store[key] : []
+      const queue: BridgeCommand[] = Array.isArray(store[key]) ? (store[key] as BridgeCommand[]) : []
       store[key] = queue.filter((item) => {
         const itemId = item?.command_id || item?.commandId || null
         return itemId !== commandId
       })
     }
 
-    const postCommandToIframe = (command) => {
+    const postCommandToIframe = (command: BridgeCommand): boolean => {
       const frame = iframeRef.current
       const target = frame?.contentWindow
       if (!target || !command || typeof command !== 'object') return false
@@ -542,13 +620,13 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
         targetOrigin,
       )
       const commandId = command.command_id || command.commandId || null
-      removeQueuedCommand(targetArtifactId || artifactId, commandId)
+      removeQueuedCommand((targetArtifactId || artifactId) as string, commandId || null)
       return true
     }
 
     const flushQueuedCommands = () => {
       if (typeof window === 'undefined') return
-      const store = window.__hermesArtifactBridgeCommands
+      const store = (window as Window & { __hermesArtifactBridgeCommands?: Record<string, BridgeCommand[]> }).__hermesArtifactBridgeCommands
       if (!store || typeof store !== 'object') return
       const keys = artifactId ? [String(artifactId)] : ['__global__']
       keys.forEach((key) => {
@@ -559,18 +637,18 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
       })
     }
 
-    const handleWindowMessage = (event) => {
+    const handleWindowMessage = (event: MessageEvent) => {
       const frame = iframeRef.current
       const target = frame?.contentWindow
       if (!target || event.source !== target) return
       if (src && event.origin !== window.location.origin) return
-      const data = event.data
+      const data = event.data as Record<string, unknown> | null
       if (!data || typeof data !== 'object' || data.type !== 'hermes:artifact-event') return
       const channel = String(data.channel || 'strudel')
       const eventName = String(data.event || '').trim()
       if (!eventName) return
       const payload = data.payload && typeof data.payload === 'object' ? data.payload : {}
-      const requestId = data.requestId || data.request_id || null
+      const requestId = (data.requestId || data.request_id) as string | null || null
       void fetch('/api/artifacts/bridge/event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -586,8 +664,8 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
       })
     }
 
-    const handleBridgeCommand = (event) => {
-      const command = event?.detail
+    const handleBridgeCommand = (event: Event) => {
+      const command = (event as CustomEvent<BridgeCommand>)?.detail
       if (!command || typeof command !== 'object') return
       postCommandToIframe(command)
     }
@@ -620,7 +698,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
         ref={iframeRef}
         onLoad={() => {
           try {
-            const store = window.__hermesArtifactBridgeCommands
+            const store = (window as Window & { __hermesArtifactBridgeCommands?: Record<string, BridgeCommand[]> }).__hermesArtifactBridgeCommands
             const key = artifactId ? String(artifactId) : '__global__'
             const queue = store && typeof store === 'object' && Array.isArray(store[key]) ? [...store[key]] : []
             const target = iframeRef.current?.contentWindow
@@ -659,8 +737,8 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }) {
   )
 }
 
-function HtmlArtifact({ artifact }) {
-  const data = artifact?.data || {}
+function HtmlArtifact({ artifact }: ArtifactProps) {
+  const data = (artifact?.data as Record<string, unknown>) || {}
   const html = typeof data?.html === 'string' ? data.html : typeof data?.srcdoc === 'string' ? data.srcdoc : ''
   if (!html) {
     return <ArtifactEmpty title="Invalid html artifact" detail="Expected data.html or data.srcdoc." />
@@ -668,16 +746,16 @@ function HtmlArtifact({ artifact }) {
   return <HtmlLikeFrame title={artifact?.title || 'HTML artifact'} srcDoc={html} artifactId={artifact?.id || ''} />
 }
 
-function IframeArtifact({ artifact }) {
-  const data = artifact?.data || {}
+function IframeArtifact({ artifact }: ArtifactProps) {
+  const data = (artifact?.data as Record<string, unknown>) || {}
   const rawSrc = typeof data?.src === 'string' ? data.src : ''
   const srcDoc = typeof data?.srcdoc === 'string' ? data.srcdoc : ''
   const tabId = typeof artifact?.id === 'string' ? artifact.id : ''
 
   const isLocalRunner = useMemo(() => parseLocalRunnerSrc(rawSrc), [rawSrc])
 
-  const [resolved, setResolved] = useState({ key: '', src: '' })
-  const [error, setError] = useState({ key: '', msg: '' })
+  const [resolved, setResolved] = useState<{ key: string; src: string }>({ key: '', src: '' })
+  const [error, setError] = useState<{ key: string; msg: string }>({ key: '', msg: '' })
 
   const runnerKey = `${tabId || ''}:${rawSrc || ''}`
   const resolvedSrc = resolved?.key === runnerKey ? resolved.src : ''
@@ -701,7 +779,7 @@ function IframeArtifact({ artifact }) {
           setError({ key: runnerKey, msg: '' })
         }
       } catch (err) {
-        const msg = err?.message ? String(err.message) : String(err)
+        const msg = err instanceof Error ? err.message : String(err)
         if (!cancelled) setError({ key: runnerKey, msg })
       }
     })()
@@ -735,11 +813,17 @@ function IframeArtifact({ artifact }) {
   return <HtmlLikeFrame title={artifact?.title || 'Iframe artifact'} src={rawSrc} srcDoc={srcDoc} artifactId={artifact?.id || ''} />
 }
 
-function LogsArtifact({ artifact }) {
+function LogsArtifact({ artifact }: ArtifactProps) {
   const [filter, setFilter] = useState('all')
-  const scrollRef = useRef(null)
-  const data = useMemo(() => (artifact?.data && typeof artifact.data === 'object' ? artifact.data : {}), [artifact])
-  const lines = useMemo(() => (Array.isArray(data?.lines) ? data.lines : []), [data])
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const data = useMemo(
+    () => (artifact?.data && typeof artifact.data === 'object' ? (artifact.data as Record<string, unknown>) : {}),
+    [artifact],
+  )
+  const lines = useMemo(
+    () => (Array.isArray(data?.lines) ? (data.lines as Record<string, unknown>[]) : []),
+    [data],
+  )
   const follow = data?.follow !== false
 
   const filtered = useMemo(() => {
@@ -812,8 +896,8 @@ function LogsArtifact({ artifact }) {
       >
         {filtered.map((line, index) => {
           const level = String(line?.level || '').toUpperCase()
-          const source = line?.source || line?.src || line?.unit || ''
-          const message = line?.msg || line?.message || ''
+          const source = (line?.source || line?.src || line?.unit || '') as string
+          const message = (line?.msg || line?.message || '') as string
           return (
             <div
               key={`${artifact?.id || 'logs'}-${index}`}
@@ -841,9 +925,15 @@ function LogsArtifact({ artifact }) {
   )
 }
 
-function chartSeriesData(data) {
-  const xAxis = Array.isArray(data?.x_axis) ? data.x_axis : []
-  const series = Array.isArray(data?.series) ? data.series : []
+interface ChartSeriesItem {
+  name?: string
+  color?: string
+  values?: unknown[]
+}
+
+function chartSeriesData(data: Record<string, unknown>) {
+  const xAxis = Array.isArray(data?.x_axis) ? (data.x_axis as unknown[]) : []
+  const series = Array.isArray(data?.series) ? (data.series as ChartSeriesItem[]) : []
   const count = Math.max(xAxis.length, ...series.map((item) => Array.isArray(item?.values) ? item.values.length : 0), 0)
   const numericValues = series.flatMap((item) => (Array.isArray(item?.values) ? item.values : []).map((v) => Number(v)).filter((v) => Number.isFinite(v)))
   const min = numericValues.length ? Math.min(...numericValues, 0) : 0
@@ -851,8 +941,11 @@ function chartSeriesData(data) {
   return { xAxis, series, count, min, max }
 }
 
-function ChartArtifact({ artifact }) {
-  const data = useMemo(() => (artifact?.data && typeof artifact.data === 'object' ? artifact.data : {}), [artifact])
+function ChartArtifact({ artifact }: ArtifactProps) {
+  const data = useMemo(
+    () => (artifact?.data && typeof artifact.data === 'object' ? (artifact.data as Record<string, unknown>) : {}),
+    [artifact],
+  )
   const chartType = String(data?.chart_type || 'line').toLowerCase()
   const { xAxis, series, count, min, max } = useMemo(() => chartSeriesData(data), [data])
 
@@ -867,16 +960,16 @@ function ChartArtifact({ artifact }) {
   const innerHeight = height - pad.top - pad.bottom
   const range = max - min || 1
 
-  const xForIndex = (index) => pad.left + (count <= 1 ? innerWidth / 2 : (index / (count - 1)) * innerWidth)
-  const yForValue = (value) => pad.top + innerHeight - (((Number(value) - min) / range) * innerHeight)
+  const xForIndex = (index: number) => pad.left + (count <= 1 ? innerWidth / 2 : (index / (count - 1)) * innerWidth)
+  const yForValue = (value: number) => pad.top + innerHeight - (((Number(value) - min) / range) * innerHeight)
 
   const xTickStep = Math.max(1, Math.ceil(count / 6))
   const yTicks = 4
 
-  const renderLineSeries = (item) => {
+  const renderLineSeries = (item: ChartSeriesItem) => {
     const values = Array.isArray(item?.values) ? item.values : []
     const color = item?.color || AMBER[400]
-    const points = values.map((value, index) => `${xForIndex(index)},${yForValue(value)}`).join(' ')
+    const points = values.map((value, index) => `${xForIndex(index)},${yForValue(Number(value))}`).join(' ')
     if (!points) return null
 
     if (chartType === 'area') {
@@ -974,7 +1067,14 @@ function ChartArtifact({ artifact }) {
   )
 }
 
-function markerBounds(markers) {
+interface MarkerItem {
+  lat?: unknown
+  lng?: unknown
+  label?: string
+  color?: string
+}
+
+function markerBounds(markers: MarkerItem[]) {
   const lats = markers.map((marker) => Number(marker?.lat)).filter((v) => Number.isFinite(v))
   const lngs = markers.map((marker) => Number(marker?.lng)).filter((v) => Number.isFinite(v))
   if (!lats.length || !lngs.length) return null
@@ -986,15 +1086,15 @@ function markerBounds(markers) {
   }
 }
 
-function MapArtifact({ artifact }) {
-  const data = artifact?.data || {}
+function MapArtifact({ artifact }: ArtifactProps) {
+  const data = (artifact?.data as Record<string, unknown>) || {}
   const floorPlan = typeof data?.floor_plan === 'string' ? data.floor_plan : typeof data?.svg === 'string' ? data.svg : ''
 
   if (floorPlan) {
     return <HtmlLikeFrame title={artifact?.title || 'Map artifact'} srcDoc={floorPlan} />
   }
 
-  const markers = Array.isArray(data?.markers) ? data.markers : []
+  const markers = Array.isArray(data?.markers) ? (data.markers as MarkerItem[]) : []
   const bounds = markerBounds(markers)
   if (!markers.length || !bounds) {
     return <ArtifactEmpty title="Invalid map artifact" detail="Expected data.markers or data.floor_plan." />
@@ -1077,14 +1177,22 @@ function MapArtifact({ artifact }) {
       </div>
 
       <div style={{ display: 'flex', gap: 10, marginTop: 10, fontSize: 10, color: SLATE.muted }}>
-        <span title={formatTimestamp(artifact?.timestamp)}>updated {formatTimestamp(artifact?.timestamp) || 'unknown'}</span>
-        {data?.center ? <span>{`center ${data.center.lat}, ${data.center.lng}`}</span> : null}
+        <span title={formatTimestamp(artifact?.timestamp as number | undefined)}>updated {formatTimestamp(artifact?.timestamp as number | undefined) || 'unknown'}</span>
+        {data?.center ? <span>{`center ${(data.center as Record<string, unknown>).lat}, ${(data.center as Record<string, unknown>).lng}`}</span> : null}
       </div>
     </div>
   )
 }
 
-export default function ArtifactRenderer({ artifact }) {
+// ---------------------------------------------------------------------------
+// Main export
+// ---------------------------------------------------------------------------
+
+export interface ArtifactRendererProps {
+  artifact: ArtifactTab
+}
+
+export default function ArtifactRenderer({ artifact }: ArtifactRendererProps) {
   const type = String(artifact?.type || '').toLowerCase()
 
   if (!artifact || typeof artifact !== 'object') {
