@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { useAuthStore } from '../../stores/auth'
 import { useSearchStore } from '../../stores/search'
 import { useUiPrefsStore } from '../../stores/ui-prefs'

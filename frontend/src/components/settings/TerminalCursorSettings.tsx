@@ -1,4 +1,4 @@
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import type { UiPrefs } from '../../types'
 
 // ─── Types ──────────────────────────────────────────────────────────

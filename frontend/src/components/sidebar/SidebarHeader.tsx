@@ -1,4 +1,4 @@
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { SidebarDockIcon, SettingsIcon } from '../shared/icons'
 import { useUiPrefsStore } from '../../stores/ui-prefs'
 

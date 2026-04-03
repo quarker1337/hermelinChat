@@ -1,4 +1,4 @@
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { useSessionStore } from '../../stores/sessions'
 import { useSearchStore } from '../../stores/search'
 import { useUiPrefsStore } from '../../stores/ui-prefs'

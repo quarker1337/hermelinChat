@@ -1,5 +1,5 @@
-import { SLATE } from '../../theme/index.js'
-import { THEME_OPTIONS } from '../../theme/index.js'
+import { SLATE } from '../../theme/index'
+import { THEME_OPTIONS } from '../../theme/index'
 import { DEFAULT_UI_PREFS } from '../../utils/ui-prefs'
 import type { UiPrefs } from '../../types'
 

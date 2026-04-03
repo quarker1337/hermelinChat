@@ -1,4 +1,4 @@
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { DEFAULT_UI_PREFS } from '../../utils/ui-prefs'
 import type { UiPrefs } from '../../types'
 

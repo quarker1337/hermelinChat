@@ -1,4 +1,4 @@
-import { AMBER } from '../../theme/index.js'
+import { AMBER } from '../../theme/index'
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)

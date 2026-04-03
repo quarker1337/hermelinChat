@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AMBER, SLATE } from '../theme/index.js'
+import { AMBER, SLATE } from '../theme/index'
 import { InlineSvgIcon } from './shared/icons'
 import { useToastStore } from '../stores/toast'
 

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AMBER, SLATE, hexToRgb } from '../../theme/index.js'
+import { AMBER, SLATE, hexToRgb } from '../../theme/index'
 
 interface SessionRowProps {
   title: string

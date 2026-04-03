@@ -3,7 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware'
 
 // Theme module is still plain JS — will be properly typed when theme/ converts
 // to TypeScript in Task 19.
-import { THEMES, DEFAULT_THEME_ID, normalizeThemeId, setActiveThemeId } from '../theme/index.js'
+import { THEMES, DEFAULT_THEME_ID, normalizeThemeId, setActiveThemeId } from '../theme/index'
 
 import {
   loadUiPrefs,

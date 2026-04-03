@@ -9,9 +9,64 @@ import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
 import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
 import SAMARITAN_FAVICON_URL from '../assets/samaritan-favicon.svg'
 
+export interface SlateColors {
+  bg: string
+  surface: string
+  elevated: string
+  border: string
+  muted: string
+  text: string
+  textBright: string
+  accent: string
+  danger: string
+  success: string
+  info: string
+  purple: string
+  cyan: string
+  [key: string]: string
+}
+
+export interface ThemeIcons {
+  faviconHref: string
+  favicons?: Array<{ rel: string; type?: string; sizes?: string; href: string }>
+  topbarSvgRaw: string
+  topbarSize?: number
+  alignmentSvgRaw: string
+  alignmentTitle: string
+  alignmentWhisperText: string
+  alignmentFetchWhisper: boolean
+}
+
+export interface ThemeBackground {
+  kind: string
+  overlay?: { kind: string; opacity: number }
+  matrixRain?: {
+    colWidth: number
+    fontSize: number
+    fadeAlpha: number
+    opacity: number
+    frameMs: number
+    speedBase: number
+    speedJitter: number
+    redChance: number
+    resetChance: number
+  }
+}
+
+export interface Theme {
+  id: string
+  label: string
+  AMBER: Record<string, string>
+  SLATE: SlateColors
+  background?: ThemeBackground
+  icons?: ThemeIcons
+  mascot?: Record<string, unknown>
+  whisper?: Record<string, unknown>
+}
+
 export const DEFAULT_THEME_ID = 'hermelin'
 
-export const THEMES = {
+export const THEMES: Record<string, Theme> = {
   hermelin: {
     id: 'hermelin',
     label: 'Hermelin (amber)',
@@ -216,9 +271,11 @@ export const THEMES = {
   },
 }
 
-export const THEME_OPTIONS = Object.values(THEMES).map((t) => ({ id: t.id, label: t.label }))
+export const THEME_OPTIONS: Array<{ id: string; value: string; label: string }> = Object.values(
+  THEMES,
+).map((t) => ({ id: t.id, value: t.id, label: t.label }))
 
-export function normalizeThemeId(raw) {
+export function normalizeThemeId(raw: unknown): string {
   const id = String(raw || '').trim()
   if (id && Object.prototype.hasOwnProperty.call(THEMES, id)) return id
   return DEFAULT_THEME_ID

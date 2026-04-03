@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { normalizeInlineSvg, svgViewBoxAspect } from '../../utils/svg'
 
 // ─── InvertelinSmall ────────────────────────────────────────────────

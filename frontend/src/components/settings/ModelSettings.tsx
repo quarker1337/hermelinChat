@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 
 // ─── Types ──────────────────────────────────────────────────────────
 

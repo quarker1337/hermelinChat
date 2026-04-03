@@ -1,4 +1,4 @@
-import { AMBER } from '../../theme/index.js'
+import { AMBER } from '../../theme/index'
 
 interface HighlightedSnippetProps {
   text: string

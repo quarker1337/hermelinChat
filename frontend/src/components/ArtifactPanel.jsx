@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import ArtifactRenderer from './artifacts/ArtifactRenderer.jsx'
-import { AMBER, SLATE, formatTimeAgo, formatTimestamp } from '../theme/index.js'
+import { AMBER, SLATE, formatTimeAgo, formatTimestamp } from '../theme/index'
 
 function IconButton({ title, onClick, children, active = false }) {
   return (

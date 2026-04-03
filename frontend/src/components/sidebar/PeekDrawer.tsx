@@ -1,4 +1,4 @@
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { HighlightedSnippet } from '../shared/HighlightedSnippet'
 import { formatModelLabel, isoToLocalLabel } from '../../utils/formatting'
 import type { SearchHit, PeekContext } from '../../types'

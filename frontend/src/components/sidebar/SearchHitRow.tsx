@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { HighlightedSnippet } from '../shared/HighlightedSnippet'
 import { isoToTimeLabel } from '../../utils/formatting'
 import type { SearchHit } from '../../types'

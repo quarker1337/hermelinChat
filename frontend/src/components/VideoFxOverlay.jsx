@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { AMBER, SLATE, hexToRgb } from '../theme/index.js'
+import { AMBER, SLATE, hexToRgb } from '../theme/index'
 
 function clampNum(n, min, max) {
   const x = Number(n)

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { normalizeUiPrefs, DEFAULT_UI_PREFS } from '../../utils/ui-prefs'
 import { CollapsiblePanel } from '../shared/CollapsiblePanel'
 import { SettingsIcon } from '../shared/icons'

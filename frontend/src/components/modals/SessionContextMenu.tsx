@@ -1,4 +1,4 @@
-import { SLATE } from '../../theme/index.js'
+import { SLATE } from '../../theme/index'
 import type { SessionMenu } from '../../types'
 
 interface SessionContextMenuProps {

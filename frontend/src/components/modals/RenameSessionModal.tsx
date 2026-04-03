@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 
 interface RenameSessionModalProps {
   session: { id: string; title: string }

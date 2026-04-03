@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { AMBER } from '../../theme/index.js'
+import { AMBER } from '../../theme/index'
 
 function clampNum(n: unknown, min: number, max: number): number {
   const x = Number(n)

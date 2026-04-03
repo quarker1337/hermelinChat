@@ -1,25 +1,25 @@
-import { DEFAULT_THEME_ID, THEMES, normalizeThemeId } from './themes.js'
+import { DEFAULT_THEME_ID, THEMES, normalizeThemeId, Theme } from './themes'
 
-let _activeThemeId = DEFAULT_THEME_ID
-let _activeTheme = THEMES[_activeThemeId]
+let _activeThemeId: string = DEFAULT_THEME_ID
+let _activeTheme: Theme = THEMES[_activeThemeId]
 
-export function getActiveThemeId() {
+export function getActiveThemeId(): string {
   return _activeThemeId
 }
 
-export function getActiveTheme() {
+export function getActiveTheme(): Theme {
   return _activeTheme
 }
 
-export function setActiveThemeId(raw) {
+export function setActiveThemeId(raw: unknown): string {
   const nextId = normalizeThemeId(raw)
   _activeThemeId = nextId
   _activeTheme = THEMES[nextId]
   return _activeThemeId
 }
 
-export const AMBER = new Proxy(
-  {},
+export const AMBER: Record<string, string> = new Proxy(
+  {} as Record<string, string>,
   {
     get(_target, prop) {
       if (prop === Symbol.toStringTag) return 'AMBER'
@@ -29,8 +29,8 @@ export const AMBER = new Proxy(
   },
 )
 
-export const SLATE = new Proxy(
-  {},
+export const SLATE: Record<string, string> = new Proxy(
+  {} as Record<string, string>,
   {
     get(_target, prop) {
       if (prop === Symbol.toStringTag) return 'SLATE'

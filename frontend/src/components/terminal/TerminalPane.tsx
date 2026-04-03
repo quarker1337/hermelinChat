@@ -8,7 +8,7 @@ import { buildWsUrl, stripAnsi } from './utils'
 import { handleControlMessage } from '../artifacts/bridge'
 import { useTerminalStore } from '../../stores/terminal'
 import { useUiPrefsStore } from '../../stores/ui-prefs'
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { CURSOR_STYLE_VALUES, DEFAULT_UI_PREFS } from '../../utils/ui-prefs'
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 import { useSearchStore } from '../../stores/search'
 import { useUiPrefsStore } from '../../stores/ui-prefs'
 import { isoToTimeLabel } from '../../utils/formatting'

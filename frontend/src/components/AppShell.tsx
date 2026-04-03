@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AMBER, SLATE } from '../theme/index.js'
+import { AMBER, SLATE } from '../theme/index'
 
 // ─── Stores ────────────────────────────────────────────────────────
 import { useAuthStore } from '../stores/auth'

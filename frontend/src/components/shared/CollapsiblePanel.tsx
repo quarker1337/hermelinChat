@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { AMBER, SLATE } from '../../theme/index.js'
+import { AMBER, SLATE } from '../../theme/index'
 
 interface CollapsiblePanelProps {
   title: string

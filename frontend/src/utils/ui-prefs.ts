@@ -1,4 +1,4 @@
-import { DEFAULT_THEME_ID, normalizeThemeId } from '../theme/index.js'
+import { DEFAULT_THEME_ID, normalizeThemeId } from '../theme/index'
 import type { UiPrefs } from '../types'
 
 // ─── Storage keys + defaults ────────────────────────────────────────────────
