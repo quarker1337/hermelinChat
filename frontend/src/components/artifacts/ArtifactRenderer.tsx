@@ -125,6 +125,9 @@ interface LocalRunnerParts {
 
 function parseLocalRunnerSrc(src: string): LocalRunnerParts | null {
   if (!src || typeof src !== 'string') return null
+  // Relative paths (e.g. /api/default-artifacts/...) are same-origin assets,
+  // not local runners that need proxying.
+  if (src.startsWith('/')) return null
   try {
     const u = new URL(src)
     const host = String(u.hostname || '').toLowerCase()
