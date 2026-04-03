@@ -693,7 +693,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }: HtmlLikeFrameProps) {
         title={title}
         src={src || undefined}
         srcDoc={srcDoc || undefined}
-        sandbox="allow-scripts allow-forms"
+        sandbox={src ? 'allow-scripts allow-forms allow-same-origin' : 'allow-scripts allow-forms'}
         referrerPolicy="no-referrer"
         ref={iframeRef}
         onLoad={() => {

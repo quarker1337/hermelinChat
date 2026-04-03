@@ -97,6 +97,10 @@ export function AppShell() {
     useSessionStore.getState().startPolling()
     useSessionStore.getState().fetchRuntimeInfo()
     useArtifactStore.getState().startPolling()
+    // Auto-spawn terminal on first auth (new session)
+    if (useTerminalStore.getState().state.phase === 'idle') {
+      useTerminalStore.getState().spawn(null)
+    }
     return () => {
       useSessionStore.getState().stopPolling()
       useArtifactStore.getState().stopPolling()
