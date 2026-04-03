@@ -246,10 +246,12 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         return verify_session_token(token=token, secret=cookie_secret, revoked_jtis=_revoked_jtis)
 
     def _is_public_path(path: str) -> bool:
-        # SPA + static: public. Guard /api (except /api/auth/*).
+        # SPA + static: public. Guard /api (except /api/auth/* and default artifact assets).
         if not path.startswith("/api"):
             return True
         if path.startswith("/api/auth/"):
+            return True
+        if path.startswith("/api/default-artifacts/"):
             return True
         return False
 
@@ -275,7 +277,11 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     async def _security_headers(request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        # Default artifact assets are served inside iframes — allow SAMEORIGIN for those.
+        if request.url.path.startswith("/api/default-artifacts/"):
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        else:
+            response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         if cookie_secure:
             response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
