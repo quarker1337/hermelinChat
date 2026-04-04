@@ -1,4 +1,4 @@
-export function hexToRgb(hex) {
+export function hexToRgb(hex: unknown): { r: number; g: number; b: number } | null {
   const raw = String(hex || '').trim().replace(/^#/, '')
   if (!raw) return null
 

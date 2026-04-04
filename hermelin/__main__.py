@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import logging
 import os
+import re
 from pathlib import Path
 
 import uvicorn
@@ -23,6 +25,21 @@ def _is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(h).is_loopback
     except ValueError:
         return False
+
+
+class _RunnerTokenFilter(logging.Filter):
+    """Redact runner bearer tokens from access log lines."""
+    _PATTERN = re.compile(r'(/r/[^/]+/_t/)[^\s/"]+')
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if hasattr(record, 'args') and isinstance(record.args, tuple):
+            record.args = tuple(
+                self._PATTERN.sub(r'\1[REDACTED]', str(a)) if isinstance(a, str) else a
+                for a in record.args
+            )
+        elif hasattr(record, 'msg') and isinstance(record.msg, str):
+            record.msg = self._PATTERN.sub(r'\1[REDACTED]', record.msg)
+        return True
 
 
 def main() -> None:
@@ -107,6 +124,7 @@ def main() -> None:
             print("Hint: configure HERMELIN_SSL_CERTFILE/HERMELIN_SSL_KEYFILE (default), or set HERMELIN_ALLOW_INSECURE_HTTP=1")
             raise SystemExit(1)
 
+        logging.getLogger("uvicorn.access").addFilter(_RunnerTokenFilter())
         uvicorn.run(
             "hermelin.server:create_app",
             factory=True,
@@ -145,6 +163,7 @@ def main() -> None:
 
     app = create_app(cfg)
 
+    logging.getLogger("uvicorn.access").addFilter(_RunnerTokenFilter())
     uvicorn.run(
         app,
         host=cfg.host,

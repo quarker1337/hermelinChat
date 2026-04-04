@@ -80,9 +80,8 @@ class StrudelEnvSyncTests(unittest.TestCase):
 
                 self.assertTrue(result['ok'])
                 self.assertTrue(result['items'][0]['enabled'])
-                runtime_info_route = _route_for_path(app, '/api/info', method='GET')
-                runtime_info = asyncio.run(runtime_info_route.endpoint())
-                self.assertIn('strudel', runtime_info['hermes_cmd'])
+                # Verify strudel is present in the config file (hermes_cmd no longer exposed via /api/info)
+
                 cfg_text = (hermes_home / 'config.yaml').read_text(encoding='utf-8')
                 self.assertIn('default_artifacts:\n    strudel: true', cfg_text)
                 self.assertIn('toolsets:\n    strudel: true', cfg_text)
@@ -92,8 +91,7 @@ class StrudelEnvSyncTests(unittest.TestCase):
                 result = asyncio.run(route.endpoint(payload={'items': [{'id': 'strudel', 'enabled': False}]}))
                 self.assertTrue(result['ok'])
                 self.assertFalse(result['items'][0]['enabled'])
-                runtime_info = asyncio.run(runtime_info_route.endpoint())
-                self.assertNotIn('strudel', runtime_info['hermes_cmd'])
+                # Verify strudel is absent in the config file (hermes_cmd no longer exposed via /api/info)
                 cfg_text = (hermes_home / 'config.yaml').read_text(encoding='utf-8')
                 self.assertIn('default_artifacts:\n    strudel: false', cfg_text)
                 self.assertIn('toolsets:\n    strudel: false', cfg_text)

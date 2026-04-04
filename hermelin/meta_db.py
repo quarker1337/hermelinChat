@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from pathlib import Path
 from typing import Iterable, Optional
+
+logger = logging.getLogger("hermelin.meta_db")
 
 
 _SCHEMA_SQL = """
@@ -41,6 +44,7 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     try:
         conn.execute("PRAGMA journal_mode=WAL")
     except Exception:
+        logger.debug("WAL pragma failed for %s", db_path, exc_info=True)
         pass
     return conn
 
@@ -111,6 +115,7 @@ def delete_title(db_path: Path, *, session_id: str) -> bool:
         try:
             return bool(cur.rowcount and cur.rowcount > 0)
         except Exception:
+            logger.debug("rowcount check failed for delete_title", exc_info=True)
             return False
 
 
@@ -140,6 +145,7 @@ def insert_whispers(db_path: Path, whispers: Iterable[str], source: str = "auto"
                 if cur.rowcount and cur.rowcount > 0:
                     inserted += 1
             except Exception:
+                logger.debug("failed to insert whisper: %s", s[:50], exc_info=True)
                 continue
         conn.commit()
 
@@ -166,6 +172,7 @@ def get_random_whisper(db_path: Path) -> Optional[str]:
             )
             conn.commit()
         except Exception:
+            logger.debug("failed to update whisper used_count", exc_info=True)
             pass
 
     return str(text) if text is not None else None

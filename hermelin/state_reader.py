@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger("hermelin.state_reader")
 
 
 def _ts_to_iso(ts: Optional[float]) -> Optional[str]:
@@ -139,10 +142,12 @@ def search_messages(
         rows = _run(query)
     except sqlite3.OperationalError:
         # Fallback to phrase query
+        logger.debug("FTS query failed, falling back to phrase search: %s", query, exc_info=True)
         safe = query.replace('"', '""')
         try:
             rows = _run(f'"{safe}"')
         except sqlite3.OperationalError:
+            logger.debug("FTS phrase fallback also failed: %s", query, exc_info=True)
             return []
 
     out: list[dict[str, Any]] = []

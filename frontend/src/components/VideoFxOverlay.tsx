@@ -2,17 +2,37 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { AMBER, SLATE, hexToRgb } from '../theme/index.js'
 
-function clampNum(n, min, max) {
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface VideoFxOverlayProps {
+  enabled?: boolean
+  intensity?: number
+  glitchNow?: boolean
+  glitchSeed?: number
+  zIndex?: number
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function clampNum(n: number, min: number, max: number): number {
   const x = Number(n)
   if (!Number.isFinite(x)) return min
   return Math.min(max, Math.max(min, x))
 }
 
-function frac(x) {
+function frac(x: number): number {
   const n = Number(x)
   if (!Number.isFinite(n)) return 0
   return n - Math.floor(n)
 }
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export default function VideoFxOverlay({
   enabled = false,
@@ -20,7 +40,7 @@ export default function VideoFxOverlay({
   glitchNow = false,
   glitchSeed = 0,
   zIndex = 999,
-}) {
+}: VideoFxOverlayProps) {
   const pct = clampNum(intensity, 0, 100)
   const f = enabled ? pct / 100 : 0
 
@@ -31,7 +51,7 @@ export default function VideoFxOverlay({
     if (!enabled || f <= 0) return
 
     let cancelled = false
-    let t = null
+    let t: ReturnType<typeof setTimeout> | null = null
 
     const schedule = () => {
       if (cancelled) return

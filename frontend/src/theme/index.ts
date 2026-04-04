@@ -1,10 +1,11 @@
-import { AMBER, SLATE } from './store.js'
+import { AMBER, SLATE } from './store'
 
-export { DEFAULT_THEME_ID, THEMES, THEME_OPTIONS, normalizeThemeId } from './themes.js'
-export { AMBER, SLATE, getActiveTheme, getActiveThemeId, setActiveThemeId } from './store.js'
-export { hexToRgb } from './utils.js'
+export { DEFAULT_THEME_ID, THEMES, THEME_OPTIONS, normalizeThemeId } from './themes'
+export type { Theme, SlateColors, ThemeIcons, ThemeBackground } from './themes'
+export { AMBER, SLATE, getActiveTheme, getActiveThemeId, setActiveThemeId } from './store'
+export { hexToRgb } from './utils'
 
-export function levelColor(level) {
+export function levelColor(level: unknown): string {
   const key = String(level || '').toUpperCase()
   if (key === 'ERROR' || key === 'ERR' || key === 'CRITICAL') return SLATE.danger
   if (key === 'WARN' || key === 'WARNING') return AMBER[400]
@@ -12,7 +13,7 @@ export function levelColor(level) {
   return SLATE.text
 }
 
-export function semanticColor(value) {
+export function semanticColor(value: unknown): string {
   const key = String(value || '').toLowerCase()
   if (key === 'danger' || key === 'error' || key === 'critical') return SLATE.danger
   if (key === 'success' || key === 'ok' || key === 'healthy') return SLATE.success
@@ -21,7 +22,7 @@ export function semanticColor(value) {
   return SLATE.text
 }
 
-export function formatTimeAgo(timestamp) {
+export function formatTimeAgo(timestamp: unknown): string {
   const value = Number(timestamp || 0)
   if (!Number.isFinite(value) || value <= 0) return 'unknown'
   const delta = Math.max(0, Math.round(Date.now() / 1000 - value))
@@ -35,7 +36,7 @@ export function formatTimeAgo(timestamp) {
   return `${days}d ago`
 }
 
-export function formatTimestamp(timestamp) {
+export function formatTimestamp(timestamp: unknown): string {
   const value = Number(timestamp || 0)
   if (!Number.isFinite(value) || value <= 0) return ''
   try {

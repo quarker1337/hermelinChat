@@ -1,9 +1,35 @@
 import { useEffect, useRef, useState } from 'react'
 
-import ArtifactRenderer from './artifacts/ArtifactRenderer.jsx'
+import ArtifactRenderer from './artifacts/ArtifactRenderer'
 import { AMBER, SLATE, formatTimeAgo, formatTimestamp } from '../theme/index.js'
+import type { ArtifactTab } from '../types'
 
-function IconButton({ title, onClick, children, active = false }) {
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+export interface ArtifactPanelProps {
+  width?: number
+  onResizeWidth?: (width: number) => void
+  artifacts: ArtifactTab[]
+  activeArtifactId: string | null
+  onSelectArtifact?: (id: string) => void
+  onClose?: () => void
+  onDeleteArtifact?: (id: string) => void
+}
+
+// ---------------------------------------------------------------------------
+// Icon sub-components
+// ---------------------------------------------------------------------------
+
+interface IconButtonProps {
+  title: string
+  onClick: () => void
+  children: React.ReactNode
+  active?: boolean
+}
+
+function IconButton({ title, onClick, children, active = false }: IconButtonProps) {
   return (
     <button
       type="button"
@@ -53,7 +79,11 @@ function InfoIcon() {
   )
 }
 
-function MaximizeIcon({ maximized }) {
+interface MaximizeIconProps {
+  maximized?: boolean
+}
+
+function MaximizeIcon({ maximized }: MaximizeIconProps) {
   if (maximized) {
     return (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -75,7 +105,11 @@ function MaximizeIcon({ maximized }) {
   )
 }
 
-function PinIcon({ pinned }) {
+interface PinIconProps {
+  pinned?: boolean
+}
+
+function PinIcon({ pinned }: PinIconProps) {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill={pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <path d="M12 17v5" />
@@ -85,7 +119,11 @@ function PinIcon({ pinned }) {
   )
 }
 
-function ChevronDownIcon({ open = false }) {
+interface ChevronDownIconProps {
+  open?: boolean
+}
+
+function ChevronDownIcon({ open = false }: ChevronDownIconProps) {
   return (
     <svg
       width="14"
@@ -107,7 +145,11 @@ function ChevronDownIcon({ open = false }) {
   )
 }
 
-function ArtifactTabIcon({ type }) {
+interface ArtifactTabIconProps {
+  type?: string
+}
+
+function ArtifactTabIcon({ type }: ArtifactTabIconProps) {
   const kind = String(type || '').toLowerCase()
 
   if (kind === 'table') {
@@ -189,6 +231,10 @@ function ArtifactTabIcon({ type }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export default function ArtifactPanel({
   width = 480,
   onResizeWidth,
@@ -197,24 +243,24 @@ export default function ArtifactPanel({
   onSelectArtifact,
   onClose,
   onDeleteArtifact,
-}) {
+}: ArtifactPanelProps) {
   const activeArtifact = artifacts.find((artifact) => artifact?.id === activeArtifactId) || artifacts[0] || null
 
   const [tabMenuOpen, setTabMenuOpen] = useState(false)
-  const triggerRef = useRef(null)
-  const menuRef = useRef(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!tabMenuOpen) return
 
-    const handlePointerDown = (event) => {
-      const target = event.target
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node
       if (menuRef.current && menuRef.current.contains(target)) return
       if (triggerRef.current && triggerRef.current.contains(target)) return
       setTabMenuOpen(false)
     }
 
-    const handleKeyDown = (event) => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setTabMenuOpen(false)
     }
 
@@ -228,7 +274,7 @@ export default function ArtifactPanel({
     }
   }, [tabMenuOpen])
 
-  const resizeCleanupRef = useRef(null)
+  const resizeCleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     return () => {
@@ -240,7 +286,7 @@ export default function ArtifactPanel({
     }
   }, [])
 
-  const handleResizePointerDown = (event) => {
+  const handleResizePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (!onResizeWidth) return
     if (typeof window === 'undefined') return
 
@@ -281,7 +327,7 @@ export default function ArtifactPanel({
       // ignore
     }
 
-    let raf = null
+    let raf: number | null = null
 
     const cleanup = () => {
       window.removeEventListener('pointermove', handleMove)
@@ -309,7 +355,7 @@ export default function ArtifactPanel({
       resizeCleanupRef.current = null
     }
 
-    const handleMove = (moveEvent) => {
+    const handleMove = (moveEvent: PointerEvent) => {
       // If we somehow miss pointerup (e.g. released outside window / iframe weirdness),
       // stop resizing as soon as the pointer is no longer pressed.
       if (typeof moveEvent.buttons === 'number' && moveEvent.buttons === 0) {
@@ -489,7 +535,7 @@ export default function ArtifactPanel({
 
             <div style={{ flex: 1 }} />
 
-            {activeArtifact?.live ? (
+            {(activeArtifact?.live as boolean | undefined) ? (
               <span
                 style={{
                   display: 'inline-flex',
@@ -514,7 +560,7 @@ export default function ArtifactPanel({
               </span>
             ) : null}
 
-            {activeArtifact?.persistent ? (
+            {(activeArtifact?.persistent as boolean | undefined) ? (
               <span
                 style={{
                   flexShrink: 0,
@@ -661,7 +707,7 @@ export default function ArtifactPanel({
                     {title}
                   </span>
 
-                  {artifact?.live ? (
+                  {(artifact?.live as boolean | undefined) ? (
                     <span
                       title="live"
                       style={{
@@ -675,7 +721,7 @@ export default function ArtifactPanel({
                     />
                   ) : null}
 
-                  {artifact?.persistent ? (
+                  {(artifact?.persistent as boolean | undefined) ? (
                     <span
                       style={{
                         flexShrink: 0,
@@ -731,7 +777,7 @@ export default function ArtifactPanel({
                       title="Delete"
                       aria-label="Delete"
                     >
-                      ×
+                      &times;
                     </button>
                   ) : null}
                 </button>
@@ -784,7 +830,7 @@ export default function ArtifactPanel({
             updated {formatTimeAgo(activeArtifact?.timestamp)}
           </span>
           <span>
-            {activeArtifact?.live ? `auto-refresh: ${Math.max(0, Number(activeArtifact?.refresh_seconds || 0))}s` : 'manual refresh'}
+            {(activeArtifact?.live as boolean | undefined) ? `auto-refresh: ${Math.max(0, Number(activeArtifact?.refresh_seconds || 0))}s` : 'manual refresh'}
           </span>
         </div>
       ) : null}
