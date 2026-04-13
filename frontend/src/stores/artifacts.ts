@@ -18,6 +18,9 @@ let _tabsRef: ArtifactTab[] = []
 // Polling interval handle
 let _pollInterval: ReturnType<typeof setInterval> | null = null
 
+// Track whether the global resize listener has been attached
+let _panelResizeListenerAttached = false
+
 // Debounce handle for panel-width localStorage save
 let _widthSaveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -267,3 +270,17 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
     })
   },
 }))
+
+function ensureArtifactPanelResizeSync() {
+  if (_panelResizeListenerAttached || typeof window === 'undefined') return
+
+  const handleResize = () => {
+    const { panelWidth, setPanelWidth } = useArtifactStore.getState()
+    setPanelWidth(panelWidth)
+  }
+
+  window.addEventListener('resize', handleResize)
+  _panelResizeListenerAttached = true
+}
+
+ensureArtifactPanelResizeSync()

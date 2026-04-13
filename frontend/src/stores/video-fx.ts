@@ -174,23 +174,29 @@ export const useVideoFxStore = create<VideoFxStore>()(
 // Subscribe to ui-prefs changes to sync enabled/factor and start/stop loop
 // ---------------------------------------------------------------------------
 
+function syncVideoFxFromPrefs() {
+  const store = useVideoFxStore.getState()
+  store.recompute()
+
+  const prefs = useUiPrefsStore.getState().prefs
+  const vxPrefs = prefs.videoFx || { enabled: false, intensity: 65, glitchPulses: true }
+  const intensity = Math.min(100, Math.max(0, Number(vxPrefs.intensity ?? 65)))
+  const enabled = !!vxPrefs.enabled && intensity > 0
+  const glitchPulses = enabled && !!vxPrefs.glitchPulses
+
+  if (glitchPulses) {
+    store.stopGlitchLoop()
+    store.startGlitchLoop()
+  } else {
+    store.stopGlitchLoop()
+  }
+}
+
 useUiPrefsStore.subscribe(
   (s) => s.prefs.videoFx,
   () => {
-    const store = useVideoFxStore.getState()
-    store.recompute()
-
-    const prefs = useUiPrefsStore.getState().prefs
-    const vxPrefs = prefs.videoFx || { enabled: false, intensity: 65, glitchPulses: true }
-    const intensity = Math.min(100, Math.max(0, Number(vxPrefs.intensity ?? 65)))
-    const enabled = !!vxPrefs.enabled && intensity > 0
-    const glitchPulses = enabled && !!vxPrefs.glitchPulses
-
-    if (glitchPulses) {
-      store.stopGlitchLoop()
-      store.startGlitchLoop()
-    } else {
-      store.stopGlitchLoop()
-    }
+    syncVideoFxFromPrefs()
   }
 )
+
+syncVideoFxFromPrefs()

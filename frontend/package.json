@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:regressions": "rm -rf /tmp/hermelin-frontend-cjs && tsc -p tsconfig.json --noEmit false --module commonjs --moduleResolution node --ignoreDeprecations 6.0 --rootDir src --outDir /tmp/hermelin-frontend-cjs && NODE_PATH=$PWD/node_modules node --test tests/*.test.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

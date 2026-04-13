@@ -14,7 +14,7 @@ interface TerminalStore {
   state: TerminalState
   spawnNonce: number
   spawn: (resumeId: string | null) => void
-  onConnectionChange: (isUp: boolean) => void
+  onConnectionChange: (isUp: boolean, nonce?: number) => void
   onDetectedSessionId: (sid: string) => void
   reset: () => void
 }
@@ -44,8 +44,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   // -------------------------------------------------------------------------
   // onConnectionChange — called when the WS connects or disconnects
   // -------------------------------------------------------------------------
-  onConnectionChange: (isUp: boolean) => {
-    const { state } = get()
+  onConnectionChange: (isUp: boolean, nonce?: number) => {
+    const { state, spawnNonce } = get()
+
+    if (nonce !== undefined && nonce !== spawnNonce) {
+      return
+    }
 
     if (!isUp) {
       set({ state: { phase: 'idle' } })

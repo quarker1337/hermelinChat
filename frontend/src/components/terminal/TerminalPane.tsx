@@ -375,18 +375,20 @@ export default function TerminalPane() {
         }
       })
 
+      const connectionNonce = spawnNonce
+
       ws.onopen = () => {
-        onConnectionChange(true)
+        onConnectionChange(true, connectionNonce)
         // initial fit + resize
         setTimeout(sendResize, 10)
       }
 
       ws.onclose = () => {
-        onConnectionChange(false)
+        onConnectionChange(false, connectionNonce)
       }
 
       ws.onerror = () => {
-        onConnectionChange(false)
+        onConnectionChange(false, connectionNonce)
       }
 
       ws.onmessage = (ev: MessageEvent) => {

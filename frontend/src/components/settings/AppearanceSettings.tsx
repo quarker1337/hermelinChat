@@ -1,4 +1,4 @@
-import { SLATE } from '../../theme/index'
+import { AMBER, SLATE } from '../../theme/index'
 import { THEME_OPTIONS } from '../../theme/index'
 import { DEFAULT_UI_PREFS } from '../../utils/ui-prefs'
 import type { UiPrefs } from '../../types'
@@ -93,7 +93,7 @@ export const AppearanceSettings = ({ ui, onUpdate }: AppearanceSettingsProps) =>
               timestamps: { ...prev.timestamps, enabled: e.target.checked },
             }))
           }}
-          style={{ accentColor: '#f5b731' }}
+          style={{ accentColor: AMBER[400] }}
         />
       </div>
     </>

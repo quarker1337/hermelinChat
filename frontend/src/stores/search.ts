@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { SearchHit, SearchGroup, PeekState } from '../types'
+import { apiCall, ApiError } from '../api/client'
 import { useAuthStore } from './auth'
-import { apiCall } from '../api/client'
+import { useArtifactStore } from './artifacts'
 import { registerSearchStore } from './sessions'
 
 // ---------------------------------------------------------------------------
@@ -189,6 +190,8 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
   openPeek: async (hit: SearchHit) => {
     if (!useAuthStore.getState().authenticated) return
     if (!hit?.id) return
+
+    useArtifactStore.setState({ panelOpen: false })
 
     set({
       peek: {

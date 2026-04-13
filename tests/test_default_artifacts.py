@@ -13,7 +13,7 @@ from hermelin.server import create_app
 
 
 DEFAULT_STRUDEL_SRC = "/api/default-artifacts/strudel/index.html"
-ARTIFACT_RENDERER_SRC = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "artifacts" / "ArtifactRenderer.jsx"
+ARTIFACT_RENDERER_SRC = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "artifacts" / "ArtifactRenderer.tsx"
 
 
 def _load_artifact_tool_module():
