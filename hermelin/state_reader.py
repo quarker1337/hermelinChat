@@ -45,18 +45,22 @@ def list_sessions(
     with connect_db(db_path) as conn:
         params: list[Any] = []
         sql = (
-            "SELECT s.id, s.source, s.user_id, s.model, s.started_at, s.ended_at, s.end_reason, "
-            "s.message_count, s.tool_call_count, s.input_tokens, s.output_tokens, "
+            "SELECT s.id, s.source, s.user_id, s.model, s.parent_session_id, s.title AS session_title, "
+            "s.started_at, s.ended_at, s.end_reason, s.message_count, s.tool_call_count, "
+            "s.input_tokens, s.output_tokens, "
             "(SELECT m.content FROM messages m "
             "   WHERE m.session_id = s.id AND m.role = 'user' AND m.content IS NOT NULL AND m.content != '' "
             "   ORDER BY m.timestamp ASC LIMIT 1) AS first_user_message, "
             "(SELECT m.content FROM messages m "
             "   WHERE m.session_id = s.id AND m.role IN ('user','assistant') AND m.content IS NOT NULL AND m.content != '' "
             "   ORDER BY m.timestamp DESC LIMIT 1) AS last_message "
-            "FROM sessions s"
+            "FROM sessions s "
+            "WHERE NOT EXISTS ("
+            "   SELECT 1 FROM sessions child WHERE child.parent_session_id = s.id"
+            ")"
         )
         if source:
-            sql += " WHERE s.source = ?"
+            sql += " AND s.source = ?"
             params.append(source)
 
         sql += " ORDER BY s.started_at DESC LIMIT ? OFFSET ?"
@@ -69,7 +73,7 @@ def list_sessions(
         first_user = r["first_user_message"]
         last_msg = r["last_message"]
 
-        title = _truncate_one_line(first_user, 60) or r["id"]
+        title = _truncate_one_line(r["session_title"], 60) or _truncate_one_line(first_user, 60) or r["id"]
         preview = _truncate_one_line(last_msg, 80)
 
         out.append(
@@ -78,6 +82,7 @@ def list_sessions(
                 "source": r["source"],
                 "user_id": r["user_id"],
                 "model": r["model"],
+                "parent_session_id": r["parent_session_id"],
                 "started_at": r["started_at"],
                 "started_at_iso": _ts_to_iso(r["started_at"]),
                 "ended_at": r["ended_at"],
