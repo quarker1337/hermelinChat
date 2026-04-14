@@ -10,6 +10,8 @@ import NOUS_GIRL_BIG_URL from '../assets/nous-girl-big.png'
 
 import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
 import SAMARITAN_FAVICON_URL from '../assets/samaritan-favicon.svg'
+import SAMARITAN_TOPBAR_URL from '../assets/samaritan-topbar.png'
+import SAMARITAN_MASCOT_URL from '../assets/samaritan-mascot.png'
 
 export interface SlateColors {
   bg: string
@@ -264,7 +266,7 @@ export const THEMES: Record<string, Theme> = {
 
   samaritan: {
     id: 'samaritan',
-    label: 'Samaritan (light)',
+    label: 'Samaritan (warm)',
     AMBER: {
       // Keep the token name AMBER for compatibility; in this theme it represents the accent scale.
       300: '#e06666',
@@ -290,11 +292,22 @@ export const THEMES: Record<string, Theme> = {
       purple: '#a78bfa',
       cyan: '#22d3ee',
       yellow: '#cc3333',
+      gold: '#c8a848',
     },
     icons: {
       faviconHref: SAMARITAN_FAVICON_URL,
       topbarSvgRaw: SAMARITAN_MARK_RAW,
+      topbarImageHref: SAMARITAN_TOPBAR_URL,
+      topbarWidth: 48,
+      topbarHeight: 48,
       alignmentSvgRaw: SAMARITAN_MARK_RAW,
+      alignmentImageHref: SAMARITAN_MASCOT_URL,
+      alignmentWidth: 56,
+      alignmentHeight: 56,
+      alignmentAlwaysVisible: true,
+      alignmentBob: true,
+      alignmentBobDurationMs: 3600,
+      alignmentBobDistancePx: 2,
       alignmentTitle: 'samaritan',
       alignmentWhisperText: 'the machine sees you…',
       alignmentFetchWhisper: false,

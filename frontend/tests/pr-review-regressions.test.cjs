@@ -289,3 +289,16 @@ test('alignment easter egg supports always-on bobbing artwork', () => {
   assert.match(source, /bob\?: boolean/)
   assert.match(source, /@keyframes eggBob/)
 })
+
+test('samaritan theme uses warm palette and sprite artwork', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  const { THEMES } = loadCompiled('theme/themes.js')
+
+  assert.equal(THEMES.samaritan.SLATE.bg, '#e8e6e1')
+  assert.equal(THEMES.samaritan.SLATE.accent, '#cc3333')
+  assert.match(THEMES.samaritan.icons.topbarImageHref || '', /samaritan-topbar\.png$/)
+  assert.match(THEMES.samaritan.icons.alignmentImageHref || '', /samaritan-mascot\.png$/)
+  assert.equal(THEMES.samaritan.icons.alignmentAlwaysVisible, true)
+  assert.equal(THEMES.samaritan.icons.alignmentBob, true)
+})
