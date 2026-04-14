@@ -127,6 +127,29 @@ test('terminal store ignores stale disconnects from an earlier spawn cycle', () 
   assert.equal(useTerminalStore.getState().state.phase, 'detecting')
 })
 
+test('terminal store keeps resumeId when a resumed session echoes its session id', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useSessionStore } = loadCompiled('stores/sessions.js')
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useSessionStore.getState().reset()
+  useTerminalStore.getState().reset()
+
+  useTerminalStore.getState().spawn('20260413_134408_76e00f')
+  const nonce = useTerminalStore.getState().spawnNonce
+  useTerminalStore.getState().onConnectionChange(true, nonce)
+  useTerminalStore.getState().onDetectedSessionId('20260413_134408_76e00f')
+
+  assert.deepEqual(useTerminalStore.getState().state, {
+    phase: 'connected',
+    resumeId: '20260413_134408_76e00f',
+  })
+  assert.equal(useSessionStore.getState().activeSessionId, '20260413_134408_76e00f')
+})
+
 test('video fx store applies saved prefs immediately on startup', () => {
   installAssetStubs()
   clearCompiledModules()

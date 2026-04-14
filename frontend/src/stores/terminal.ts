@@ -90,6 +90,15 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
     if (state.phase !== 'detecting' && state.phase !== 'connected') return
 
+    if (state.phase === 'connected' && state.resumeId !== null) {
+      // Resume flows already know which session they requested. If the backend later
+      // echoes the same "Session: ..." line, keep the resumeId instead of clearing it.
+      // Clearing it causes TerminalPane's websocket effect to reconnect without the
+      // ?resume=... query param, which starts a fresh session and drops the resumed one.
+      useSessionStore.getState().setActiveSessionId(sid)
+      return
+    }
+
     set({ state: { phase: 'connected', resumeId: null } })
     useSessionStore.getState().setActiveSessionId(sid)
   },
