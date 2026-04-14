@@ -236,3 +236,34 @@ test('appearance settings uses the active theme accent for timestamps', () => {
   assert.match(source, /accentColor:\s*AMBER\[400\]/)
   assert.ok(!source.includes("accentColor: '#f5b731'"))
 })
+
+test('nous theme uses dusk palette and sprite artwork', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  const { THEMES } = loadCompiled('theme/themes.js')
+
+  assert.equal(THEMES.nous.SLATE.bg, '#0e1028')
+  assert.equal(THEMES.nous.SLATE.accent, '#88b8f0')
+  assert.match(THEMES.nous.icons.topbarImageHref || '', /nous-girl-big\.png$/)
+  assert.match(THEMES.nous.icons.alignmentImageHref || '', /nous-girl\.png$/)
+})
+
+test('theme icon renders image markup when imageHref is provided', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  const React = require('react')
+  const ReactDOMServer = require('react-dom/server')
+  const { ThemeIcon } = loadCompiled('components/shared/icons.js')
+
+  const html = ReactDOMServer.renderToStaticMarkup(
+    React.createElement(ThemeIcon, {
+      imageHref: '/assets/nous-girl.png',
+      title: 'nous girl',
+      width: 64,
+      height: 64,
+    }),
+  )
+
+  assert.match(html, /<img/)
+  assert.match(html, /nous-girl\.png/)
+})

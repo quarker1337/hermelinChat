@@ -5,6 +5,8 @@ import WHITE_RABBIT_RAW from '../assets/white-rabbit.svg?raw'
 import NOUS_ALIGNMENT_RAW from '../assets/nous-alignment.svg?raw'
 import NOUS_MARK_RAW from '../assets/nous-alignment-flipped.svg?raw'
 import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
+import NOUS_GIRL_URL from '../assets/nous-girl.png'
+import NOUS_GIRL_BIG_URL from '../assets/nous-girl-big.png'
 
 import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
 import SAMARITAN_FAVICON_URL from '../assets/samaritan-favicon.svg'
@@ -30,8 +32,15 @@ export interface ThemeIcons {
   faviconHref: string
   favicons?: Array<{ rel: string; type?: string; sizes?: string; href: string }>
   topbarSvgRaw: string
+  topbarImageHref?: string
   topbarSize?: number
+  topbarWidth?: number
+  topbarHeight?: number
   alignmentSvgRaw: string
+  alignmentImageHref?: string
+  alignmentSize?: number
+  alignmentWidth?: number
+  alignmentHeight?: number
   alignmentTitle: string
   alignmentWhisperText: string
   alignmentFetchWhisper: boolean
@@ -188,42 +197,54 @@ export const THEMES: Record<string, Theme> = {
 
   nous: {
     id: 'nous',
-    label: 'Nous (aqua)',
+    label: 'Nous (dusk)',
     AMBER: {
-      300: '#9ae1f2',
-      400: '#5cc8e6',
-      500: '#3aa8c8',
-      600: '#2a88a8',
-      700: '#1e6888',
-      800: '#144868',
-      900: '#0a2838',
+      // Keep the token name AMBER for compatibility; in this theme it represents the accent scale.
+      300: '#b7ccff',
+      400: '#88b8f0',
+      500: '#68a0d0',
+      600: '#5888c0',
+      700: '#3868a0',
+      800: '#244c78',
+      900: '#16284a',
     },
     SLATE: {
-      bg: '#06181e',
-      surface: '#0a2028',
-      elevated: '#0e2830',
-      border: '#1a3a44',
-      muted: '#4a7a88',
-      text: '#8acade',
-      textBright: '#c0e8f4',
-      accent: '#5cc8e6',
-      danger: '#e84057',
-      success: '#38c878',
-      info: '#5cc8e6',
+      bg: '#0e1028',
+      surface: '#141838',
+      elevated: '#1c2248',
+      border: '#2e3860',
+      muted: '#6878a0',
+      text: '#a0b0d0',
+      textBright: '#d0d8f0',
+      accent: '#88b8f0',
+      danger: '#d08888',
+      success: '#80c088',
+      info: '#68a0d0',
       purple: '#a78bfa',
-      cyan: '#22d3ee',
+      cyan: '#68a0d0',
+      yellow: '#e0c868',
+      teal: '#68a0d0',
+      tealDim: '#3868a0',
+      rose: '#d08888',
+      green: '#80c088',
     },
     icons: {
       faviconHref: NOUS_MARK_URL,
       topbarSvgRaw: NOUS_MARK_RAW,
+      topbarImageHref: NOUS_GIRL_BIG_URL,
+      topbarWidth: 71,
+      topbarHeight: 34,
       alignmentSvgRaw: NOUS_ALIGNMENT_RAW,
+      alignmentImageHref: NOUS_GIRL_URL,
+      alignmentWidth: 40,
+      alignmentHeight: 40,
       alignmentTitle: 'nous research',
-      alignmentWhisperText: 'aligned to nous…',
+      alignmentWhisperText: 'nous · research · aligned',
       alignmentFetchWhisper: true,
     },
     background: {
       kind: 'nous-crt',
-      overlay: { kind: 'grain', opacity: 0.03 },
+      overlay: { kind: 'grain', opacity: 0.025 },
     },
   },
 

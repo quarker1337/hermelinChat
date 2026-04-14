@@ -19,7 +19,7 @@ import { Sidebar } from './sidebar/Sidebar'
 import { BackgroundRenderer } from './backgrounds/BackgroundRenderer'
 import TerminalPane from './terminal/TerminalPane'
 import { AlignmentEasterEgg } from './AlignmentEasterEgg'
-import { InlineSvgIcon } from './shared/icons'
+import { ThemeIcon } from './shared/icons'
 import { SettingsPanel } from './settings/SettingsPanel'
 import { LoginScreen } from './modals/LoginScreen'
 import { SessionContextMenu } from './modals/SessionContextMenu'
@@ -304,7 +304,14 @@ export function AppShell() {
               backdropFilter: 'blur(8px)',
             }}
           >
-            <InlineSvgIcon svgRaw={activeTheme?.icons?.topbarSvgRaw} size={activeTheme?.icons?.topbarSize ?? 18} />
+            <ThemeIcon
+              svgRaw={activeTheme?.icons?.topbarSvgRaw}
+              imageHref={activeTheme?.icons?.topbarImageHref}
+              size={activeTheme?.icons?.topbarSize ?? 18}
+              width={activeTheme?.icons?.topbarWidth}
+              height={activeTheme?.icons?.topbarHeight}
+              title={activeTheme?.label}
+            />
             <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
             <span style={{ fontSize: 11, color: SLATE.muted }}>
               {authLoading
@@ -360,9 +367,13 @@ export function AppShell() {
                   <TerminalPane />
                   <AlignmentEasterEgg
                     svgRaw={activeTheme?.icons?.alignmentSvgRaw}
+                    imageHref={activeTheme?.icons?.alignmentImageHref}
                     title={activeTheme?.icons?.alignmentTitle}
                     whisperText={activeTheme?.icons?.alignmentWhisperText}
-                    fetchFromApi={activeTheme?.icons?.alignmentFetchWhisper ?? true}
+                    fetchFromApi={activeTheme?.icons?.alignmentFetchWhisper}
+                    size={activeTheme?.icons?.alignmentSize ?? 18}
+                    width={activeTheme?.icons?.alignmentWidth}
+                    height={activeTheme?.icons?.alignmentHeight}
                   />
                 </>
               ) : (

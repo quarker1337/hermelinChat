@@ -29,6 +29,13 @@ interface InlineSvgIconProps {
   title?: string
 }
 
+interface ThemeIconProps extends InlineSvgIconProps {
+  imageHref?: string
+  width?: number
+  height?: number
+  pixelated?: boolean
+}
+
 export const InlineSvgIcon = ({
   svgRaw,
   size = 18,
@@ -52,6 +59,37 @@ export const InlineSvgIcon = ({
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )
+}
+
+export const ThemeIcon = ({
+  svgRaw,
+  imageHref,
+  size = 18,
+  width,
+  height,
+  color = AMBER[400],
+  title = '',
+  pixelated = true,
+}: ThemeIconProps) => {
+  if (imageHref) {
+    return (
+      <img
+        src={imageHref}
+        width={width ?? size}
+        height={height ?? size}
+        title={title || undefined}
+        alt=""
+        draggable={false}
+        style={{
+          display: 'block',
+          imageRendering: pixelated ? 'pixelated' : 'auto',
+          flexShrink: 0,
+        }}
+      />
+    )
+  }
+
+  return <InlineSvgIcon svgRaw={svgRaw} size={size} color={color} title={title} />
 }
 
 // ─── SidebarDockIcon ────────────────────────────────────────────────

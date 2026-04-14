@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AMBER, SLATE } from '../theme/index'
-import { InlineSvgIcon } from './shared/icons'
+import { ThemeIcon } from './shared/icons'
 import { useToastStore } from '../stores/toast'
 
 // ---------------------------------------------------------------------------
@@ -9,9 +9,13 @@ import { useToastStore } from '../stores/toast'
 
 interface AlignmentEasterEggProps {
   svgRaw?: string
+  imageHref?: string
   title?: string
   whisperText?: string
   fetchFromApi?: boolean
+  size?: number
+  width?: number
+  height?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -20,9 +24,13 @@ interface AlignmentEasterEggProps {
 
 export const AlignmentEasterEgg = ({
   svgRaw,
+  imageHref,
   title,
   whisperText,
   fetchFromApi = true,
+  size = 18,
+  width,
+  height,
 }: AlignmentEasterEggProps) => {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState(false)
@@ -94,7 +102,7 @@ export const AlignmentEasterEgg = ({
       }}
       title={title || 'the stout knows\u2026'}
     >
-      <InlineSvgIcon svgRaw={svgRaw} size={18} />
+      <ThemeIcon svgRaw={svgRaw} imageHref={imageHref} size={size} width={width} height={height} title={title} />
 
       {toastActive && (
         <div
