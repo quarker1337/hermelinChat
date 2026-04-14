@@ -34,6 +34,8 @@ interface ThemeIconProps extends InlineSvgIconProps {
   width?: number
   height?: number
   pixelated?: boolean
+  tintColor?: string
+  tintOpacity?: number
 }
 
 export const InlineSvgIcon = ({
@@ -70,22 +72,52 @@ export const ThemeIcon = ({
   color = AMBER[400],
   title = '',
   pixelated = true,
+  tintColor,
+  tintOpacity = 0.25,
 }: ThemeIconProps) => {
   if (imageHref) {
+    const w = width ?? size
+    const h = height ?? size
     return (
-      <img
-        src={imageHref}
-        width={width ?? size}
-        height={height ?? size}
-        title={title || undefined}
-        alt=""
-        draggable={false}
+      <span
         style={{
-          display: 'block',
-          imageRendering: pixelated ? 'pixelated' : 'auto',
+          position: 'relative',
+          display: 'inline-block',
+          width: w,
+          height: h,
           flexShrink: 0,
+          lineHeight: 0,
         }}
-      />
+        title={title || undefined}
+      >
+        <img
+          src={imageHref}
+          width={w}
+          height={h}
+          alt=""
+          draggable={false}
+          style={{
+            display: 'block',
+            width: w,
+            height: h,
+            imageRendering: pixelated ? 'pixelated' : 'auto',
+            flexShrink: 0,
+          }}
+        />
+        {tintColor ? (
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: tintColor,
+              opacity: tintOpacity,
+              mixBlendMode: 'color',
+              pointerEvents: 'none',
+            }}
+          />
+        ) : null}
+      </span>
     )
   }
 

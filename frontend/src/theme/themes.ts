@@ -33,6 +33,8 @@ export interface ThemeIcons {
   favicons?: Array<{ rel: string; type?: string; sizes?: string; href: string }>
   topbarSvgRaw: string
   topbarImageHref?: string
+  topbarTintColor?: string
+  topbarTintOpacity?: number
   topbarSize?: number
   topbarWidth?: number
   topbarHeight?: number
@@ -41,6 +43,10 @@ export interface ThemeIcons {
   alignmentSize?: number
   alignmentWidth?: number
   alignmentHeight?: number
+  alignmentAlwaysVisible?: boolean
+  alignmentBob?: boolean
+  alignmentBobDurationMs?: number
+  alignmentBobDistancePx?: number
   alignmentTitle: string
   alignmentWhisperText: string
   alignmentFetchWhisper: boolean
@@ -232,12 +238,18 @@ export const THEMES: Record<string, Theme> = {
       faviconHref: NOUS_MARK_URL,
       topbarSvgRaw: NOUS_MARK_RAW,
       topbarImageHref: NOUS_GIRL_BIG_URL,
+      topbarTintColor: '#5888c0',
+      topbarTintOpacity: 0.25,
       topbarWidth: 71,
       topbarHeight: 34,
       alignmentSvgRaw: NOUS_ALIGNMENT_RAW,
       alignmentImageHref: NOUS_GIRL_URL,
       alignmentWidth: 40,
       alignmentHeight: 40,
+      alignmentAlwaysVisible: true,
+      alignmentBob: true,
+      alignmentBobDurationMs: 3200,
+      alignmentBobDistancePx: 2,
       alignmentTitle: 'nous research',
       alignmentWhisperText: 'nous · research · aligned',
       alignmentFetchWhisper: true,

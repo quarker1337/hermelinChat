@@ -246,9 +246,12 @@ test('nous theme uses dusk palette and sprite artwork', () => {
   assert.equal(THEMES.nous.SLATE.accent, '#88b8f0')
   assert.match(THEMES.nous.icons.topbarImageHref || '', /nous-girl-big\.png$/)
   assert.match(THEMES.nous.icons.alignmentImageHref || '', /nous-girl\.png$/)
+  assert.equal(THEMES.nous.icons.topbarTintColor, '#5888c0')
+  assert.equal(THEMES.nous.icons.alignmentAlwaysVisible, true)
+  assert.equal(THEMES.nous.icons.alignmentBob, true)
 })
 
-test('theme icon renders image markup when imageHref is provided', () => {
+test('theme icon renders image markup and tint overlay when requested', () => {
   installAssetStubs()
   clearCompiledModules()
   const React = require('react')
@@ -261,9 +264,22 @@ test('theme icon renders image markup when imageHref is provided', () => {
       title: 'nous girl',
       width: 64,
       height: 64,
+      tintColor: '#5888c0',
+      tintOpacity: 0.25,
     }),
   )
 
   assert.match(html, /<img/)
   assert.match(html, /nous-girl\.png/)
+  assert.match(html, /mix-blend-mode:color/)
+  assert.match(html, /background:#5888c0/)
+})
+
+test('alignment easter egg supports always-on bobbing artwork', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'AlignmentEasterEgg.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /alwaysVisible\?: boolean/)
+  assert.match(source, /bob\?: boolean/)
+  assert.match(source, /@keyframes eggBob/)
 })

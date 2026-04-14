@@ -310,6 +310,8 @@ export function AppShell() {
               size={activeTheme?.icons?.topbarSize ?? 18}
               width={activeTheme?.icons?.topbarWidth}
               height={activeTheme?.icons?.topbarHeight}
+              tintColor={activeTheme?.icons?.topbarTintColor}
+              tintOpacity={activeTheme?.icons?.topbarTintOpacity}
               title={activeTheme?.label}
             />
             <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
@@ -374,6 +376,10 @@ export function AppShell() {
                     size={activeTheme?.icons?.alignmentSize ?? 18}
                     width={activeTheme?.icons?.alignmentWidth}
                     height={activeTheme?.icons?.alignmentHeight}
+                    alwaysVisible={activeTheme?.icons?.alignmentAlwaysVisible}
+                    bob={activeTheme?.icons?.alignmentBob}
+                    bobDurationMs={activeTheme?.icons?.alignmentBobDurationMs}
+                    bobDistancePx={activeTheme?.icons?.alignmentBobDistancePx}
                   />
                 </>
               ) : (
