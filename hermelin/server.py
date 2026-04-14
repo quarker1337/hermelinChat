@@ -60,7 +60,7 @@ from .meta_db import (
 from .pty_handler import PtyProcess
 from . import __version__
 from .security import extract_client_ip, ip_allowed, parse_allowlist
-from .state_reader import get_message_context, list_sessions, search_messages
+from .state_reader import get_message_context, list_sessions, resolve_resume_session_id, search_messages
 from .config_editor import (
     _yaml_inline_scalar,
     _update_display_skin_config_text,
@@ -2026,8 +2026,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             except Exception:
                 pass
 
-        if resume:
-            argv += ["--resume", resume]
+        safe_resume = resolve_resume_session_id(config.db_path, resume) if resume else None
+        if resume and not safe_resume:
+            await websocket.close(code=1008)
+            return
+
+        if safe_resume:
+            argv += ["--resume", safe_resume]
         elif cont:
             argv += ["--continue"]
 

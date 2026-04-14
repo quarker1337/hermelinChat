@@ -18,22 +18,22 @@ def parse_allowlist(spec: str) -> list[ipaddress._BaseNetwork]:
     """
     nets: list[ipaddress._BaseNetwork] = []
     for raw in (spec or "").split(","):
-        token = raw.strip()
-        if not token or token == "*":
+        entry = raw.strip()
+        if not entry or entry == "*":
             continue
 
         try:
-            if "/" in token:
-                nets.append(ipaddress.ip_network(token, strict=False))
+            if "/" in entry:
+                nets.append(ipaddress.ip_network(entry, strict=False))
             else:
-                ip = ipaddress.ip_address(token)
+                ip = ipaddress.ip_address(entry)
                 if ip.version == 4:
-                    nets.append(ipaddress.ip_network(f"{token}/32", strict=False))
+                    nets.append(ipaddress.ip_network(f"{entry}/32", strict=False))
                 else:
-                    nets.append(ipaddress.ip_network(f"{token}/128", strict=False))
+                    nets.append(ipaddress.ip_network(f"{entry}/128", strict=False))
         except ValueError:
             # Ignore bad entries; safer than accidentally allowing everything.
-            logger.warning("invalid IP allowlist entry ignored: %r", token)
+            logger.warning("invalid IP allowlist entry ignored: %r", entry)
             continue
 
     return nets

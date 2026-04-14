@@ -24,6 +24,21 @@ def runner_manifest_path(artifact_dir: Path, tab_id: str) -> Path:
     return runner_project_dir(artifact_dir, tab_id) / "runner.json"
 
 
+def _resolve_within(base_dir: Path, path: Path) -> Path | None:
+    try:
+        base = Path(base_dir).resolve()
+        resolved = Path(path).resolve(strict=False)
+    except Exception:
+        return None
+
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        return None
+
+    return resolved
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -36,8 +51,9 @@ def read_runner_manifest(artifact_dir: Path, tab_id: str) -> dict[str, Any] | No
     if not is_valid_artifact_id(str(tab_id or "")):
         return None
 
-    path = runner_manifest_path(artifact_dir, tab_id)
-    if not path.exists() or not path.is_file():
+    project_dir = runner_project_dir(artifact_dir, tab_id)
+    path = _resolve_within(project_dir, runner_manifest_path(artifact_dir, tab_id))
+    if path is None or not path.exists() or not path.is_file():
         return None
 
     payload = _read_json(path)
@@ -87,13 +103,14 @@ def _read_artifact_by_id(artifact_dir: Path, artifact_id: str) -> dict[str, Any]
 
     root = Path(artifact_dir)
     candidates = [
-        root / "session" / f"{artifact_id}.json",
-        root / "persistent" / f"{artifact_id}.json",
-        root / f"{artifact_id}.json",  # legacy
+        (root / "session", root / "session" / f"{artifact_id}.json"),
+        (root / "persistent", root / "persistent" / f"{artifact_id}.json"),
+        (root, root / f"{artifact_id}.json"),  # legacy
     ]
 
-    for path in candidates:
-        if not path.exists() or not path.is_file():
+    for base_dir, candidate in candidates:
+        path = _resolve_within(base_dir, candidate)
+        if path is None or not path.exists() or not path.is_file():
             continue
         payload = _read_json(path)
         if isinstance(payload, dict):

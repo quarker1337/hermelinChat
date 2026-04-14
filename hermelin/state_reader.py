@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger("hermelin.state_reader")
+
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 
 
 def _ts_to_iso(ts: Optional[float]) -> Optional[str]:
@@ -19,6 +22,23 @@ def connect_db(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), timeout=5.0)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def resolve_resume_session_id(db_path: Path, value: Optional[str]) -> Optional[str]:
+    session_id = str(value or "").strip()
+    if not session_id or not _SESSION_ID_RE.fullmatch(session_id):
+        return None
+    if not db_path.exists():
+        return None
+
+    try:
+        with connect_db(db_path) as conn:
+            row = conn.execute("SELECT 1 FROM sessions WHERE id = ? LIMIT 1", (session_id,)).fetchone()
+    except sqlite3.Error:
+        logger.debug("failed to validate resume session id", exc_info=True)
+        return None
+
+    return session_id if row else None
 
 
 def _truncate_one_line(s: Optional[str], n: int) -> Optional[str]:
