@@ -247,11 +247,14 @@ test('nous theme uses dusk palette and sprite artwork', () => {
   assert.match(THEMES.nous.icons.topbarImageHref || '', /nous-girl-big\.png$/)
   assert.match(THEMES.nous.icons.alignmentImageHref || '', /nous-girl\.png$/)
   assert.equal(THEMES.nous.icons.topbarTintColor, '#5888c0')
+  assert.equal(THEMES.nous.icons.topbarBackdropFadeColor, '#141838')
   assert.equal(THEMES.nous.icons.alignmentAlwaysVisible, true)
   assert.equal(THEMES.nous.icons.alignmentBob, true)
+  assert.equal(THEMES.nous.icons.alignmentWidth, 64)
+  assert.equal(THEMES.nous.icons.alignmentHeight, 64)
 })
 
-test('theme icon renders image markup and tint overlay when requested', () => {
+test('theme icon renders masked tint overlay and backdrop fade when requested', () => {
   installAssetStubs()
   clearCompiledModules()
   const React = require('react')
@@ -266,6 +269,7 @@ test('theme icon renders image markup and tint overlay when requested', () => {
       height: 64,
       tintColor: '#5888c0',
       tintOpacity: 0.25,
+      backdropFadeColor: '#141838',
     }),
   )
 
@@ -273,6 +277,8 @@ test('theme icon renders image markup and tint overlay when requested', () => {
   assert.match(html, /nous-girl\.png/)
   assert.match(html, /mix-blend-mode:color/)
   assert.match(html, /background:#5888c0/)
+  assert.match(html, /mask-image:url\(\/assets\/nous-girl\.png\)/)
+  assert.match(html, /radial-gradient\(ellipse at center/)
 })
 
 test('alignment easter egg supports always-on bobbing artwork', () => {

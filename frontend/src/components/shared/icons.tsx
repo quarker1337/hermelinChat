@@ -36,6 +36,7 @@ interface ThemeIconProps extends InlineSvgIconProps {
   pixelated?: boolean
   tintColor?: string
   tintOpacity?: number
+  backdropFadeColor?: string
 }
 
 export const InlineSvgIcon = ({
@@ -74,10 +75,12 @@ export const ThemeIcon = ({
   pixelated = true,
   tintColor,
   tintOpacity = 0.25,
+  backdropFadeColor,
 }: ThemeIconProps) => {
   if (imageHref) {
     const w = width ?? size
     const h = height ?? size
+    const maskImage = `url(${imageHref})`
     return (
       <span
         style={{
@@ -114,6 +117,23 @@ export const ThemeIcon = ({
               opacity: tintOpacity,
               mixBlendMode: 'color',
               pointerEvents: 'none',
+              WebkitMaskImage: maskImage,
+              maskImage,
+              WebkitMaskSize: '100% 100%',
+              maskSize: '100% 100%',
+              WebkitMaskRepeat: 'no-repeat',
+              maskRepeat: 'no-repeat',
+            }}
+          />
+        ) : null}
+        {backdropFadeColor ? (
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+              background: `radial-gradient(ellipse at center, transparent 40%, ${backdropFadeColor}dd 85%, ${backdropFadeColor} 100%)`,
             }}
           />
         ) : null}

@@ -312,6 +312,7 @@ export function AppShell() {
               height={activeTheme?.icons?.topbarHeight}
               tintColor={activeTheme?.icons?.topbarTintColor}
               tintOpacity={activeTheme?.icons?.topbarTintOpacity}
+              backdropFadeColor={activeTheme?.icons?.topbarBackdropFadeColor}
               title={activeTheme?.label}
             />
             <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
