@@ -33,12 +33,12 @@ def resolve_resume_session_id(db_path: Path, value: Optional[str]) -> Optional[s
 
     try:
         with connect_db(db_path) as conn:
-            row = conn.execute("SELECT 1 FROM sessions WHERE id = ? LIMIT 1", (session_id,)).fetchone()
+            row = conn.execute("SELECT id FROM sessions WHERE id = ? LIMIT 1", (session_id,)).fetchone()
     except sqlite3.Error:
         logger.debug("failed to validate resume session id", exc_info=True)
         return None
 
-    return session_id if row else None
+    return str(row[0]) if row else None
 
 
 def _truncate_one_line(s: Optional[str], n: int) -> Optional[str]:

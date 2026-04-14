@@ -68,6 +68,25 @@ class RunnerSecurityTests(unittest.TestCase):
 
         self.assertIsNone(manifest)
 
+    def test_read_runner_manifest_rejects_symlinked_project_dir_escape(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            artifact_dir = root / "artifacts"
+            projects_root = artifact_dir / "runners" / "projects"
+            projects_root.mkdir(parents=True)
+
+            outside_dir = root / "outside-project"
+            outside_dir.mkdir()
+            (outside_dir / "runner.json").write_text(
+                json.dumps({"scheme": "http", "host": "127.0.0.1", "port": 43123}),
+                encoding="utf-8",
+            )
+            os.symlink(outside_dir, projects_root / "tab-1")
+
+            manifest = read_runner_manifest(artifact_dir, "tab-1")
+
+        self.assertIsNone(manifest)
+
     def test_discover_runner_upstream_rejects_symlinked_artifact_escape(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

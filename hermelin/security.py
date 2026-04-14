@@ -33,7 +33,7 @@ def parse_allowlist(spec: str) -> list[ipaddress._BaseNetwork]:
                     nets.append(ipaddress.ip_network(f"{entry}/128", strict=False))
         except ValueError:
             # Ignore bad entries; safer than accidentally allowing everything.
-            logger.warning("invalid IP allowlist entry ignored: %r", entry)
+            logger.warning("invalid IP allowlist entry ignored")
             continue
 
     return nets

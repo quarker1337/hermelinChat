@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from .artifacts import is_valid_artifact_id
@@ -20,23 +20,45 @@ def runner_project_dir(artifact_dir: Path, tab_id: str) -> Path:
     return Path(artifact_dir) / "runners" / "projects" / str(tab_id)
 
 
-def runner_manifest_path(artifact_dir: Path, tab_id: str) -> Path:
-    return runner_project_dir(artifact_dir, tab_id) / "runner.json"
-
-
-def _resolve_within(base_dir: Path, path: Path) -> Path | None:
+def _iter_children(directory: Path):
     try:
-        base = Path(base_dir).resolve()
-        resolved = Path(path).resolve(strict=False)
+        if not directory.exists() or not directory.is_dir():
+            return
     except Exception:
-        return None
+        return
 
     try:
-        resolved.relative_to(base)
-    except ValueError:
-        return None
+        yield from directory.iterdir()
+    except Exception:
+        return
 
-    return resolved
+
+def _find_named_child_dir(parent_dir: Path, name: str) -> Path | None:
+    for child in _iter_children(parent_dir):
+        try:
+            if child.name != name:
+                continue
+            if child.is_symlink():
+                return None
+            if child.is_dir():
+                return child
+        except Exception:
+            return None
+    return None
+
+
+def _find_named_child_file(parent_dir: Path, name: str) -> Path | None:
+    for child in _iter_children(parent_dir):
+        try:
+            if child.name != name:
+                continue
+            if child.is_symlink():
+                return None
+            if child.is_file():
+                return child
+        except Exception:
+            return None
+    return None
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -51,9 +73,13 @@ def read_runner_manifest(artifact_dir: Path, tab_id: str) -> dict[str, Any] | No
     if not is_valid_artifact_id(str(tab_id or "")):
         return None
 
-    project_dir = runner_project_dir(artifact_dir, tab_id)
-    path = _resolve_within(project_dir, runner_manifest_path(artifact_dir, tab_id))
-    if path is None or not path.exists() or not path.is_file():
+    projects_root = Path(artifact_dir) / "runners" / "projects"
+    project_dir = _find_named_child_dir(projects_root, str(tab_id))
+    if project_dir is None:
+        return None
+
+    path = _find_named_child_file(project_dir, "runner.json")
+    if path is None:
         return None
 
     payload = _read_json(path)
@@ -102,15 +128,10 @@ def _read_artifact_by_id(artifact_dir: Path, artifact_id: str) -> dict[str, Any]
         return None
 
     root = Path(artifact_dir)
-    candidates = [
-        (root / "session", root / "session" / f"{artifact_id}.json"),
-        (root / "persistent", root / "persistent" / f"{artifact_id}.json"),
-        (root, root / f"{artifact_id}.json"),  # legacy
-    ]
-
-    for base_dir, candidate in candidates:
-        path = _resolve_within(base_dir, candidate)
-        if path is None or not path.exists() or not path.is_file():
+    filename = f"{artifact_id}.json"
+    for base_dir in (root / "session", root / "persistent", root):
+        path = _find_named_child_file(base_dir, filename)
+        if path is None:
             continue
         payload = _read_json(path)
         if isinstance(payload, dict):
