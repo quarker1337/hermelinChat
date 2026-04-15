@@ -5,7 +5,7 @@ import WHITE_RABBIT_RAW from '../assets/white-rabbit.svg?raw'
 import NOUS_ALIGNMENT_RAW from '../assets/nous-alignment.svg?raw'
 import NOUS_MARK_RAW from '../assets/nous-alignment-flipped.svg?raw'
 import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
-import NOUS_GIRL_URL from '../assets/nous-girl.png'
+import NOUS_GIRL_URL from '../assets/nous-girl.gif'
 import NOUS_GIRL_BIG_URL from '../assets/nous-girl-big.png'
 
 import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
@@ -249,8 +249,8 @@ export const THEMES: Record<string, Theme> = {
       topbarTintColor: '#5888c0',
       topbarTintOpacity: 0.25,
       topbarBackdropFadeColor: '#141838',
-      topbarWidth: 71,
-      topbarHeight: 34,
+      topbarWidth: 54,
+      topbarHeight: 42,
       alignmentSvgRaw: NOUS_ALIGNMENT_RAW,
       alignmentImageHref: NOUS_GIRL_URL,
       alignmentWidth: 64,
