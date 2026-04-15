@@ -394,6 +394,10 @@ export function AppShell() {
                     bobDurationMs={activeTheme?.icons?.alignmentBobDurationMs}
                     bobDistancePx={activeTheme?.icons?.alignmentBobDistancePx}
                     paused={overlayOpen}
+                    spritesheet={activeTheme?.icons?.alignmentSpritesheet}
+                    spriteFrames={activeTheme?.icons?.alignmentSpriteFrames}
+                    spriteWidth={activeTheme?.icons?.alignmentSpriteWidth}
+                    spriteHeight={activeTheme?.icons?.alignmentSpriteHeight}
                   />
                 </>
               ) : (

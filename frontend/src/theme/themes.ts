@@ -5,7 +5,7 @@ import WHITE_RABBIT_RAW from '../assets/white-rabbit.svg?raw'
 import NOUS_ALIGNMENT_RAW from '../assets/nous-alignment.svg?raw'
 import NOUS_MARK_RAW from '../assets/nous-alignment-flipped.svg?raw'
 import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
-import NOUS_GIRL_URL from '../assets/nous-girl.gif'
+import NOUS_GIRL_BLINK_URL from '../assets/nous-girl-blink.png'
 import NOUS_GIRL_BIG_URL from '../assets/nous-girl-big.png'
 
 import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
@@ -49,6 +49,10 @@ export interface ThemeIcons {
   alignmentBob?: boolean
   alignmentBobDurationMs?: number
   alignmentBobDistancePx?: number
+  alignmentSpritesheet?: boolean
+  alignmentSpriteFrames?: number
+  alignmentSpriteWidth?: number
+  alignmentSpriteHeight?: number
   alignmentTitle: string
   alignmentWhisperText: string
   alignmentFetchWhisper: boolean
@@ -254,9 +258,13 @@ export const THEMES: Record<string, Theme> = {
       topbarHeight: 42,
       topbarGlow: true,
       alignmentSvgRaw: NOUS_ALIGNMENT_RAW,
-      alignmentImageHref: NOUS_GIRL_URL,
+      alignmentImageHref: NOUS_GIRL_BLINK_URL,
       alignmentWidth: 64,
       alignmentHeight: 64,
+      alignmentSpritesheet: true,
+      alignmentSpriteFrames: 4,
+      alignmentSpriteWidth: 64,
+      alignmentSpriteHeight: 64,
       alignmentAlwaysVisible: true,
       alignmentBob: true,
       alignmentBobDurationMs: 3200,
