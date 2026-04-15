@@ -32,11 +32,11 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
   const baseOpacity = clampNum(cfg.opacity ?? 0.3, 0, 1)
   const canvasOpacity = clampNum(baseOpacity * factor, 0, 1)
 
-  const speedBase = clampNum(cfg.speedBase ?? 0.3, 0.01, 5)
-  const speedJitter = clampNum(cfg.speedJitter ?? 0.25, 0, 5)
+  const speedBase = clampNum(cfg.speedBase ?? 0.04, 0.01, 5)
+  const speedJitter = clampNum(cfg.speedJitter ?? 0.05, 0, 5)
 
   // Optional throttling + palette tweaks for the matrix-rain effect
-  const frameMs = clampNum(cfg.frameMs ?? 0, 0, 250)
+  const frameMs = clampNum(cfg.frameMs ?? 50, 0, 250)
   const redChance = clampNum(cfg.redChance ?? 0, 0, 1)
   // When a drop is past the bottom, chance (per draw) to reset it back to the top.
   const resetChance = clampNum(cfg.resetChance ?? 0.98, 0, 1)
