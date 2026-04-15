@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AMBER, SLATE } from '../../theme/index'
 
 function clampNum(n: unknown, min: number, max: number): number {
@@ -24,8 +24,18 @@ export function MatrixRainField({ intensity = 50, config, paused = false }: Matr
   const resumeFnRef = useRef<(() => void) | null>(null)
   pausedRef.current = paused
 
+  // Snapshot: flatten canvas to static image when paused — trivial for blur
+  const [snapshot, setSnapshot] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (paused && canvasRef.current) {
+      try { setSnapshot(canvasRef.current.toDataURL('image/jpeg', 0.7)) } catch { setSnapshot(null) }
+    } else {
+      setSnapshot(null)
+    }
+  }, [paused])
+
   const pct = clampNum(intensity, 0, 100)
-  // 75 == "normal" intensity
   const factor = pct / 75
 
   const cfg = config && typeof config === 'object' ? (config as Record<string, unknown>) : {}
@@ -99,13 +109,11 @@ export function MatrixRainField({ intensity = 50, config, paused = false }: Matr
       }
       animId = requestAnimationFrame(draw)
 
-      // Throttle draws (prevents smear when speed is low).
       if (frameMs > 0 && lastDraw && ts - lastDraw < frameMs) return
 
       const dt = lastDraw ? Math.min(200, ts - lastDraw) : 16
       lastDraw = ts
 
-      // Fade to background (creates trails).
       ctx.fillStyle = `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},${fadeAlpha})`
       ctx.fillRect(0, 0, canvas.width, canvas.height)
 
@@ -158,7 +166,6 @@ export function MatrixRainField({ intensity = 50, config, paused = false }: Matr
     init()
     window.addEventListener('resize', init)
 
-    // Pause when tab is hidden
     const handleVisibility = () => {
       if (document.hidden) {
         cancelAnimationFrame(animId)
@@ -178,53 +185,16 @@ export function MatrixRainField({ intensity = 50, config, paused = false }: Matr
       document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [
-    colWidth,
-    fontSize,
-    fadeAlpha,
-    factor,
-    speedBase,
-    speedJitter,
-    frameMs,
-    redChance,
-    resetChance,
-
-    redBrightHex,
-    redBright.r,
-    redBright.g,
-    redBright.b,
-
-    redMidHex,
-    redMid.r,
-    redMid.g,
-    redMid.b,
-
-    redDimHex,
-    redDim.r,
-    redDim.g,
-    redDim.b,
-
-    brightHex,
-    bright.r,
-    bright.g,
-    bright.b,
-
-    midHex,
-    mid.r,
-    mid.g,
-    mid.b,
-
-    dimHex,
-    dim.r,
-    dim.g,
-    dim.b,
-
-    bgHex,
-    bgRgb.r,
-    bgRgb.g,
-    bgRgb.b,
+    colWidth, fontSize, fadeAlpha, factor, speedBase, speedJitter, frameMs, redChance, resetChance,
+    redBrightHex, redBright.r, redBright.g, redBright.b,
+    redMidHex, redMid.r, redMid.g, redMid.b,
+    redDimHex, redDim.r, redDim.g, redDim.b,
+    brightHex, bright.r, bright.g, bright.b,
+    midHex, mid.r, mid.g, mid.b,
+    dimHex, dim.r, dim.g, dim.b,
+    bgHex, bgRgb.r, bgRgb.g, bgRgb.b,
   ])
 
-  // Resume animation when paused flips to false
   useEffect(() => {
     if (!paused && resumeFnRef.current) {
       resumeFnRef.current()
@@ -232,18 +202,36 @@ export function MatrixRainField({ intensity = 50, config, paused = false }: Matr
   }, [paused])
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        opacity: paused ? 0 : canvasOpacity,
-        zIndex: 0,
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          opacity: snapshot ? 0 : canvasOpacity,
+          zIndex: 0,
+        }}
+      />
+      {snapshot && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            backgroundImage: `url(${snapshot})`,
+            backgroundSize: 'cover',
+            opacity: canvasOpacity,
+            zIndex: 0,
+          }}
+        />
+      )}
+    </>
   )
 }

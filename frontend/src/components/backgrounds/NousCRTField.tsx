@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AMBER, SLATE } from '../../theme/index'
 
 function clampNum(n: unknown, min: number, max: number): number {
@@ -22,6 +22,17 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
   const pausedRef = useRef(paused)
   const resumeFnRef = useRef<(() => void) | null>(null)
   pausedRef.current = paused
+
+  // Snapshot: flatten canvas to static image when paused — trivial for blur
+  const [snapshot, setSnapshot] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (paused && canvasRef.current) {
+      try { setSnapshot(canvasRef.current.toDataURL('image/jpeg', 0.7)) } catch { setSnapshot(null) }
+    } else {
+      setSnapshot(null)
+    }
+  }, [paused])
 
   const pct = clampNum(intensity, 0, 100)
   const factor = pct / 75
@@ -71,8 +82,6 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
       color: palette[Math.floor(Math.random() * palette.length)],
     }))
 
-    // ─── Pre-rendered static layers ──────────────────────────────────────────
-
     let staticLayer: HTMLCanvasElement | null = null
     let backdropLayer: HTMLCanvasElement | null = null
 
@@ -82,7 +91,6 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
       staticLayer.height = H
       const sCtx = staticLayer.getContext('2d')!
 
-      // Grid
       sCtx.strokeStyle = `rgba(${borderRgb.r},${borderRgb.g},${borderRgb.b},${(0.22 * Math.min(1, f)).toFixed(4)})`
       sCtx.lineWidth = 1
       for (let x = 0; x < W; x += gridSize) {
@@ -92,7 +100,6 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
         sCtx.beginPath(); sCtx.moveTo(0, y + 0.5); sCtx.lineTo(W, y + 0.5); sCtx.stroke()
       }
 
-      // Scanlines
       const scanAlpha = 0.035 * Math.min(1.15, f)
       if (scanAlpha > 0.001) {
         sCtx.fillStyle = `rgba(0,0,0,${scanAlpha.toFixed(4)})`
@@ -119,16 +126,12 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
       bCtx.fillRect(0, 0, W, H)
     }
 
-    // ─── Init ────────────────────────────────────────────────────────────────
-
     const init = () => {
       canvas.width = canvas.parentElement?.offsetWidth || window.innerWidth
       canvas.height = canvas.parentElement?.offsetHeight || window.innerHeight
       initBackdrop(canvas.width, canvas.height)
       initStaticLayer(canvas.width, canvas.height)
     }
-
-    // ─── Dynamic draw functions ──────────────────────────────────────────────
 
     const drawParticles = (W: number, H: number, dtScale: number) => {
       for (const p of particles) {
@@ -161,8 +164,6 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
       ctx.fillStyle = grad
       ctx.fillRect(0, sweepY, W, 48)
     }
-
-    // ─── Draw loop (throttled to 15fps) ──────────────────────────────────────
 
     const TARGET_FPS = 15
     const FRAME_MS = 1000 / TARGET_FPS
@@ -209,8 +210,6 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
       }
     }
 
-    // ─── Startup ─────────────────────────────────────────────────────────────
-
     init()
     window.addEventListener('resize', init)
 
@@ -235,7 +234,6 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
     }
   }, [factor, canvasOpacity, bgHex, bgRgb.r, bgRgb.g, bgRgb.b, borderRgb.r, borderRgb.g, borderRgb.b, textRgb.r, textRgb.g, textRgb.b, accentRgb.r, accentRgb.g, accentRgb.b, accentSoftRgb.r, accentSoftRgb.g, accentSoftRgb.b, yellowRgb.r, yellowRgb.g, yellowRgb.b])
 
-  // Resume animation when paused flips to false
   useEffect(() => {
     if (!paused && resumeFnRef.current) {
       resumeFnRef.current()
@@ -243,18 +241,36 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
   }, [paused])
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        opacity: paused ? 0 : canvasOpacity,
-        zIndex: 0,
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          opacity: snapshot ? 0 : canvasOpacity,
+          zIndex: 0,
+        }}
+      />
+      {snapshot && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            backgroundImage: `url(${snapshot})`,
+            backgroundSize: 'cover',
+            opacity: canvasOpacity,
+            zIndex: 0,
+          }}
+        />
+      )}
+    </>
   )
 }

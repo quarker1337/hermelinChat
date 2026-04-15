@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AMBER } from '../../theme/index'
 
 function clampNum(n: unknown, min: number, max: number): number {
@@ -22,6 +22,17 @@ export function ParticleField({ intensity = 50, paused = false }: ParticleFieldP
   const pausedRef = useRef(paused)
   const resumeFnRef = useRef<(() => void) | null>(null)
   pausedRef.current = paused
+
+  // Snapshot: flatten canvas to static image when paused — trivial for blur
+  const [snapshot, setSnapshot] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (paused && canvasRef.current) {
+      try { setSnapshot(canvasRef.current.toDataURL('image/jpeg', 0.7)) } catch { setSnapshot(null) }
+    } else {
+      setSnapshot(null)
+    }
+  }, [paused])
 
   const pct = clampNum(intensity, 0, 100)
   const factor = pct / 50
@@ -124,7 +135,6 @@ export function ParticleField({ intensity = 50, paused = false }: ParticleFieldP
       }
     }
 
-    // Resume function — kicks the animation loop back to life
     const resume = () => {
       if (!pausedRef.current && !animId) {
         lastFrame = 0
@@ -155,7 +165,6 @@ export function ParticleField({ intensity = 50, paused = false }: ParticleFieldP
     }
   }, [factor, accentRgb.r, accentRgb.g, accentRgb.b])
 
-  // Resume animation when paused flips to false
   useEffect(() => {
     if (!paused && resumeFnRef.current) {
       resumeFnRef.current()
@@ -163,18 +172,36 @@ export function ParticleField({ intensity = 50, paused = false }: ParticleFieldP
   }, [paused])
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        opacity: paused ? 0 : canvasOpacity,
-        zIndex: 0,
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          opacity: snapshot ? 0 : canvasOpacity,
+          zIndex: 0,
+        }}
+      />
+      {snapshot && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            backgroundImage: `url(${snapshot})`,
+            backgroundSize: 'cover',
+            opacity: canvasOpacity,
+            zIndex: 0,
+          }}
+        />
+      )}
+    </>
   )
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AMBER, SLATE } from '../../theme/index'
 
 function clampNum(n: unknown, min: number, max: number): number {
@@ -22,6 +22,17 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
   const pausedRef = useRef(paused)
   const resumeFnRef = useRef<(() => void) | null>(null)
   pausedRef.current = paused
+
+  // Snapshot: flatten canvas to static image when paused — trivial for blur
+  const [snapshot, setSnapshot] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (paused && canvasRef.current) {
+      try { setSnapshot(canvasRef.current.toDataURL('image/jpeg', 0.7)) } catch { setSnapshot(null) }
+    } else {
+      setSnapshot(null)
+    }
+  }, [paused])
 
   const pct = clampNum(intensity, 0, 100)
   const factor = pct / 75
@@ -55,16 +66,9 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
 
     const f = clampNum(factor, 0, 2)
     let blocks: {
-      x: number
-      y: number
-      vx: number
-      vy: number
-      w: number
-      h: number
-      depth: number
-      opacity: number
-      life: number
-      maxLife: number
+      x: number; y: number; vx: number; vy: number
+      w: number; h: number; depth: number; opacity: number
+      life: number; maxLife: number
     }[] = []
     const maxBlocks = Math.max(8, Math.round(25 * f))
 
@@ -107,20 +111,12 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
       }
 
       return {
-        x,
-        y,
-        vx,
-        vy,
-        w,
-        h,
-        depth,
+        x, y, vx, vy, w, h, depth,
         opacity: (0.06 + depth * 0.2) * (0.4 + Math.random() * 0.6) * (0.7 + f * 0.6),
         life: 0,
         maxLife: 600 + Math.random() * 800,
       }
     }
-
-    // ─── Pre-rendered static layers ──────────────────────────────────────────
 
     let staticLayer: HTMLCanvasElement | null = null
 
@@ -130,18 +126,15 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
       staticLayer.height = H
       const sCtx = staticLayer.getContext('2d')!
 
-      // Background fill
       sCtx.fillStyle = bgHex
       sCtx.fillRect(0, 0, W, H)
 
-      // Vignette (never changes)
       const vig = sCtx.createRadialGradient(W / 2, H / 2, W * 0.25, W / 2, H / 2, W * 0.8)
       vig.addColorStop(0, `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},0)`)
       vig.addColorStop(1, `rgba(${borderRgb.r},${borderRgb.g},${borderRgb.b},${(0.22 * f).toFixed(4)})`)
       sCtx.fillStyle = vig
       sCtx.fillRect(0, 0, W, H)
 
-      // Grid (never changes)
       const gridAlpha = 0.025 * f
       if (gridAlpha > 0.001) {
         sCtx.strokeStyle = `rgba(${textRgb.r},${textRgb.g},${textRgb.b},${gridAlpha.toFixed(4)})`
@@ -154,7 +147,6 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
         }
       }
 
-      // Scanlines (never change)
       const scanAlpha = 0.012 * f
       if (scanAlpha > 0.001) {
         sCtx.fillStyle = `rgba(${textRgb.r},${textRgb.g},${textRgb.b},${scanAlpha.toFixed(4)})`
@@ -163,8 +155,6 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
         }
       }
     }
-
-    // ─── Init ────────────────────────────────────────────────────────────────
 
     const init = () => {
       canvas.width = canvas.parentElement?.offsetWidth || window.innerWidth
@@ -185,8 +175,6 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
       }
     }
 
-    // ─── Draw loop (throttled to 20fps) ──────────────────────────────────────
-
     const TARGET_FPS = 20
     const FRAME_MS = 1000 / TARGET_FPS
     let lastFrame = 0
@@ -206,10 +194,8 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
       const W = canvas.width
       const H = canvas.height
 
-      // Static layers — one blit
       if (staticLayer) ctx.drawImage(staticLayer, 0, 0)
 
-      // Connection nodes (only 8, O(n²) is fine)
       for (const n of nodes) {
         n.x += (n.vx + Math.sin(t * 0.0008 + n.phase) * 0.02) * dtScale
         n.y += (n.vy + Math.cos(t * 0.0006 + n.phase) * 0.015) * dtScale
@@ -226,7 +212,7 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
           const dx = a.x - b.x
           const dy = a.y - b.y
           const d2 = dx * dx + dy * dy
-          if (d2 < 90000) { // 300²
+          if (d2 < 90000) {
             const dist = Math.sqrt(d2)
             const alpha = (1 - dist / 300) * 0.03 * f
             ctx.beginPath()
@@ -245,33 +231,22 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
         }
       }
 
-      // Spawn blocks
       if (blocks.length < maxBlocks && Math.random() < 0.03 * f) {
         blocks.push(spawnBlock(W, H))
       }
 
-      // Draw blocks (skip save/restore — offset fillRect directly)
       for (let i = blocks.length - 1; i >= 0; i--) {
         const b = blocks[i]
         b.x += b.vx * dtScale
         b.y += b.vy * dtScale
         b.life += dtScale
 
-        if (
-          b.life > b.maxLife ||
-          b.x < -200 ||
-          b.x > W + 200 ||
-          b.y < -200 ||
-          b.y > H + 200
-        ) {
+        if (b.life > b.maxLife || b.x < -200 || b.x > W + 200 || b.y < -200 || b.y > H + 200) {
           blocks.splice(i, 1)
           continue
         }
 
-        const alpha =
-          b.opacity *
-          Math.min(b.life / 60, 1) *
-          Math.min((b.maxLife - b.life) / 80, 1)
+        const alpha = b.opacity * Math.min(b.life / 60, 1) * Math.min((b.maxLife - b.life) / 80, 1)
 
         const sp = Math.sqrt(b.vx * b.vx + b.vy * b.vy)
         const bl = sp * 3 * b.depth
@@ -284,7 +259,6 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
         }
       }
 
-      // Moving scan bar (slight accent)
       const scanY = (t * 0.15) % (H + 60) - 30
       ctx.fillStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${(0.01 * f).toFixed(4)})`
       ctx.fillRect(0, scanY, W, 30)
@@ -320,24 +294,8 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
       window.removeEventListener('resize', init)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [
-    factor,
-    bgHex,
-    bgRgb.r,
-    bgRgb.g,
-    bgRgb.b,
-    textRgb.r,
-    textRgb.g,
-    textRgb.b,
-    borderRgb.r,
-    borderRgb.g,
-    borderRgb.b,
-    accentRgb.r,
-    accentRgb.g,
-    accentRgb.b,
-  ])
+  }, [factor, bgHex, bgRgb.r, bgRgb.g, bgRgb.b, textRgb.r, textRgb.g, textRgb.b, borderRgb.r, borderRgb.g, borderRgb.b, accentRgb.r, accentRgb.g, accentRgb.b])
 
-  // Resume animation when paused flips to false
   useEffect(() => {
     if (!paused && resumeFnRef.current) {
       resumeFnRef.current()
@@ -345,18 +303,36 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
   }, [paused])
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        opacity: paused ? 0 : canvasOpacity,
-        zIndex: 0,
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          opacity: snapshot ? 0 : canvasOpacity,
+          zIndex: 0,
+        }}
+      />
+      {snapshot && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            backgroundImage: `url(${snapshot})`,
+            backgroundSize: 'cover',
+            opacity: canvasOpacity,
+            zIndex: 0,
+          }}
+        />
+      )}
+    </>
   )
 }
