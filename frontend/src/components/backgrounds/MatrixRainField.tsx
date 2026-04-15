@@ -32,8 +32,8 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
   const baseOpacity = clampNum(cfg.opacity ?? 0.3, 0, 1)
   const canvasOpacity = clampNum(baseOpacity * factor, 0, 1)
 
-  const speedBase = clampNum(cfg.speedBase ?? 0.3, 0.01, 5)
-  const speedJitter = clampNum(cfg.speedJitter ?? 0.25, 0, 5)
+  const speedBase = clampNum(cfg.speedBase ?? 0.15, 0.01, 5)
+  const speedJitter = clampNum(cfg.speedJitter ?? 0.12, 0, 5)
 
   // Optional throttling + palette tweaks for the matrix-rain effect
   const frameMs = clampNum(cfg.frameMs ?? 0, 0, 250)
@@ -145,11 +145,25 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
 
     init()
     window.addEventListener('resize', init)
+
+    // Pause when tab is hidden
+    const handleVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(animId)
+        animId = 0
+      } else if (!animId) {
+        lastDraw = 0
+        animId = requestAnimationFrame(draw)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+
     animId = requestAnimationFrame(draw)
 
     return () => {
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [
     colWidth,
