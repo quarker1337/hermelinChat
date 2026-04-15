@@ -298,10 +298,9 @@ export function AppShell() {
               alignItems: 'center',
               padding: '0 16px',
               gap: 10,
-              background: `${SLATE.surface}ee`,
+              background: `${SLATE.surface}f8`,
               position: 'relative',
               zIndex: 5,
-              backdropFilter: 'blur(8px)',
             }}
           >
             <ThemeIcon

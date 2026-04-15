@@ -20,7 +20,6 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   const pct = clampNum(intensity, 0, 100)
-  // 50 == current look
   const factor = pct / 50
   const canvasOpacity = clampNum(0.5 * factor, 0, 1)
 
@@ -33,64 +32,114 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    let animId: number
-    let particles: { x: number; y: number; vx: number; vy: number; r: number; o: number }[] = []
+    const prefersReducedMotion =
+      !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)')?.matches
+    if (prefersReducedMotion) return
+
+    let animId = 0
+    const TARGET_FPS = 20
+    const FRAME_MS = 1000 / TARGET_FPS
+    let lastFrame = 0
+
+    // Fewer particles — 30 is visually identical to 60 at this opacity
+    const count = Math.max(0, Math.round(30 * factor))
+
+    const particles = Array.from({ length: count }, () => ({
+      x: 0,
+      y: 0,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      r: Math.random() * 1.5 + 0.5,
+      o: Math.min(0.22, (Math.random() * 0.15 + 0.03) * factor),
+    }))
+
+    // Pre-compute the rgba string per particle (avoids string alloc per frame)
+    const particleColors = particles.map(p =>
+      `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${p.o})`
+    )
+
+    // Pre-compute connection line base color
+    const connBase = Math.min(0.08, 0.04 * factor)
 
     const init = () => {
       canvas.width = canvas.parentElement?.offsetWidth || 800
       canvas.height = canvas.parentElement?.offsetHeight || 600
-
-      const count = Math.max(0, Math.round(60 * factor))
-      particles = Array.from({ length: count }, () => ({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
-        r: Math.random() * 1.5 + 0.5,
-        o: Math.min(0.22, (Math.random() * 0.15 + 0.03) * factor),
-      }))
+      for (const p of particles) {
+        p.x = Math.random() * canvas.width
+        p.y = Math.random() * canvas.height
+      }
     }
 
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      for (const p of particles) {
+    const draw = (timestamp: number) => {
+      animId = requestAnimationFrame(draw)
+      if (timestamp - lastFrame < FRAME_MS) return
+      lastFrame = timestamp
+
+      const W = canvas.width
+      const H = canvas.height
+      ctx.clearRect(0, 0, W, H)
+
+      // Update + draw particles using fillRect instead of arc
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i]
         p.x += p.vx
         p.y += p.vy
-        if (p.x < 0) p.x = canvas.width
-        if (p.x > canvas.width) p.x = 0
-        if (p.y < 0) p.y = canvas.height
-        if (p.y > canvas.height) p.y = 0
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${p.o})`
-        ctx.fill()
+        if (p.x < 0) p.x = W
+        if (p.x > W) p.x = 0
+        if (p.y < 0) p.y = H
+        if (p.y > H) p.y = 0
+
+        // fillRect is ~3x faster than arc+fill for tiny dots
+        ctx.fillStyle = particleColors[i]
+        const s = p.r * 2
+        ctx.fillRect(p.x - p.r, p.y - p.r, s, s)
       }
 
-      const connBase = Math.min(0.08, 0.04 * factor)
+      // Connection lines — batch into single path, use squared distance
+      ctx.lineWidth = 0.5
+      ctx.beginPath()  // ONE beginPath for ALL lines
+      let hasLines = false
+
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
           const dx = particles[i].x - particles[j].x
           const dy = particles[i].y - particles[j].y
-          const d = Math.sqrt(dx * dx + dy * dy)
-          if (d < 120) {
-            ctx.beginPath()
+          const d2 = dx * dx + dy * dy  // skip sqrt!
+          if (d2 < 14400) {  // 120² = 14400
             ctx.moveTo(particles[i].x, particles[i].y)
             ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.strokeStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${connBase * (1 - d / 120)})`
-            ctx.lineWidth = 0.5
-            ctx.stroke()
+            hasLines = true
           }
         }
       }
-      animId = requestAnimationFrame(draw)
+
+      if (hasLines) {
+        // Single stroke call for all lines (uniform color)
+        ctx.strokeStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${connBase})`
+        ctx.stroke()
+      }
+    }
+
+    // Tab visibility
+    const handleVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(animId)
+        animId = 0
+      } else if (!animId) {
+        lastFrame = 0
+        animId = requestAnimationFrame(draw)
+      }
     }
 
     init()
     window.addEventListener('resize', init)
-    draw()
+    document.addEventListener('visibilitychange', handleVisibility)
+    animId = requestAnimationFrame(draw)
+
     return () => {
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [factor, accentRgb.r, accentRgb.g, accentRgb.b])
 

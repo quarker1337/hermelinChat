@@ -185,8 +185,7 @@ export const SettingsPanel = ({
         position: 'fixed',
         inset: 0,
         zIndex: 40,
-        background: 'rgba(0,0,0,0.55)',
-        backdropFilter: 'blur(6px)',
+        background: 'rgba(0,0,0,0.7)',
       }}
     >
       <div
