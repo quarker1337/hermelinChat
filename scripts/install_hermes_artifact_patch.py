@@ -233,6 +233,13 @@ def _patch_model_tools(path: Path) -> tuple[bool, str]:
     if '"tools.artifact_tool"' in text:
         return False, "model_tools.py already references tools.artifact_tool"
 
+    # Hermes >= v0.10 (approx) uses discover_builtin_tools() which auto-discovers
+    # tools by scanning tools/*.py for registry.register() calls.  In that case
+    # there is no hardcoded import list to patch — installing artifact_tool.py
+    # into the tools/ directory is sufficient and no model_tools.py edit is needed.
+    if "discover_builtin_tools()" in text:
+        return False, "model_tools.py uses auto-discovery (discover_builtin_tools); no patch needed"
+
     # Upgrade path: previous versions imported tools.render_panel_tool.
     if '"tools.render_panel_tool"' in text:
         patched = text.replace('"tools.render_panel_tool"', '"tools.artifact_tool"')
@@ -241,7 +248,12 @@ def _patch_model_tools(path: Path) -> tuple[bool, str]:
 
     anchor = '        "tools.homeassistant_tool",'
     if anchor not in text:
-        raise RuntimeError(f"Could not find insertion anchor in {path}")
+        raise RuntimeError(
+            f"Could not find insertion anchor in {path}. "
+            "This Hermes version may use auto-discovery (discover_builtin_tools) "
+            "instead of a hardcoded tool list. If so, no model_tools.py patch is "
+            "needed — installing artifact_tool.py into the tools/ directory is sufficient."
+        )
 
     patched = text.replace(anchor, anchor + newline + '        "tools.artifact_tool",', 1)
     _write_text_with_newline(path, patched, newline)
