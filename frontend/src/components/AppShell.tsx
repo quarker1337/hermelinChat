@@ -306,17 +306,27 @@ export function AppShell() {
               zIndex: 5,
             }}
           >
-            <ThemeIcon
-              svgRaw={activeTheme?.icons?.topbarSvgRaw}
-              imageHref={activeTheme?.icons?.topbarImageHref}
-              size={activeTheme?.icons?.topbarSize ?? 18}
-              width={activeTheme?.icons?.topbarWidth}
-              height={activeTheme?.icons?.topbarHeight}
-              tintColor={activeTheme?.icons?.topbarTintColor}
-              tintOpacity={activeTheme?.icons?.topbarTintOpacity}
-              backdropFadeColor={activeTheme?.icons?.topbarBackdropFadeColor}
-              title={activeTheme?.label}
-            />
+            <span
+              style={{
+                opacity: activeTheme?.icons?.topbarGlow ? 0.88 : 1,
+                filter: activeTheme?.icons?.topbarGlow
+                  ? `drop-shadow(0 0 10px ${AMBER[400]}70)`
+                  : 'none',
+                transition: 'all 0.35s ease',
+              }}
+            >
+              <ThemeIcon
+                svgRaw={activeTheme?.icons?.topbarSvgRaw}
+                imageHref={activeTheme?.icons?.topbarImageHref}
+                size={activeTheme?.icons?.topbarSize ?? 18}
+                width={activeTheme?.icons?.topbarWidth}
+                height={activeTheme?.icons?.topbarHeight}
+                tintColor={activeTheme?.icons?.topbarTintColor}
+                tintOpacity={activeTheme?.icons?.topbarTintOpacity}
+                backdropFadeColor={activeTheme?.icons?.topbarBackdropFadeColor}
+                title={activeTheme?.label}
+              />
+            </span>
             <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
             <span style={{ fontSize: 11, color: SLATE.muted }}>
               {authLoading

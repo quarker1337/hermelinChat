@@ -39,6 +39,7 @@ export interface ThemeIcons {
   topbarSize?: number
   topbarWidth?: number
   topbarHeight?: number
+  topbarGlow?: boolean
   alignmentSvgRaw: string
   alignmentImageHref?: string
   alignmentSize?: number
@@ -246,11 +247,12 @@ export const THEMES: Record<string, Theme> = {
       ],
       topbarSvgRaw: NOUS_MARK_RAW,
       topbarImageHref: NOUS_GIRL_BIG_URL,
-      topbarTintColor: '#5888c0',
-      topbarTintOpacity: 0.25,
-      topbarBackdropFadeColor: '#141838',
+      topbarTintColor: undefined,
+      topbarTintOpacity: undefined,
+      topbarBackdropFadeColor: undefined,
       topbarWidth: 54,
       topbarHeight: 42,
+      topbarGlow: true,
       alignmentSvgRaw: NOUS_ALIGNMENT_RAW,
       alignmentImageHref: NOUS_GIRL_URL,
       alignmentWidth: 64,
