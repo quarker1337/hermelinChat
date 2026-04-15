@@ -55,7 +55,7 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
     const quant = 4
 
     const palette = [accentRgb, accentSoftRgb, yellowRgb, textRgb]
-    const particleCount = Math.max(8, Math.round(22 * Math.max(0.35, f)))
+    const particleCount = Math.max(6, Math.round(14 * Math.max(0.35, f)))
     const particles = Array.from({ length: particleCount }, () => ({
       x: Math.random(),
       y: Math.random(),
@@ -67,40 +67,64 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
       color: palette[Math.floor(Math.random() * palette.length)],
     }))
 
-    const init = () => {
-      canvas.width = canvas.parentElement?.offsetWidth || window.innerWidth
-      canvas.height = canvas.parentElement?.offsetHeight || window.innerHeight
+    // ─── Pre-rendered static layers ──────────────────────────────────────────
+
+    let staticLayer: HTMLCanvasElement | null = null
+    let backdropLayer: HTMLCanvasElement | null = null
+
+    const initStaticLayer = (W: number, H: number) => {
+      staticLayer = document.createElement('canvas')
+      staticLayer.width = W
+      staticLayer.height = H
+      const sCtx = staticLayer.getContext('2d')!
+
+      // Grid
+      sCtx.strokeStyle = `rgba(${borderRgb.r},${borderRgb.g},${borderRgb.b},${(0.22 * Math.min(1, f)).toFixed(4)})`
+      sCtx.lineWidth = 1
+      for (let x = 0; x < W; x += gridSize) {
+        sCtx.beginPath(); sCtx.moveTo(x + 0.5, 0); sCtx.lineTo(x + 0.5, H); sCtx.stroke()
+      }
+      for (let y = 0; y < H; y += gridSize) {
+        sCtx.beginPath(); sCtx.moveTo(0, y + 0.5); sCtx.lineTo(W, y + 0.5); sCtx.stroke()
+      }
+
+      // Scanlines
+      const scanAlpha = 0.035 * Math.min(1.15, f)
+      if (scanAlpha > 0.001) {
+        sCtx.fillStyle = `rgba(0,0,0,${scanAlpha.toFixed(4)})`
+        for (let y = 0; y < H; y += 3) {
+          sCtx.fillRect(0, y, W, 1)
+        }
+      }
     }
 
-    const drawBackdrop = (W: number, H: number) => {
-      ctx.fillStyle = bgHex
-      ctx.fillRect(0, 0, W, H)
+    const initBackdrop = (W: number, H: number) => {
+      backdropLayer = document.createElement('canvas')
+      backdropLayer.width = W
+      backdropLayer.height = H
+      const bCtx = backdropLayer.getContext('2d')!
 
-      const vignette = ctx.createRadialGradient(W / 2, H / 2, W * 0.08, W / 2, H / 2, W * 0.7)
+      bCtx.fillStyle = bgHex
+      bCtx.fillRect(0, 0, W, H)
+
+      const vignette = bCtx.createRadialGradient(W / 2, H / 2, W * 0.08, W / 2, H / 2, W * 0.7)
       vignette.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${0.06 * f})`)
       vignette.addColorStop(0.45, `rgba(${accentSoftRgb.r},${accentSoftRgb.g},${accentSoftRgb.b},${0.025 * f})`)
       vignette.addColorStop(1, `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},0)`)
-      ctx.fillStyle = vignette
-      ctx.fillRect(0, 0, W, H)
+      bCtx.fillStyle = vignette
+      bCtx.fillRect(0, 0, W, H)
     }
 
-    const drawGrid = (W: number, H: number) => {
-      ctx.strokeStyle = `rgba(${borderRgb.r},${borderRgb.g},${borderRgb.b},${(0.22 * Math.min(1, f)).toFixed(4)})`
-      ctx.lineWidth = 1
+    // ─── Init ────────────────────────────────────────────────────────────────
 
-      for (let x = 0; x < W; x += gridSize) {
-        ctx.beginPath()
-        ctx.moveTo(x + 0.5, 0)
-        ctx.lineTo(x + 0.5, H)
-        ctx.stroke()
-      }
-      for (let y = 0; y < H; y += gridSize) {
-        ctx.beginPath()
-        ctx.moveTo(0, y + 0.5)
-        ctx.lineTo(W, y + 0.5)
-        ctx.stroke()
-      }
+    const init = () => {
+      canvas.width = canvas.parentElement?.offsetWidth || window.innerWidth
+      canvas.height = canvas.parentElement?.offsetHeight || window.innerHeight
+      initBackdrop(canvas.width, canvas.height)
+      initStaticLayer(canvas.width, canvas.height)
     }
+
+    // ─── Dynamic draw functions ──────────────────────────────────────────────
 
     const drawParticles = (W: number, H: number) => {
       for (const p of particles) {
@@ -123,15 +147,6 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
       }
     }
 
-    const drawScanlines = (W: number, H: number) => {
-      const scanAlpha = 0.035 * Math.min(1.15, f)
-      if (scanAlpha <= 0.001) return
-      ctx.fillStyle = `rgba(0,0,0,${scanAlpha.toFixed(4)})`
-      for (let y = 0; y < H; y += 3) {
-        ctx.fillRect(0, y, W, 1)
-      }
-    }
-
     const drawSweep = (W: number, H: number) => {
       const sweepY = (tick * 0.18) % (H + 120) - 60
       const grad = ctx.createLinearGradient(0, sweepY, 0, sweepY + 48)
@@ -143,26 +158,41 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
       ctx.fillRect(0, sweepY, W, 48)
     }
 
-    const draw = () => {
+    // ─── Draw loop (throttled to 15fps) ──────────────────────────────────────
+
+    const TARGET_FPS = 15
+    const FRAME_MS = 1000 / TARGET_FPS
+    let lastFrame = 0
+
+    const draw = (timestamp: number) => {
+      animId = requestAnimationFrame(draw)
+      if (timestamp - lastFrame < FRAME_MS) return
+      lastFrame = timestamp
+
       const W = canvas.width
       const H = canvas.height
-      drawBackdrop(W, H)
-      drawGrid(W, H)
+
+      // Static layers (pre-rendered once in init)
+      if (backdropLayer) ctx.drawImage(backdropLayer, 0, 0)
+      if (staticLayer) ctx.drawImage(staticLayer, 0, 0)
+
+      // Dynamic layers (cheap — just particles + sweep)
       drawParticles(W, H)
       drawSweep(W, H)
-      drawScanlines(W, H)
+
       tick += 1
-      animId = requestAnimationFrame(draw)
     }
+
+    // ─── Startup ─────────────────────────────────────────────────────────────
 
     init()
     window.addEventListener('resize', init)
 
     if (prefersReducedMotion) {
-      drawBackdrop(canvas.width, canvas.height)
-      drawGrid(canvas.width, canvas.height)
+      // Static-only render, no animation loop
+      if (backdropLayer) ctx.drawImage(backdropLayer, 0, 0)
+      if (staticLayer) ctx.drawImage(staticLayer, 0, 0)
       drawParticles(canvas.width, canvas.height)
-      drawScanlines(canvas.width, canvas.height)
       return () => {
         window.removeEventListener('resize', init)
       }
@@ -170,9 +200,22 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
 
     animId = requestAnimationFrame(draw)
 
+    // Pause when tab is hidden
+    const handleVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(animId)
+        animId = 0
+      } else if (!animId) {
+        lastFrame = 0
+        animId = requestAnimationFrame(draw)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+
     return () => {
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [factor, canvasOpacity, bgHex, bgRgb.r, bgRgb.g, bgRgb.b, borderRgb.r, borderRgb.g, borderRgb.b, textRgb.r, textRgb.g, textRgb.b, accentRgb.r, accentRgb.g, accentRgb.b, accentSoftRgb.r, accentSoftRgb.g, accentSoftRgb.b, yellowRgb.r, yellowRgb.g, yellowRgb.b])
 
