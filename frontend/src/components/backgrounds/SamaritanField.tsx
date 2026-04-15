@@ -14,13 +14,16 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 
 interface SamaritanFieldProps {
   intensity?: number
+  paused?: boolean
 }
 
-export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
+export function SamaritanField({ intensity = 50, paused = false }: SamaritanFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pausedRef = useRef(paused)
+  const resumeFnRef = useRef<(() => void) | null>(null)
+  pausedRef.current = paused
 
   const pct = clampNum(intensity, 0, 100)
-  // 75 == "normal" intensity
   const factor = pct / 75
   const canvasOpacity = clampNum(0.85 * factor, 0, 1)
 
@@ -189,10 +192,13 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
     let lastFrame = 0
 
     const draw = (timestamp: number) => {
+      if (pausedRef.current) {
+        animId = 0
+        return
+      }
       animId = requestAnimationFrame(draw)
       if (timestamp - lastFrame < FRAME_MS) return
 
-      // Delta time compensation — same visual speed at any framerate
       const dt = Math.min(timestamp - lastFrame, 100)
       const dtScale = dt / 16.67
       lastFrame = timestamp
@@ -286,23 +292,30 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
       t += dtScale
     }
 
-    // Tab visibility
+    const resume = () => {
+      if (!pausedRef.current && !animId) {
+        lastFrame = 0
+        animId = requestAnimationFrame(draw)
+      }
+    }
+    resumeFnRef.current = resume
+
     const handleVisibility = () => {
       if (document.hidden) {
         cancelAnimationFrame(animId)
         animId = 0
-      } else if (!animId) {
-        lastFrame = 0
-        animId = requestAnimationFrame(draw)
+      } else {
+        resume()
       }
     }
 
     init()
     window.addEventListener('resize', init)
     document.addEventListener('visibilitychange', handleVisibility)
-    animId = requestAnimationFrame(draw)
+    if (!paused) animId = requestAnimationFrame(draw)
 
     return () => {
+      resumeFnRef.current = null
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
       document.removeEventListener('visibilitychange', handleVisibility)
@@ -323,6 +336,13 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
     accentRgb.g,
     accentRgb.b,
   ])
+
+  // Resume animation when paused flips to false
+  useEffect(() => {
+    if (!paused && resumeFnRef.current) {
+      resumeFnRef.current()
+    }
+  }, [paused])
 
   return (
     <canvas

@@ -15,10 +15,14 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 interface MatrixRainFieldProps {
   intensity?: number
   config?: unknown
+  paused?: boolean
 }
 
-export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps) {
+export function MatrixRainField({ intensity = 50, config, paused = false }: MatrixRainFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pausedRef = useRef(paused)
+  const resumeFnRef = useRef<(() => void) | null>(null)
+  pausedRef.current = paused
 
   const pct = clampNum(intensity, 0, 100)
   // 75 == "normal" intensity
@@ -35,10 +39,8 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
   const speedBase = clampNum(cfg.speedBase ?? 0.04, 0.01, 5)
   const speedJitter = clampNum(cfg.speedJitter ?? 0.05, 0, 5)
 
-  // Optional throttling + palette tweaks for the matrix-rain effect
   const frameMs = clampNum(cfg.frameMs ?? 50, 0, 250)
   const redChance = clampNum(cfg.redChance ?? 0, 0, 1)
-  // When a drop is past the bottom, chance (per draw) to reset it back to the top.
   const resetChance = clampNum(cfg.resetChance ?? 0.98, 0, 1)
 
   const redBrightHex = (cfg.redBright as string) ?? '#ff4d4d'
@@ -72,8 +74,6 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
     const prefersReducedMotion =
       !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)')?.matches
 
-    if (prefersReducedMotion) return
-
     let animId: number
     let drops: number[] = []
     let columns = 0
@@ -93,6 +93,10 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
     }
 
     const draw = (ts: number) => {
+      if (pausedRef.current) {
+        animId = 0
+        return
+      }
       animId = requestAnimationFrame(draw)
 
       // Throttle draws (prevents smear when speed is low).
@@ -143,6 +147,14 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
       }
     }
 
+    const resume = () => {
+      if (!pausedRef.current && !animId) {
+        lastDraw = 0
+        animId = requestAnimationFrame(draw)
+      }
+    }
+    resumeFnRef.current = resume
+
     init()
     window.addEventListener('resize', init)
 
@@ -151,16 +163,16 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
       if (document.hidden) {
         cancelAnimationFrame(animId)
         animId = 0
-      } else if (!animId) {
-        lastDraw = 0
-        animId = requestAnimationFrame(draw)
+      } else {
+        resume()
       }
     }
     document.addEventListener('visibilitychange', handleVisibility)
 
-    animId = requestAnimationFrame(draw)
+    if (!prefersReducedMotion && !paused) animId = requestAnimationFrame(draw)
 
     return () => {
+      resumeFnRef.current = null
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
       document.removeEventListener('visibilitychange', handleVisibility)
@@ -211,6 +223,13 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
     bgRgb.g,
     bgRgb.b,
   ])
+
+  // Resume animation when paused flips to false
+  useEffect(() => {
+    if (!paused && resumeFnRef.current) {
+      resumeFnRef.current()
+    }
+  }, [paused])
 
   return (
     <canvas

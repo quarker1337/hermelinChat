@@ -6,7 +6,11 @@ import { SamaritanField } from './SamaritanField'
 import { GrainOverlay } from './GrainOverlay'
 import { ScanlinesOverlay } from './ScanlinesOverlay'
 
-export function BackgroundRenderer() {
+interface BackgroundRendererProps {
+  paused?: boolean
+}
+
+export function BackgroundRenderer({ paused = false }: BackgroundRendererProps) {
   const effectiveBgKind = useUiPrefsStore((s) => s.effectiveBgKind)
   const prefs = useUiPrefsStore((s) => s.prefs)
   const activeTheme = useUiPrefsStore((s) => s.activeTheme)
@@ -20,13 +24,13 @@ export function BackgroundRenderer() {
       {prefs.particles.enabled && intensity > 0 && (
         <>
           {effectiveBgKind === 'matrix-rain' ? (
-            <MatrixRainField intensity={intensity} config={activeTheme?.background?.matrixRain} />
+            <MatrixRainField intensity={intensity} config={activeTheme?.background?.matrixRain} paused={paused} />
           ) : effectiveBgKind === 'nous-crt' ? (
-            <NousCRTField intensity={intensity} />
+            <NousCRTField intensity={intensity} paused={paused} />
           ) : effectiveBgKind === 'samaritan' ? (
-            <SamaritanField intensity={intensity} />
+            <SamaritanField intensity={intensity} paused={paused} />
           ) : (
-            <ParticleField intensity={intensity} />
+            <ParticleField intensity={intensity} paused={paused} />
           )}
         </>
       )}

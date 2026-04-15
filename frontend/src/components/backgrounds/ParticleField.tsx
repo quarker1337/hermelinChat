@@ -14,10 +14,14 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 
 interface ParticleFieldProps {
   intensity?: number
+  paused?: boolean
 }
 
-export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
+export function ParticleField({ intensity = 50, paused = false }: ParticleFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pausedRef = useRef(paused)
+  const resumeFnRef = useRef<(() => void) | null>(null)
+  pausedRef.current = paused
 
   const pct = clampNum(intensity, 0, 100)
   const factor = pct / 50
@@ -41,7 +45,6 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
     const FRAME_MS = 1000 / TARGET_FPS
     let lastFrame = 0
 
-    // Fewer particles — 30 is visually identical to 60 at this opacity
     const count = Math.max(0, Math.round(30 * factor))
 
     const particles = Array.from({ length: count }, () => ({
@@ -53,12 +56,10 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
       o: Math.min(0.22, (Math.random() * 0.15 + 0.03) * factor),
     }))
 
-    // Pre-compute the rgba string per particle (avoids string alloc per frame)
     const particleColors = particles.map(p =>
       `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${p.o})`
     )
 
-    // Pre-compute connection line base color
     const connBase = Math.min(0.08, 0.04 * factor)
 
     const init = () => {
@@ -71,19 +72,21 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
     }
 
     const draw = (timestamp: number) => {
+      if (pausedRef.current) {
+        animId = 0
+        return
+      }
       animId = requestAnimationFrame(draw)
       if (timestamp - lastFrame < FRAME_MS) return
 
-      // Delta time compensation — same visual speed at any framerate
       const dt = Math.min(timestamp - lastFrame, 100)
-      const dtScale = dt / 16.67  // 1.0 at 60fps, ~3.0 at 20fps
+      const dtScale = dt / 16.67
       lastFrame = timestamp
 
       const W = canvas.width
       const H = canvas.height
       ctx.clearRect(0, 0, W, H)
 
-      // Update + draw particles using fillRect instead of arc
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i]
         p.x += p.vx * dtScale
@@ -93,23 +96,21 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
         if (p.y < 0) p.y = H
         if (p.y > H) p.y = 0
 
-        // fillRect is ~3x faster than arc+fill for tiny dots
         ctx.fillStyle = particleColors[i]
         const s = p.r * 2
         ctx.fillRect(p.x - p.r, p.y - p.r, s, s)
       }
 
-      // Connection lines — batch into single path, use squared distance
       ctx.lineWidth = 0.5
-      ctx.beginPath()  // ONE beginPath for ALL lines
+      ctx.beginPath()
       let hasLines = false
 
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
           const dx = particles[i].x - particles[j].x
           const dy = particles[i].y - particles[j].y
-          const d2 = dx * dx + dy * dy  // skip sqrt!
-          if (d2 < 14400) {  // 120² = 14400
+          const d2 = dx * dx + dy * dy
+          if (d2 < 14400) {
             ctx.moveTo(particles[i].x, particles[i].y)
             ctx.lineTo(particles[j].x, particles[j].y)
             hasLines = true
@@ -118,34 +119,48 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
       }
 
       if (hasLines) {
-        // Single stroke call for all lines (uniform color)
         ctx.strokeStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${connBase})`
         ctx.stroke()
       }
     }
 
-    // Tab visibility
+    // Resume function — kicks the animation loop back to life
+    const resume = () => {
+      if (!pausedRef.current && !animId) {
+        lastFrame = 0
+        animId = requestAnimationFrame(draw)
+      }
+    }
+    resumeFnRef.current = resume
+
     const handleVisibility = () => {
       if (document.hidden) {
         cancelAnimationFrame(animId)
         animId = 0
-      } else if (!animId) {
-        lastFrame = 0
-        animId = requestAnimationFrame(draw)
+      } else {
+        resume()
       }
     }
 
     init()
     window.addEventListener('resize', init)
     document.addEventListener('visibilitychange', handleVisibility)
-    animId = requestAnimationFrame(draw)
+    if (!paused) animId = requestAnimationFrame(draw)
 
     return () => {
+      resumeFnRef.current = null
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [factor, accentRgb.r, accentRgb.g, accentRgb.b])
+
+  // Resume animation when paused flips to false
+  useEffect(() => {
+    if (!paused && resumeFnRef.current) {
+      resumeFnRef.current()
+    }
+  }, [paused])
 
   return (
     <canvas

@@ -80,6 +80,9 @@ export function AppShell() {
   const [renameSession, setRenameSession] = useState<{ id: string; title: string } | null>(null)
   const [deleteSession, setDeleteSession] = useState<{ id: string; title: string } | null>(null)
 
+  // Pause background animation while any overlay/modal is open
+  const overlayOpen = !!(settingsOpen || renameSession || deleteSession || locked)
+
   // ─── Initialization ───────────────────────────────────────────────
 
   // Refresh auth on mount
@@ -286,7 +289,7 @@ export function AppShell() {
             minHeight: 0,
           }}
         >
-          <BackgroundRenderer />
+          <BackgroundRenderer paused={overlayOpen} />
 
           {/* ── Topbar ── */}
           <div

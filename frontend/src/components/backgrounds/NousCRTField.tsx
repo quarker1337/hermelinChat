@@ -14,10 +14,14 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 
 interface NousCRTFieldProps {
   intensity?: number
+  paused?: boolean
 }
 
-export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
+export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pausedRef = useRef(paused)
+  const resumeFnRef = useRef<(() => void) | null>(null)
+  pausedRef.current = paused
 
   const pct = clampNum(intensity, 0, 100)
   const factor = pct / 75
@@ -165,10 +169,13 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
     let lastFrame = 0
 
     const draw = (timestamp: number) => {
+      if (pausedRef.current) {
+        animId = 0
+        return
+      }
       animId = requestAnimationFrame(draw)
       if (timestamp - lastFrame < FRAME_MS) return
 
-      // Delta time compensation — same visual speed at any framerate
       const dt = Math.min(timestamp - lastFrame, 100)
       const dtScale = dt / 16.67
       lastFrame = timestamp
@@ -176,15 +183,30 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
       const W = canvas.width
       const H = canvas.height
 
-      // Static layers (pre-rendered once in init)
       if (backdropLayer) ctx.drawImage(backdropLayer, 0, 0)
       if (staticLayer) ctx.drawImage(staticLayer, 0, 0)
 
-      // Dynamic layers (cheap — just particles + sweep)
       drawParticles(W, H, dtScale)
       drawSweep(W, H)
 
       tick += dtScale
+    }
+
+    const resume = () => {
+      if (!pausedRef.current && !animId) {
+        lastFrame = 0
+        animId = requestAnimationFrame(draw)
+      }
+    }
+    resumeFnRef.current = resume
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(animId)
+        animId = 0
+      } else {
+        resume()
+      }
     }
 
     // ─── Startup ─────────────────────────────────────────────────────────────
@@ -193,35 +215,32 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
     window.addEventListener('resize', init)
 
     if (prefersReducedMotion) {
-      // Static-only render, no animation loop
       if (backdropLayer) ctx.drawImage(backdropLayer, 0, 0)
       if (staticLayer) ctx.drawImage(staticLayer, 0, 0)
       drawParticles(canvas.width, canvas.height, 1)
       return () => {
+        resumeFnRef.current = null
         window.removeEventListener('resize', init)
       }
     }
 
-    animId = requestAnimationFrame(draw)
-
-    // Pause when tab is hidden
-    const handleVisibility = () => {
-      if (document.hidden) {
-        cancelAnimationFrame(animId)
-        animId = 0
-      } else if (!animId) {
-        lastFrame = 0
-        animId = requestAnimationFrame(draw)
-      }
-    }
     document.addEventListener('visibilitychange', handleVisibility)
+    if (!paused) animId = requestAnimationFrame(draw)
 
     return () => {
+      resumeFnRef.current = null
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [factor, canvasOpacity, bgHex, bgRgb.r, bgRgb.g, bgRgb.b, borderRgb.r, borderRgb.g, borderRgb.b, textRgb.r, textRgb.g, textRgb.b, accentRgb.r, accentRgb.g, accentRgb.b, accentSoftRgb.r, accentSoftRgb.g, accentSoftRgb.b, yellowRgb.r, yellowRgb.g, yellowRgb.b])
+
+  // Resume animation when paused flips to false
+  useEffect(() => {
+    if (!paused && resumeFnRef.current) {
+      resumeFnRef.current()
+    }
+  }, [paused])
 
   return (
     <canvas
