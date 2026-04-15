@@ -383,6 +383,7 @@ export function AppShell() {
                     bob={activeTheme?.icons?.alignmentBob}
                     bobDurationMs={activeTheme?.icons?.alignmentBobDurationMs}
                     bobDistancePx={activeTheme?.icons?.alignmentBobDistancePx}
+                    paused={overlayOpen}
                   />
                 </>
               ) : (

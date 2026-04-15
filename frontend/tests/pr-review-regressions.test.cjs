@@ -290,6 +290,37 @@ test('alignment easter egg supports always-on bobbing artwork', () => {
   assert.match(source, /@keyframes eggBob/)
 })
 
+test('alignment easter egg disables bob animation and glow while paused', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  const React = require('react')
+  const ReactDOMServer = require('react-dom/server')
+  const { AlignmentEasterEgg } = loadCompiled('components/AlignmentEasterEgg.js')
+
+  const html = ReactDOMServer.renderToStaticMarkup(
+    React.createElement(AlignmentEasterEgg, {
+      imageHref: '/assets/nous-girl.png',
+      title: 'nous girl',
+      width: 64,
+      height: 64,
+      alwaysVisible: true,
+      bob: true,
+      paused: true,
+    }),
+  )
+
+  assert.doesNotMatch(html, /animation:eggBob/)
+  assert.doesNotMatch(html, /drop-shadow/)
+})
+
+test('AppShell pauses the alignment easter egg when overlays are open', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'AppShell.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /<BackgroundRenderer paused=\{overlayOpen\} \/>/)
+  assert.match(source, /<AlignmentEasterEgg[\s\S]*paused=\{overlayOpen\}/)
+})
+
 test('samaritan theme uses warm palette and sprite artwork', () => {
   installAssetStubs()
   clearCompiledModules()

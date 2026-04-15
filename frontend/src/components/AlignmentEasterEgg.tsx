@@ -20,6 +20,7 @@ interface AlignmentEasterEggProps {
   bob?: boolean
   bobDurationMs?: number
   bobDistancePx?: number
+  paused?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ export const AlignmentEasterEgg = ({
   bob = false,
   bobDurationMs = 3200,
   bobDistancePx = 2,
+  paused = false,
 }: AlignmentEasterEggProps) => {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState(false)
@@ -53,6 +55,8 @@ export const AlignmentEasterEgg = ({
   const toastId = toast?.id || ''
 
   const opacity = alwaysVisible ? (open || toastActive ? 1 : 0.88) : open ? 0.75 : toastActive ? 0.75 : hovered ? 0.25 : 0.08
+  const shouldBob = bob && !paused
+  const glowEnabled = (open || toastActive || alwaysVisible) && !paused
 
   const fetchWhisper = useCallback(async () => {
     try {
@@ -105,13 +109,13 @@ export const AlignmentEasterEgg = ({
         opacity,
         transition: 'all 0.35s ease',
         transform: open ? 'scale(1.15)' : toastActive ? 'scale(1.1)' : 'scale(1)',
-        filter: open || toastActive || alwaysVisible ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
+        filter: glowEnabled ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
         userSelect: 'none',
       }}
       title={title || 'the stout knows\u2026'}
     >
       <style>{`@keyframes eggBob { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-${bobDistancePx}px); } }`}</style>
-      <div style={{ animation: bob ? `eggBob ${bobDurationMs}ms ease-in-out infinite` : undefined, willChange: bob ? 'transform' : undefined }}>
+      <div style={{ animation: shouldBob ? `eggBob ${bobDurationMs}ms ease-in-out infinite` : undefined, willChange: shouldBob ? 'transform' : undefined }}>
         <ThemeIcon svgRaw={svgRaw} imageHref={imageHref} size={size} width={width} height={height} title={title} />
       </div>
 
