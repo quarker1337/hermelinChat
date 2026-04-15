@@ -321,6 +321,21 @@ test('AppShell pauses the alignment easter egg when overlays are open', () => {
   assert.match(source, /<AlignmentEasterEgg[\s\S]*paused=\{overlayOpen\}/)
 })
 
+test('theme background fields do not snapshot canvas into data URLs on pause', () => {
+  const paths = [
+    path.join(SOURCE_ROOT, 'components', 'backgrounds', 'NousCRTField.tsx'),
+    path.join(SOURCE_ROOT, 'components', 'backgrounds', 'SamaritanField.tsx'),
+    path.join(SOURCE_ROOT, 'components', 'backgrounds', 'ParticleField.tsx'),
+    path.join(SOURCE_ROOT, 'components', 'backgrounds', 'MatrixRainField.tsx'),
+  ]
+
+  for (const sourcePath of paths) {
+    const source = fs.readFileSync(sourcePath, 'utf8')
+    assert.ok(!source.includes('toDataURL('), `${path.basename(sourcePath)} still snapshots canvas`)
+    assert.ok(!source.includes('backgroundImage: `url(${snapshot})`'), `${path.basename(sourcePath)} still renders snapshot overlay`)
+  }
+})
+
 test('samaritan theme uses warm palette and sprite artwork', () => {
   installAssetStubs()
   clearCompiledModules()

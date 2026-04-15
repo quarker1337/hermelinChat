@@ -23,16 +23,7 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
   const resumeFnRef = useRef<(() => void) | null>(null)
   pausedRef.current = paused
 
-  // Snapshot: flatten canvas to static image when paused — trivial for blur
-  const [snapshot, setSnapshot] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (paused && canvasRef.current) {
-      try { setSnapshot(canvasRef.current.toDataURL('image/jpeg', 0.7)) } catch { setSnapshot(null) }
-    } else {
-      setSnapshot(null)
-    }
-  }, [paused])
 
   const pct = clampNum(intensity, 0, 100)
   const factor = pct / 75
@@ -241,8 +232,7 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
   }, [paused])
 
   return (
-    <>
-      <canvas
+    <canvas
         ref={canvasRef}
         style={{
           position: 'absolute',
@@ -251,26 +241,9 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
           width: '100%',
           height: '100%',
           pointerEvents: 'none',
-          opacity: snapshot ? 0 : canvasOpacity,
+          opacity: canvasOpacity,
           zIndex: 0,
         }}
-      />
-      {snapshot && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            pointerEvents: 'none',
-            backgroundImage: `url(${snapshot})`,
-            backgroundSize: 'cover',
-            opacity: canvasOpacity,
-            zIndex: 0,
-          }}
-        />
-      )}
-    </>
+    />
   )
 }
