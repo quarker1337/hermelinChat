@@ -354,7 +354,7 @@ export function SamaritanField({ intensity = 50, paused = false }: SamaritanFiel
         width: '100%',
         height: '100%',
         pointerEvents: 'none',
-        opacity: canvasOpacity,
+        opacity: paused ? 0 : canvasOpacity,
         zIndex: 0,
       }}
     />

@@ -241,7 +241,7 @@ export function MatrixRainField({ intensity = 50, config, paused = false }: Matr
         width: '100%',
         height: '100%',
         pointerEvents: 'none',
-        opacity: canvasOpacity,
+        opacity: paused ? 0 : canvasOpacity,
         zIndex: 0,
       }}
     />

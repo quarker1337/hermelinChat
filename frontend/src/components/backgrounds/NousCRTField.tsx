@@ -252,7 +252,7 @@ export function NousCRTField({ intensity = 50, paused = false }: NousCRTFieldPro
         width: '100%',
         height: '100%',
         pointerEvents: 'none',
-        opacity: canvasOpacity,
+        opacity: paused ? 0 : canvasOpacity,
         zIndex: 0,
       }}
     />
