@@ -1766,6 +1766,57 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         return {"text": text}
 
+    # ── Update check (cached) ──────────────────────────────────────────
+
+    _GITHUB_REPO = "quarker1337/hermelinChat"
+    _update_cache: dict = {"latest": None, "checked_at": 0.0, "error": None}
+    _UPDATE_CHECK_INTERVAL = 3600  # re-check at most once per hour
+
+    @app.get("/api/update-check")
+    async def update_check():
+        """Check GitHub for newer hermelinChat releases (cached 1h)."""
+        from hermelin import __version__ as current_version
+
+        now = time.time()
+
+        # Return cached result if fresh enough
+        if now - _update_cache["checked_at"] < _UPDATE_CHECK_INTERVAL and _update_cache["latest"]:
+            return {
+                "current": current_version,
+                "latest": _update_cache["latest"],
+                "update_available": _update_cache["latest"] != current_version,
+                "url": f"https://github.com/{_GITHUB_REPO}/releases/latest",
+                "cached": True,
+            }
+
+        # Fetch from GitHub
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(
+                    f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
+                    headers={"Accept": "application/vnd.github.v3+json"},
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    tag = (data.get("tag_name") or "").lstrip("v").strip()
+                    _update_cache["latest"] = tag
+                    _update_cache["checked_at"] = now
+                    _update_cache["error"] = None
+                else:
+                    _update_cache["error"] = f"GitHub API returned {r.status_code}"
+        except Exception as e:
+            _update_cache["error"] = str(e)
+
+        latest = _update_cache["latest"] or current_version
+        return {
+            "current": current_version,
+            "latest": latest,
+            "update_available": latest != current_version,
+            "url": f"https://github.com/{_GITHUB_REPO}/releases/latest",
+            "cached": False,
+            "error": _update_cache.get("error"),
+        }
+
     # -----------------------------------------------------------------
     # Auth (password -> signed session cookie)
     # -----------------------------------------------------------------

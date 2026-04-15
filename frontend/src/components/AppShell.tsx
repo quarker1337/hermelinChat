@@ -79,6 +79,7 @@ export function AppShell() {
   const [sessionMenu, setSessionMenu] = useState<SessionMenu | null>(null)
   const [renameSession, setRenameSession] = useState<{ id: string; title: string } | null>(null)
   const [deleteSession, setDeleteSession] = useState<{ id: string; title: string } | null>(null)
+  const [updateAvailable, setUpdateAvailable] = useState(false)
 
   // Pause background animation while any overlay/modal is open
   const overlayOpen = !!(settingsOpen || renameSession || deleteSession || locked)
@@ -88,6 +89,19 @@ export function AppShell() {
   // Refresh auth on mount
   useEffect(() => {
     useAuthStore.getState().refresh()
+  }, [])
+
+  // Check for updates after initial load (delayed so it doesn't compete)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      fetch('/api/update-check')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.update_available) setUpdateAvailable(true)
+        })
+        .catch(() => {})
+    }, 5000)
+    return () => clearTimeout(t)
   }, [])
 
   // Start/stop polling based on auth state
@@ -275,6 +289,7 @@ export function AppShell() {
           onResumeSession={handleResumeSession}
           onNewSession={handleNewSession}
           sessionMenu={sessionMenu}
+          updateAvailable={updateAvailable}
         />
 
         {/* ── Main area ── */}

@@ -16,6 +16,7 @@ interface SidebarProps {
   onResumeSession: (session: Session) => void
   onNewSession: () => void
   sessionMenu: SessionMenu | null
+  updateAvailable?: boolean
 }
 
 export const Sidebar = ({
@@ -24,6 +25,7 @@ export const Sidebar = ({
   onResumeSession,
   onNewSession,
   sessionMenu,
+  updateAvailable = false,
 }: SidebarProps) => {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -53,6 +55,7 @@ export const Sidebar = ({
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((v) => !v)}
           onOpenSettings={onOpenSettings}
+          updateAvailable={updateAvailable}
         />
 
         {/* Collapsed icon strip */}
@@ -119,6 +122,7 @@ export const Sidebar = ({
                 border: '1px solid transparent',
                 transition: 'all 0.15s ease',
                 userSelect: 'none',
+                position: 'relative',
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = SLATE.elevated
@@ -132,6 +136,17 @@ export const Sidebar = ({
               }}
             >
               <SettingsIcon size={18} />
+              {updateAvailable && (
+                <div style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: AMBER[400],
+                }} />
+              )}
             </button>
           </div>
         )}
