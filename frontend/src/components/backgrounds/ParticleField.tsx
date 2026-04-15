@@ -73,6 +73,10 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
     const draw = (timestamp: number) => {
       animId = requestAnimationFrame(draw)
       if (timestamp - lastFrame < FRAME_MS) return
+
+      // Delta time compensation — same visual speed at any framerate
+      const dt = Math.min(timestamp - lastFrame, 100)
+      const dtScale = dt / 16.67  // 1.0 at 60fps, ~3.0 at 20fps
       lastFrame = timestamp
 
       const W = canvas.width
@@ -82,8 +86,8 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
       // Update + draw particles using fillRect instead of arc
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i]
-        p.x += p.vx
-        p.y += p.vy
+        p.x += p.vx * dtScale
+        p.y += p.vy * dtScale
         if (p.x < 0) p.x = W
         if (p.x > W) p.x = 0
         if (p.y < 0) p.y = H

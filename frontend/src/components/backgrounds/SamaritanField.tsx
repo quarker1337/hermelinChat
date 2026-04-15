@@ -191,6 +191,10 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
     const draw = (timestamp: number) => {
       animId = requestAnimationFrame(draw)
       if (timestamp - lastFrame < FRAME_MS) return
+
+      // Delta time compensation — same visual speed at any framerate
+      const dt = Math.min(timestamp - lastFrame, 100)
+      const dtScale = dt / 16.67
       lastFrame = timestamp
 
       const W = canvas.width
@@ -201,8 +205,8 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
 
       // Connection nodes (only 8, O(n²) is fine)
       for (const n of nodes) {
-        n.x += n.vx + Math.sin(t * 0.0008 + n.phase) * 0.02
-        n.y += n.vy + Math.cos(t * 0.0006 + n.phase) * 0.015
+        n.x += (n.vx + Math.sin(t * 0.0008 + n.phase) * 0.02) * dtScale
+        n.y += (n.vy + Math.cos(t * 0.0006 + n.phase) * 0.015) * dtScale
         if (n.x < 0) n.x = W
         if (n.x > W) n.x = 0
         if (n.y < 0) n.y = H
@@ -243,9 +247,9 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
       // Draw blocks (skip save/restore — offset fillRect directly)
       for (let i = blocks.length - 1; i >= 0; i--) {
         const b = blocks[i]
-        b.x += b.vx
-        b.y += b.vy
-        b.life++
+        b.x += b.vx * dtScale
+        b.y += b.vy * dtScale
+        b.life += dtScale
 
         if (
           b.life > b.maxLife ||
@@ -279,7 +283,7 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
       ctx.fillStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${(0.01 * f).toFixed(4)})`
       ctx.fillRect(0, scanY, W, 30)
 
-      t++
+      t += dtScale
     }
 
     // Tab visibility

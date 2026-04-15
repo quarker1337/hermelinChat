@@ -126,10 +126,10 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
 
     // ─── Dynamic draw functions ──────────────────────────────────────────────
 
-    const drawParticles = (W: number, H: number) => {
+    const drawParticles = (W: number, H: number, dtScale: number) => {
       for (const p of particles) {
-        p.y -= p.speed
-        p.x += p.drift + Math.sin(tick * 0.01 + p.phase) * 0.0001
+        p.y -= p.speed * dtScale
+        p.x += p.drift * dtScale + Math.sin(tick * 0.01 + p.phase) * 0.0001 * dtScale
         if (p.y < -0.04) {
           p.y = 1.04
           p.x = Math.random()
@@ -167,6 +167,10 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
     const draw = (timestamp: number) => {
       animId = requestAnimationFrame(draw)
       if (timestamp - lastFrame < FRAME_MS) return
+
+      // Delta time compensation — same visual speed at any framerate
+      const dt = Math.min(timestamp - lastFrame, 100)
+      const dtScale = dt / 16.67
       lastFrame = timestamp
 
       const W = canvas.width
@@ -177,10 +181,10 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
       if (staticLayer) ctx.drawImage(staticLayer, 0, 0)
 
       // Dynamic layers (cheap — just particles + sweep)
-      drawParticles(W, H)
+      drawParticles(W, H, dtScale)
       drawSweep(W, H)
 
-      tick += 1
+      tick += dtScale
     }
 
     // ─── Startup ─────────────────────────────────────────────────────────────
@@ -192,7 +196,7 @@ export function NousCRTField({ intensity = 50 }: NousCRTFieldProps) {
       // Static-only render, no animation loop
       if (backdropLayer) ctx.drawImage(backdropLayer, 0, 0)
       if (staticLayer) ctx.drawImage(staticLayer, 0, 0)
-      drawParticles(canvas.width, canvas.height)
+      drawParticles(canvas.width, canvas.height, 1)
       return () => {
         window.removeEventListener('resize', init)
       }
