@@ -8,47 +8,100 @@
 #   (or set in ~/.hermes/config.yaml: display.skin: nous)
 
 name: nous
-description: "Nous Research aqua skin (matches UI theme: nous)"
+description: "Nous Research dusk skin (matches UI theme: nous)"
 
 colors:
-  banner_border: "#1a3a44"
-  banner_title: "#5cc8e6"
-  banner_accent: "#5cc8e6"
-  banner_dim: "#4a7a88"
-  banner_text: "#8acade"
+  banner_border: "#2e3860"
+  banner_title: "#88b8f0"
+  banner_accent: "#88b8f0"
+  banner_dim: "#3868a0"
+  banner_text: "#a0b0d0"
 
-  ui_accent: "#5cc8e6"
-  ui_label: "#c0e8f4"
-  ui_ok: "#38c878"
-  ui_error: "#e84057"
-  ui_warn: "#ffa726"
+  ui_accent: "#88b8f0"
+  ui_label: "#d0d8f0"
+  ui_ok: "#80c088"
+  ui_error: "#d08888"
+  ui_warn: "#e0c868"
 
-  prompt: "#8acade"
-  input_rule: "#1a3a44"
-  response_border: "#5cc8e6"
+  prompt: "#a0b0d0"
+  input_rule: "#2e3860"
+  response_border: "#88b8f0"
 
-  session_label: "#4a7a88"
-  session_border: "#1a3a44"
+  session_label: "#6878a0"
+  session_border: "#2e3860"
+
+spinner:
+  waiting_faces:
+    - "(◡‿◡)"
+    - "(◠‿◠)"
+    - "(◡ᴗ◡)"
+    - "(◠ω◠)"
+  thinking_faces:
+    - "(◡‿◡)?"
+    - "(◠‿◠)~"
+    - "(◡ᴗ◡)…"
+    - "(◠ω◠)♪"
+    - "(◡‿◡)!"
+  thinking_verbs:
+    - "aligning"
+    - "researching"
+    - "contemplating"
+    - "reasoning through"
+    - "synthesizing"
+    - "exploring the space"
+    - "consulting the archive"
+    - "inference in progress"
+  wings:
+    - ["⟪◡‿", "‿◡⟫"]
+    - ["⟪◠‿", "‿◠⟫"]
+    - ["⟪◡ᴗ", "ᴗ◡⟫"]
+    - ["⟪◠ω", "ω◠⟫"]
 
 branding:
-  agent_name: "hermelinChat"
-  welcome: "Welcome to hermelinChat! Type your message or /help for commands."
+  agent_name: "Nous://Hermes"
+  welcome: "Welcome to Nous://Hermes! Type your message or /help for commands."
   goodbye: "Goodbye! ⚕"
-  response_label: " ⚕ Hermes "
+  response_label: " ⚕ Nous://Hermes "
   prompt_symbol: "❯ "
   help_header: "(^_^)? Available Commands"
 
 tool_prefix: "│"
 
+tool_emojis:
+  terminal: "⚕"
+  web_search: "🔍"
+  read_file: "📖"
+  write_file: "✏"
+  search_files: "🔎"
+  execute_code: "⚡"
+  browser_navigate: "🌐"
+  delegate_task: "📤"
+  mixture_of_agents: "⚗"
+  memory: "🧠"
+  clarify: "❓"
+  cronjob: "⏰"
+  process: "⚙"
+  todo: "☐"
+
 banner_logo: |-
-  [bold #5cc8e6]███╗   ██╗ ██████╗ ██╗   ██╗███████╗[/]
-  [bold #3aa8c8]████╗  ██║██╔═══██╗██║   ██║██╔════╝[/]
-  [bold #1e6888]██╔██╗ ██║██║   ██║██║   ██║███████╗[/]
-  [bold #3aa8c8]██║╚██╗██║██║   ██║██║   ██║╚════██║[/]
-  [bold #5cc8e6]██║ ╚████║╚██████╔╝╚██████╔╝███████║[/]
-  [bold #4a7a88]╚═╝  ╚═══╝ ╚═════╝  ╚═════╝ ╚══════╝[/]
+  [bold #88b8f0]    ███  ██ ▄████▄ ██  ██ ▄█████     █  █ ██  ██ ██████ █████▄  ██▄  ▄██ ██████ ▄█████[/]   
+  [bold #68a0d0]    ██ ▀▄██ ██  ██ ██  ██ ▀▀▀▄▄▄ ▀  █  █  ██████ ██▄▄   ██▄▄██▄ ██ ▀▀ ██ ██▄▄   ▀▀▀▄▄▄[/]   
+  [bold #3868a0]    ██   ██ ▀████▀ ▀████▀ █████▀ ▄ █  █   ██  ██ ██▄▄▄▄ ██   ██ ██    ██ ██▄▄▄▄ █████▀[/]
 
 banner_hero: |-
-  [bold #5cc8e6]nous[/]
-  [dim #4a7a88]research[/]
-  [#1e6888]aligned[/]
+  [#3868a0]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   [/]
+  [#3868a0]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣴⣾⣿⣿⡿⠿⠿⠿⠿⢿⣿⣿⣷⣦⣤⡀⠀⠀    [/]
+  [#3868a0]⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣾⣿⠿⠛⣉⣤⣴⣶⣶⣶⣶⣶⣶⣦⣤⣉⠛⢿⣿⣷⣄⠀ ⠀ [/]
+  [#3868a0]⠀⠀⠀⠀⠀⠀⠀⣠⣿⣿⠟⣡⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣌⠻⣿⣿⣄⠀⠀⠀⠀⠀⠀⠀[/]
+  [#3868a0]⠀⠀⠀⠀⠀⠀⣸⣿⡿⣡⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣌⢿⣿⣇⠀⠀⠀⠀⠀⠀[/]
+  [#3868a0]⠀⠀⠀⠀⠀⢰⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀[/]
+  [#3868a0]⠀⠀⠀⠀⠀⢰⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀[/]
+  [#3868a0]⠀⠀⠀⠀⣀⣼⣿⣿⣿⣿⣿⣿⣿⡏⢿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣧⣀⠀⠀⠀⠀[/]
+  [#3868a0]⠀⠀⢀⣾⡟⠋⣿⣿⣿⣿⣿⣿⡿⠁⠀⠙⢿⣿⣿⣿⣿⣿⣿⡇⠙⢿⣿⣿⣿⣿⣿⣿⣿⣿⠙⢻⣷⡀⠀⠀[/]
+  [#3868a0]⠀⠀⢸⣿⡇⠀⢿⣿⣿⣿⣿⡟⠁⣀⣀⡀⠀⠈⠛⠿⠆⠉⠻⠧⣀⣀⣙⠿⣿⣿⣿⣿⣿⣿⠀⢸⣿⡇⠀⠀[/]
+  [#3868a0]⠀⠀⢸⣿⣷⣤⣸⣿⣿⣿⣿⠰⣿⣿⠿⢿⣷⡀⠀⠀⠀⠀⢠⣾⡿⠿⣿⣿⠊⣿⣿⣿⣿⣇⣤⣾⣿⡇⠀⠀[/]
+  [#3868a0]⠀⠀⠀⢿⣿⣿⣿⣿⣿⣿⣿⣆⠀⠀⠀⠀⠀⠁⠀⠀⠀⠀⠈⠀⠀⠀⠀⠀⣸⣿⣿⣿⣿⣿⣿⣿⡿⠁⠀⠀[/]
+  [#3868a0]⠀⠀⠀⠀⠉⣿⣿⣿⣿⣿⣿⣿⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⣿⣿⣿⣿⣿⣿⠛⠉⠀⠀⠀⠀[/]
+  [#3868a0]⠀⠀⠀⠀⣼⠿⠻⣿⣿⣿⣿⣿⣿⣷⣤⣀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣾⣿⣿⣿⣿⣿⣿⡏⠀⠀⠀⠀⠀⠀[/]
+  [#3868a0]⠀⠀⠀⠀⠀⠀⠀⠘⠿⣿⣿⣿⣎⠙⢿⣿⣷⣦⣤⣄⣠⣤⣴⣾⣿⣿⢟⣽⣿⣿⠟⠹⠏⠀⠀⠀⠀⠀⠀⠀[/]
+  [#3868a0]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⠛⠿⠷⠄⠈⠙⠛⠿⣿⣿⡿⠟⠛⠉⠠⠾⠟⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀[/]
