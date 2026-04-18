@@ -39,6 +39,33 @@ function normalizeArtifacts(items: unknown[]): ArtifactTab[] {
     })) as ArtifactTab[]
 }
 
+function artifactShallowEqual(a: ArtifactTab, b: ArtifactTab): boolean {
+  if (a === b) return true
+  // Fast path: compare scalar fields first.
+  if (
+    String(a.id) !== String(b.id) ||
+    String(a.type) !== String(b.type) ||
+    String(a.title) !== String(b.title) ||
+    Number(a.timestamp || 0) !== Number(b.timestamp || 0)
+  ) {
+    return false
+  }
+  // Compare `data` — this is the field most likely to cause unnecessary
+  // re-renders.  JSON.parse creates new objects on every poll, so a simple
+  // reference check is insufficient.  We do a cheap stringification compare
+  // so that identical payloads reuse the previous artifact object, preventing
+  // React from churning the DOM and stealing text-selection focus.
+  const aData = a.data
+  const bData = b.data
+  if (aData === bData) return true
+  if (!aData || !bData) return false
+  try {
+    return JSON.stringify(aData) === JSON.stringify(bData)
+  } catch {
+    return false
+  }
+}
+
 function mergeArtifactsStable(prevItems: ArtifactTab[], nextItems: ArtifactTab[]): ArtifactTab[] {
   const prev = Array.isArray(prevItems) ? prevItems : []
   const next = Array.isArray(nextItems) ? nextItems : []
@@ -51,10 +78,17 @@ function mergeArtifactsStable(prevItems: ArtifactTab[], nextItems: ArtifactTab[]
   // Keep the existing dropdown/tab order stable for known artifact IDs.
   // Live artifacts refresh their timestamps constantly, so blindly re-sorting
   // by timestamp makes the list jump around under the user's mouse.
+  //
+  // When an artifact's data hasn't semantically changed, reuse the *previous
+  // object reference* so that React's shallow-equality check in re-renders
+  // sees "no change" and skips the component update.  This prevents the
+  // constant DOM churn that steals text-selection focus from the user.
   const preserved: ArtifactTab[] = []
   for (const item of prev) {
     const updated = nextById.get(item.id)
-    if (updated) preserved.push(updated)
+    if (updated) {
+      preserved.push(artifactShallowEqual(item, updated) ? item : updated)
+    }
   }
 
   const newcomers = next.filter((item) => !prevById.has(item.id))
