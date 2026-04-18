@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
@@ -1195,7 +1195,7 @@ export interface ArtifactRendererProps {
   artifact: ArtifactTab
 }
 
-export default function ArtifactRenderer({ artifact }: ArtifactRendererProps) {
+function ArtifactRendererInner({ artifact }: ArtifactRendererProps) {
   const type = String(artifact?.type || '').toLowerCase()
 
   if (!artifact || typeof artifact !== 'object') {
@@ -1226,3 +1226,11 @@ export default function ArtifactRenderer({ artifact }: ArtifactRendererProps) {
       )
   }
 }
+
+// Memoize with referential equality check — when the artifact store reuses the
+// same object reference (which it does for unchanged artifacts thanks to
+// mergeArtifactsStable), React skips the re-render entirely and preserves
+// DOM state like text selections.
+const ArtifactRenderer = React.memo(ArtifactRendererInner)
+
+export default ArtifactRenderer
