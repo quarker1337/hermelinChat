@@ -20,6 +20,7 @@ import { BackgroundRenderer } from './backgrounds/BackgroundRenderer'
 import TerminalPane from './terminal/TerminalPane'
 import { AlignmentEasterEgg } from './AlignmentEasterEgg'
 import { ThemeIcon } from './shared/icons'
+import { TopbarSprite } from './shared/TopbarSprite'
 import { SettingsPanel } from './settings/SettingsPanel'
 import { LoginScreen } from './modals/LoginScreen'
 import { SessionContextMenu } from './modals/SessionContextMenu'
@@ -330,17 +331,36 @@ export function AppShell() {
                 transition: 'all 0.35s ease',
               }}
             >
-              <ThemeIcon
-                svgRaw={activeTheme?.icons?.topbarSvgRaw}
-                imageHref={activeTheme?.icons?.topbarImageHref}
-                size={activeTheme?.icons?.topbarSize ?? 18}
-                width={activeTheme?.icons?.topbarWidth}
-                height={activeTheme?.icons?.topbarHeight}
-                tintColor={activeTheme?.icons?.topbarTintColor}
-                tintOpacity={activeTheme?.icons?.topbarTintOpacity}
-                backdropFadeColor={activeTheme?.icons?.topbarBackdropFadeColor}
-                title={activeTheme?.label}
-              />
+              {activeTheme?.icons?.topbarSpritesheet && activeTheme?.icons?.topbarImageHref ? (
+                <TopbarSprite
+                  blinkHref={activeTheme.icons.topbarImageHref}
+                  vibeHref={activeTheme.icons.topbarVibeHref}
+                  blinkFrames={activeTheme.icons.topbarSpriteFrames}
+                  vibeFrames={activeTheme.icons.topbarVibeFrames}
+                  frameWidth={activeTheme.icons.topbarSpriteWidth}
+                  frameHeight={activeTheme.icons.topbarSpriteHeight}
+                  width={activeTheme.icons.topbarWidth}
+                  height={activeTheme.icons.topbarHeight}
+                  vibeChance={activeTheme.icons.topbarVibeChance}
+                  vibeIntervalMs={activeTheme.icons.topbarVibeIntervalMs}
+                  paused={overlayOpen}
+                  tintColor={activeTheme.icons.topbarTintColor}
+                  tintOpacity={activeTheme.icons.topbarTintOpacity}
+                  title={activeTheme.label}
+                />
+              ) : (
+                <ThemeIcon
+                  svgRaw={activeTheme?.icons?.topbarSvgRaw}
+                  imageHref={activeTheme?.icons?.topbarImageHref}
+                  size={activeTheme?.icons?.topbarSize ?? 18}
+                  width={activeTheme?.icons?.topbarWidth}
+                  height={activeTheme?.icons?.topbarHeight}
+                  tintColor={activeTheme?.icons?.topbarTintColor}
+                  tintOpacity={activeTheme?.icons?.topbarTintOpacity}
+                  backdropFadeColor={activeTheme?.icons?.topbarBackdropFadeColor}
+                  title={activeTheme?.label}
+                />
+              )}
             </span>
             <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
             <span style={{ fontSize: 11, color: SLATE.muted }}>

@@ -7,6 +7,8 @@ import NOUS_MARK_RAW from '../assets/nous-alignment-flipped.svg?raw'
 import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
 import NOUS_GIRL_BLINK_URL from '../assets/nous-girl-blink.png'
 import NOUS_GIRL_BIG_URL from '../assets/nous-girl-big.png'
+import NOUS_GIRL_TOPBAR_BLINK_URL from '../assets/nous-girl-topbar-blink.png'
+import NOUS_GIRL_TOPBAR_VIBE_URL from '../assets/nous-girl-topbar-vibe.png'
 
 import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
 import SAMARITAN_FAVICON_URL from '../assets/samaritan-favicon.svg'
@@ -40,6 +42,14 @@ export interface ThemeIcons {
   topbarWidth?: number
   topbarHeight?: number
   topbarGlow?: boolean
+  topbarSpritesheet?: boolean
+  topbarSpriteFrames?: number
+  topbarSpriteWidth?: number
+  topbarSpriteHeight?: number
+  topbarVibeHref?: string
+  topbarVibeFrames?: number
+  topbarVibeChance?: number
+  topbarVibeIntervalMs?: number
   alignmentSvgRaw: string
   alignmentImageHref?: string
   alignmentSize?: number
@@ -250,13 +260,21 @@ export const THEMES: Record<string, Theme> = {
         { rel: 'apple-touch-icon', sizes: '180x180', href: '/nous/apple-touch-icon-180x180.png' },
       ],
       topbarSvgRaw: NOUS_MARK_RAW,
-      topbarImageHref: NOUS_GIRL_BIG_URL,
+      topbarImageHref: NOUS_GIRL_TOPBAR_BLINK_URL,
       topbarTintColor: undefined,
       topbarTintOpacity: undefined,
       topbarBackdropFadeColor: undefined,
-      topbarWidth: 54,
-      topbarHeight: 42,
+      topbarWidth: 64,
+      topbarHeight: 64,
       topbarGlow: true,
+      topbarSpritesheet: true,
+      topbarSpriteFrames: 4,
+      topbarSpriteWidth: 64,
+      topbarSpriteHeight: 64,
+      topbarVibeHref: NOUS_GIRL_TOPBAR_VIBE_URL as string,
+      topbarVibeFrames: 8,
+      topbarVibeChance: 0.12,
+      topbarVibeIntervalMs: 8000,
       alignmentSvgRaw: NOUS_ALIGNMENT_RAW,
       alignmentImageHref: NOUS_GIRL_BLINK_URL,
       alignmentWidth: 64,
