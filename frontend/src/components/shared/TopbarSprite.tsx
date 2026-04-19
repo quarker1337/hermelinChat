@@ -49,36 +49,41 @@ export const TopbarSprite = ({
   frameHeight = 64,
   width,
   height,
-  vibeChance = 0.12,
-  vibeIntervalMs = 8000,
+  vibeChance = 0.25,
+  vibeIntervalMs = 5000,
   paused = false,
   tintColor,
   tintOpacity = 0.25,
   title,
 }: TopbarSpriteProps) => {
   const [vibing, setVibing] = useState(false)
-  const vibeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const vibingRef = useRef(false)
+
+  // Keep ref in sync so the scheduler can read current state without re-running
+  useEffect(() => { vibingRef.current = vibing }, [vibing])
 
   const sw = width ?? frameWidth
   const sh = height ?? frameHeight
 
-  // Random vibe trigger
+  // Random vibe trigger — uses setInterval so it doesn't break on re-renders
   useEffect(() => {
     if (paused || !vibeHref) return
 
-    const schedule = () => {
-      vibeTimeoutRef.current = setTimeout(() => {
-        if (Math.random() < vibeChance) {
-          setVibing(true)
-        }
-        // Schedule next check (or re-schedule after vibe finishes)
-        schedule()
-      }, vibeIntervalMs)
+    const check = () => {
+      // Don't trigger if already vibing
+      if (vibingRef.current) return
+      if (Math.random() < vibeChance) {
+        setVibing(true)
+      }
     }
 
-    schedule()
+    // First check after a short delay so it feels alive early on
+    const firstTimeout = setTimeout(check, 2000)
+    const interval = setInterval(check, vibeIntervalMs)
+
     return () => {
-      if (vibeTimeoutRef.current) clearTimeout(vibeTimeoutRef.current)
+      clearTimeout(firstTimeout)
+      clearInterval(interval)
     }
   }, [paused, vibeHref, vibeChance, vibeIntervalMs])
 
