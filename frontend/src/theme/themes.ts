@@ -8,7 +8,6 @@ import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
 import NOUS_GIRL_BLINK_URL from '../assets/nous-girl-blink.png'
 import NOUS_GIRL_BIG_URL from '../assets/nous-girl-big.png'
 import NOUS_GIRL_TOPBAR_BLINK_URL from '../assets/nous-girl-topbar-blink.png'
-import NOUS_GIRL_TOPBAR_VIBE_URL from '../assets/nous-girl-topbar-vibe.png'
 
 import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
 import SAMARITAN_FAVICON_URL from '../assets/samaritan-favicon.svg'
@@ -46,10 +45,6 @@ export interface ThemeIcons {
   topbarSpriteFrames?: number
   topbarSpriteWidth?: number
   topbarSpriteHeight?: number
-  topbarVibeHref?: string
-  topbarVibeFrames?: number
-  topbarVibeChance?: number
-  topbarVibeIntervalMs?: number
   alignmentSvgRaw: string
   alignmentImageHref?: string
   alignmentSize?: number
@@ -271,10 +266,6 @@ export const THEMES: Record<string, Theme> = {
       topbarSpriteFrames: 4,
       topbarSpriteWidth: 64,
       topbarSpriteHeight: 64,
-      topbarVibeHref: NOUS_GIRL_TOPBAR_VIBE_URL as string,
-      topbarVibeFrames: 8,
-      topbarVibeChance: 0.25,
-      topbarVibeIntervalMs: 5000,
       alignmentSvgRaw: NOUS_ALIGNMENT_RAW,
       alignmentImageHref: NOUS_GIRL_BLINK_URL,
       alignmentWidth: 64,

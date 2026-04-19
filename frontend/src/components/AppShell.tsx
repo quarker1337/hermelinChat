@@ -334,15 +334,11 @@ export function AppShell() {
               {activeTheme?.icons?.topbarSpritesheet && activeTheme?.icons?.topbarImageHref ? (
                 <TopbarSprite
                   blinkHref={activeTheme.icons.topbarImageHref}
-                  vibeHref={activeTheme.icons.topbarVibeHref}
                   blinkFrames={activeTheme.icons.topbarSpriteFrames}
-                  vibeFrames={activeTheme.icons.topbarVibeFrames}
                   frameWidth={activeTheme.icons.topbarSpriteWidth}
                   frameHeight={activeTheme.icons.topbarSpriteHeight}
                   width={activeTheme.icons.topbarWidth}
                   height={activeTheme.icons.topbarHeight}
-                  vibeChance={activeTheme.icons.topbarVibeChance}
-                  vibeIntervalMs={activeTheme.icons.topbarVibeIntervalMs}
                   paused={overlayOpen}
                   tintColor={activeTheme.icons.topbarTintColor}
                   tintOpacity={activeTheme.icons.topbarTintOpacity}
