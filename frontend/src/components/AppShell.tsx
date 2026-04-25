@@ -92,18 +92,29 @@ export function AppShell() {
     useAuthStore.getState().refresh()
   }, [])
 
-  // Check for updates after initial load (delayed so it doesn't compete)
+  // Check for updates after initial load (wait for auth so protected deployments don't miss it)
   useEffect(() => {
+    if (authLoading) return
+    if (authEnabled && !authenticated) {
+      setUpdateAvailable(false)
+      return
+    }
+
+    let cancelled = false
     const t = setTimeout(() => {
       fetch('/api/update-check')
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (data.update_available) setUpdateAvailable(true)
+          if (cancelled) return
+          setUpdateAvailable(Boolean(data?.update_available))
         })
         .catch(() => {})
     }, 5000)
-    return () => clearTimeout(t)
-  }, [])
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [authEnabled, authLoading, authenticated])
 
   // Start/stop polling based on auth state
   useEffect(() => {

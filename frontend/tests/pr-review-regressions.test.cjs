@@ -244,10 +244,12 @@ test('nous theme uses dusk palette and sprite artwork', () => {
 
   assert.equal(THEMES.nous.SLATE.bg, '#0e1028')
   assert.equal(THEMES.nous.SLATE.accent, '#88b8f0')
-  assert.match(THEMES.nous.icons.topbarImageHref || '', /nous-girl-big\.png$/)
-  assert.match(THEMES.nous.icons.alignmentImageHref || '', /nous-girl\.png$/)
-  assert.equal(THEMES.nous.icons.topbarTintColor, '#5888c0')
-  assert.equal(THEMES.nous.icons.topbarBackdropFadeColor, '#141838')
+  assert.match(THEMES.nous.icons.topbarImageHref || '', /nous-girl-topbar-blink\.png$/)
+  assert.match(THEMES.nous.icons.alignmentImageHref || '', /nous-girl-blink\.png$/)
+  assert.equal(THEMES.nous.icons.topbarTintColor, undefined)
+  assert.equal(THEMES.nous.icons.topbarBackdropFadeColor, undefined)
+  assert.equal(THEMES.nous.icons.topbarSpritesheet, true)
+  assert.equal(THEMES.nous.icons.alignmentSpritesheet, true)
   assert.equal(THEMES.nous.icons.alignmentAlwaysVisible, true)
   assert.equal(THEMES.nous.icons.alignmentBob, true)
   assert.equal(THEMES.nous.icons.alignmentWidth, 64)
@@ -319,6 +321,16 @@ test('AppShell pauses the alignment easter egg when overlays are open', () => {
 
   assert.match(source, /<BackgroundRenderer paused=\{overlayOpen\} \/>/)
   assert.match(source, /<AlignmentEasterEgg[\s\S]*paused=\{overlayOpen\}/)
+})
+
+test('AppShell waits for authentication before probing for updates', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'AppShell.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /if \(authLoading\) return/)
+  assert.match(source, /if \(authEnabled && !authenticated\) \{[\s\S]*setUpdateAvailable\(false\)/)
+  assert.match(source, /setUpdateAvailable\(Boolean\(data\?\.update_available\)\)/)
+  assert.match(source, /\}, \[authEnabled, authLoading, authenticated\]\)/)
 })
 
 test('theme background fields do not snapshot canvas into data URLs on pause', () => {

@@ -8,7 +8,7 @@ from unittest.mock import patch
 from hermelin.auth import create_session_token, extract_session_jti, verify_session_token
 from hermelin.config import HermelinConfig
 from hermelin.security import ip_allowed
-from hermelin.server import create_app
+from hermelin.server import _is_update_available, create_app
 
 
 def _route_for_path(app, path: str):
@@ -138,6 +138,9 @@ class InfoEndpointTests(unittest.TestCase):
 
 
 class _ExplodingAsyncClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
     async def __aenter__(self):
         return self
 
@@ -146,6 +149,31 @@ class _ExplodingAsyncClient:
 
     async def get(self, *args, **kwargs):
         raise RuntimeError("secret stack detail from /tmp/private/github-token")
+
+
+class _StaticStatusResponse:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+    def json(self):
+        return {}
+
+
+class _Http503AsyncClient:
+    calls = 0
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, *args, **kwargs):
+        type(self).calls += 1
+        return _StaticStatusResponse(503)
 
 
 class UpdateCheckEndpointTests(unittest.TestCase):
@@ -167,6 +195,37 @@ class UpdateCheckEndpointTests(unittest.TestCase):
             self.assertNotIn("secret stack detail", response["error"])
             self.assertNotIn("/tmp/private", response["error"])
             self.assertFalse(response["cached"])
+
+    def test_update_check_caches_failures_for_backoff(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hermes_home = Path(tmpdir) / "hermes-home"
+            config = HermelinConfig(
+                hermes_home=hermes_home,
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+            )
+            app = create_app(config)
+            route = _route_for_path(app, "/api/update-check")
+            _Http503AsyncClient.calls = 0
+
+            with patch("hermelin.server.httpx.AsyncClient", _Http503AsyncClient):
+                first = asyncio.run(route.endpoint())
+                second = asyncio.run(route.endpoint())
+
+            self.assertEqual(_Http503AsyncClient.calls, 1)
+            self.assertEqual(first["error"], "GitHub API returned 503")
+            self.assertFalse(first["cached"])
+            self.assertEqual(second["error"], "GitHub API returned 503")
+            self.assertTrue(second["cached"])
+            self.assertFalse(second["update_available"])
+
+
+class UpdateCheckVersionComparisonTests(unittest.TestCase):
+    def test_update_check_compares_versions_semantically(self):
+        self.assertTrue(_is_update_available("0.14", "0.15"))
+        self.assertTrue(_is_update_available("0.14.dev1", "0.14"))
+        self.assertFalse(_is_update_available("0.15.dev1", "0.14"))
+        self.assertFalse(_is_update_available("0.14+local", "0.14"))
 
 
 if __name__ == "__main__":
