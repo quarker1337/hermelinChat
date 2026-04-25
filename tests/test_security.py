@@ -3,6 +3,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from hermelin.auth import create_session_token, extract_session_jti, verify_session_token
 from hermelin.config import HermelinConfig
@@ -134,6 +135,38 @@ class InfoEndpointTests(unittest.TestCase):
             self.assertIn("default_model", response)
             for sensitive_key in ("hermes_cmd", "artifact_dir"):
                 self.assertNotIn(sensitive_key, response)
+
+
+class _ExplodingAsyncClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, *args, **kwargs):
+        raise RuntimeError("secret stack detail from /tmp/private/github-token")
+
+
+class UpdateCheckEndpointTests(unittest.TestCase):
+    def test_update_check_hides_exception_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hermes_home = Path(tmpdir) / "hermes-home"
+            config = HermelinConfig(
+                hermes_home=hermes_home,
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+            )
+            app = create_app(config)
+            route = _route_for_path(app, "/api/update-check")
+
+            with patch("hermelin.server.httpx.AsyncClient", _ExplodingAsyncClient):
+                response = asyncio.run(route.endpoint())
+
+            self.assertEqual(response["error"], "Update check temporarily unavailable")
+            self.assertNotIn("secret stack detail", response["error"])
+            self.assertNotIn("/tmp/private", response["error"])
+            self.assertFalse(response["cached"])
 
 
 if __name__ == "__main__":

@@ -1804,8 +1804,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                     _update_cache["error"] = None
                 else:
                     _update_cache["error"] = f"GitHub API returned {r.status_code}"
-        except Exception as e:
-            _update_cache["error"] = str(e)
+        except Exception:
+            logger.warning("update check failed", exc_info=True)
+            _update_cache["error"] = "Update check temporarily unavailable"
 
         latest = _update_cache["latest"] or current_version
         return {
