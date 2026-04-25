@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AMBER, SLATE } from '../../theme/index'
 
 function clampNum(n: unknown, min: number, max: number): number {
@@ -15,13 +15,18 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 interface MatrixRainFieldProps {
   intensity?: number
   config?: unknown
+  paused?: boolean
 }
 
-export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps) {
+export function MatrixRainField({ intensity = 50, config, paused = false }: MatrixRainFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pausedRef = useRef(paused)
+  const resumeFnRef = useRef<(() => void) | null>(null)
+  pausedRef.current = paused
+
+
 
   const pct = clampNum(intensity, 0, 100)
-  // 75 == "normal" intensity
   const factor = pct / 75
 
   const cfg = config && typeof config === 'object' ? (config as Record<string, unknown>) : {}
@@ -32,13 +37,11 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
   const baseOpacity = clampNum(cfg.opacity ?? 0.3, 0, 1)
   const canvasOpacity = clampNum(baseOpacity * factor, 0, 1)
 
-  const speedBase = clampNum(cfg.speedBase ?? 0.3, 0.01, 5)
-  const speedJitter = clampNum(cfg.speedJitter ?? 0.25, 0, 5)
+  const speedBase = clampNum(cfg.speedBase ?? 0.04, 0.01, 5)
+  const speedJitter = clampNum(cfg.speedJitter ?? 0.05, 0, 5)
 
-  // Optional throttling + palette tweaks for the matrix-rain effect
-  const frameMs = clampNum(cfg.frameMs ?? 0, 0, 250)
+  const frameMs = clampNum(cfg.frameMs ?? 50, 0, 250)
   const redChance = clampNum(cfg.redChance ?? 0, 0, 1)
-  // When a drop is past the bottom, chance (per draw) to reset it back to the top.
   const resetChance = clampNum(cfg.resetChance ?? 0.98, 0, 1)
 
   const redBrightHex = (cfg.redBright as string) ?? '#ff4d4d'
@@ -72,8 +75,6 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
     const prefersReducedMotion =
       !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)')?.matches
 
-    if (prefersReducedMotion) return
-
     let animId: number
     let drops: number[] = []
     let columns = 0
@@ -93,15 +94,17 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
     }
 
     const draw = (ts: number) => {
+      if (pausedRef.current) {
+        animId = 0
+        return
+      }
       animId = requestAnimationFrame(draw)
 
-      // Throttle draws (prevents smear when speed is low).
       if (frameMs > 0 && lastDraw && ts - lastDraw < frameMs) return
 
       const dt = lastDraw ? Math.min(200, ts - lastDraw) : 16
       lastDraw = ts
 
-      // Fade to background (creates trails).
       ctx.fillStyle = `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},${fadeAlpha})`
       ctx.fillRect(0, 0, canvas.width, canvas.height)
 
@@ -143,74 +146,65 @@ export function MatrixRainField({ intensity = 50, config }: MatrixRainFieldProps
       }
     }
 
+    const resume = () => {
+      if (!pausedRef.current && !animId) {
+        lastDraw = 0
+        animId = requestAnimationFrame(draw)
+      }
+    }
+    resumeFnRef.current = resume
+
     init()
     window.addEventListener('resize', init)
-    animId = requestAnimationFrame(draw)
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(animId)
+        animId = 0
+      } else {
+        resume()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    if (!prefersReducedMotion && !paused) animId = requestAnimationFrame(draw)
 
     return () => {
+      resumeFnRef.current = null
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [
-    colWidth,
-    fontSize,
-    fadeAlpha,
-    factor,
-    speedBase,
-    speedJitter,
-    frameMs,
-    redChance,
-    resetChance,
-
-    redBrightHex,
-    redBright.r,
-    redBright.g,
-    redBright.b,
-
-    redMidHex,
-    redMid.r,
-    redMid.g,
-    redMid.b,
-
-    redDimHex,
-    redDim.r,
-    redDim.g,
-    redDim.b,
-
-    brightHex,
-    bright.r,
-    bright.g,
-    bright.b,
-
-    midHex,
-    mid.r,
-    mid.g,
-    mid.b,
-
-    dimHex,
-    dim.r,
-    dim.g,
-    dim.b,
-
-    bgHex,
-    bgRgb.r,
-    bgRgb.g,
-    bgRgb.b,
+    colWidth, fontSize, fadeAlpha, factor, speedBase, speedJitter, frameMs, redChance, resetChance,
+    redBrightHex, redBright.r, redBright.g, redBright.b,
+    redMidHex, redMid.r, redMid.g, redMid.b,
+    redDimHex, redDim.r, redDim.g, redDim.b,
+    brightHex, bright.r, bright.g, bright.b,
+    midHex, mid.r, mid.g, mid.b,
+    dimHex, dim.r, dim.g, dim.b,
+    bgHex, bgRgb.r, bgRgb.g, bgRgb.b,
   ])
+
+  useEffect(() => {
+    if (!paused && resumeFnRef.current) {
+      resumeFnRef.current()
+    }
+  }, [paused])
 
   return (
     <canvas
-      ref={canvasRef}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        opacity: canvasOpacity,
-        zIndex: 0,
-      }}
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          opacity: canvasOpacity,
+          zIndex: 0,
+        }}
     />
   )
 }

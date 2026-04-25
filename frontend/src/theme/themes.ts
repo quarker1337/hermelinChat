@@ -5,6 +5,9 @@ import WHITE_RABBIT_RAW from '../assets/white-rabbit.svg?raw'
 import NOUS_ALIGNMENT_RAW from '../assets/nous-alignment.svg?raw'
 import NOUS_MARK_RAW from '../assets/nous-alignment-flipped.svg?raw'
 import NOUS_MARK_URL from '../assets/nous-alignment-flipped.svg'
+import NOUS_GIRL_BLINK_URL from '../assets/nous-girl-blink.png'
+import NOUS_GIRL_BIG_URL from '../assets/nous-girl-big.png'
+import NOUS_GIRL_TOPBAR_BLINK_URL from '../assets/nous-girl-topbar-blink.png'
 
 import SAMARITAN_MARK_RAW from '../assets/samaritan-mark.svg?raw'
 import SAMARITAN_FAVICON_URL from '../assets/samaritan-favicon.svg'
@@ -30,8 +33,31 @@ export interface ThemeIcons {
   faviconHref: string
   favicons?: Array<{ rel: string; type?: string; sizes?: string; href: string }>
   topbarSvgRaw: string
+  topbarImageHref?: string
+  topbarTintColor?: string
+  topbarTintOpacity?: number
+  topbarBackdropFadeColor?: string
   topbarSize?: number
+  topbarWidth?: number
+  topbarHeight?: number
+  topbarGlow?: boolean
+  topbarSpritesheet?: boolean
+  topbarSpriteFrames?: number
+  topbarSpriteWidth?: number
+  topbarSpriteHeight?: number
   alignmentSvgRaw: string
+  alignmentImageHref?: string
+  alignmentSize?: number
+  alignmentWidth?: number
+  alignmentHeight?: number
+  alignmentAlwaysVisible?: boolean
+  alignmentBob?: boolean
+  alignmentBobDurationMs?: number
+  alignmentBobDistancePx?: number
+  alignmentSpritesheet?: boolean
+  alignmentSpriteFrames?: number
+  alignmentSpriteWidth?: number
+  alignmentSpriteHeight?: number
   alignmentTitle: string
   alignmentWhisperText: string
   alignmentFetchWhisper: boolean
@@ -188,48 +214,83 @@ export const THEMES: Record<string, Theme> = {
 
   nous: {
     id: 'nous',
-    label: 'Nous (aqua)',
+    label: 'Nous (dusk)',
     AMBER: {
-      300: '#9ae1f2',
-      400: '#5cc8e6',
-      500: '#3aa8c8',
-      600: '#2a88a8',
-      700: '#1e6888',
-      800: '#144868',
-      900: '#0a2838',
+      // Keep the token name AMBER for compatibility; in this theme it represents the accent scale.
+      300: '#b7ccff',
+      400: '#88b8f0',
+      500: '#68a0d0',
+      600: '#5888c0',
+      700: '#3868a0',
+      800: '#244c78',
+      900: '#16284a',
     },
     SLATE: {
-      bg: '#06181e',
-      surface: '#0a2028',
-      elevated: '#0e2830',
-      border: '#1a3a44',
-      muted: '#4a7a88',
-      text: '#8acade',
-      textBright: '#c0e8f4',
-      accent: '#5cc8e6',
-      danger: '#e84057',
-      success: '#38c878',
-      info: '#5cc8e6',
+      bg: '#0e1028',
+      surface: '#141838',
+      elevated: '#1c2248',
+      border: '#2e3860',
+      muted: '#6878a0',
+      text: '#a0b0d0',
+      textBright: '#d0d8f0',
+      accent: '#88b8f0',
+      danger: '#d08888',
+      success: '#80c088',
+      info: '#68a0d0',
       purple: '#a78bfa',
-      cyan: '#22d3ee',
+      cyan: '#68a0d0',
+      yellow: '#e0c868',
+      teal: '#68a0d0',
+      tealDim: '#3868a0',
+      rose: '#d08888',
+      green: '#80c088',
     },
     icons: {
-      faviconHref: NOUS_MARK_URL,
+      // Smooth vector Nous girl illustration as favicon.
+      faviconHref: '/nous/nous-favicon.svg',
+      favicons: [
+        { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/nous/favicon-32x32.png' },
+        { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/nous/favicon-16x16.png' },
+        { rel: 'icon', type: 'image/svg+xml', sizes: 'any', href: '/nous/nous-favicon.svg' },
+        { rel: 'apple-touch-icon', sizes: '180x180', href: '/nous/apple-touch-icon-180x180.png' },
+      ],
       topbarSvgRaw: NOUS_MARK_RAW,
+      topbarImageHref: NOUS_GIRL_TOPBAR_BLINK_URL,
+      topbarTintColor: undefined,
+      topbarTintOpacity: undefined,
+      topbarBackdropFadeColor: undefined,
+      topbarWidth: 64,
+      topbarHeight: 64,
+      topbarGlow: true,
+      topbarSpritesheet: true,
+      topbarSpriteFrames: 4,
+      topbarSpriteWidth: 64,
+      topbarSpriteHeight: 64,
       alignmentSvgRaw: NOUS_ALIGNMENT_RAW,
+      alignmentImageHref: NOUS_GIRL_BLINK_URL,
+      alignmentWidth: 64,
+      alignmentHeight: 64,
+      alignmentSpritesheet: true,
+      alignmentSpriteFrames: 4,
+      alignmentSpriteWidth: 64,
+      alignmentSpriteHeight: 64,
+      alignmentAlwaysVisible: true,
+      alignmentBob: true,
+      alignmentBobDurationMs: 3200,
+      alignmentBobDistancePx: 2,
       alignmentTitle: 'nous research',
-      alignmentWhisperText: 'aligned to nous…',
+      alignmentWhisperText: 'nous · research · aligned',
       alignmentFetchWhisper: true,
     },
     background: {
       kind: 'nous-crt',
-      overlay: { kind: 'grain', opacity: 0.03 },
+      overlay: { kind: 'grain', opacity: 0.025 },
     },
   },
 
   samaritan: {
     id: 'samaritan',
-    label: 'Samaritan (light)',
+    label: 'Samaritan (warm)',
     AMBER: {
       // Keep the token name AMBER for compatibility; in this theme it represents the accent scale.
       300: '#e06666',
@@ -255,11 +316,16 @@ export const THEMES: Record<string, Theme> = {
       purple: '#a78bfa',
       cyan: '#22d3ee',
       yellow: '#cc3333',
+      gold: '#c8a848',
     },
     icons: {
       faviconHref: SAMARITAN_FAVICON_URL,
       topbarSvgRaw: SAMARITAN_MARK_RAW,
       alignmentSvgRaw: SAMARITAN_MARK_RAW,
+      alignmentAlwaysVisible: true,
+      alignmentBob: true,
+      alignmentBobDurationMs: 3600,
+      alignmentBobDistancePx: 2,
       alignmentTitle: 'samaritan',
       alignmentWhisperText: 'the machine sees you…',
       alignmentFetchWhisper: false,

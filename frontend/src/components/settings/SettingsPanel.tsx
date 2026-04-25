@@ -17,7 +17,7 @@ import type { UiPrefs } from '../../types'
 
 // ─── Version ────────────────────────────────────────────────────────
 
-const HERMELINCHAT_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.13'
+const HERMELINCHAT_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.14'
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -43,6 +43,22 @@ export const SettingsPanel = ({
   onUiPrefsChange,
 }: SettingsPanelProps) => {
   const ui = normalizeUiPrefs(uiPrefs)
+
+  // ─── Update check ──────────────────────────────────────────────
+
+  const [updateInfo, setUpdateInfo] = useState<{
+    current: string
+    latest: string
+    update_available: boolean
+    url: string
+  } | null>(null)
+
+  useEffect(() => {
+    fetch('/api/update-check')
+      .then((r) => r.json())
+      .then((data) => setUpdateInfo(data))
+      .catch(() => {}) // silently fail
+  }, [])
 
   const [openPanel, setOpenPanel] = useState<string | null>(null)
   const togglePanel = (id: string) => {
@@ -185,8 +201,9 @@ export const SettingsPanel = ({
         position: 'fixed',
         inset: 0,
         zIndex: 40,
-        background: 'rgba(0,0,0,0.55)',
+        background: 'rgba(0,0,0,0.45)',
         backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
       }}
     >
       <div
@@ -337,8 +354,31 @@ export const SettingsPanel = ({
             </div>
           </div>
 
-          <div style={{ fontSize: 10, color: SLATE.muted, textAlign: 'right' }}>
-            hermelinChat Version: {HERMELINCHAT_VERSION}
+          <div style={{ fontSize: 10, textAlign: 'right' }}>
+            <span style={{ color: SLATE.muted }}>
+              hermelinChat Version: {HERMELINCHAT_VERSION}
+            </span>
+            {updateInfo?.update_available && (
+              <div style={{ marginTop: 4 }}>
+                <span
+                  style={{
+                    color: AMBER[400],
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                  }}
+                  onClick={() => window.open(updateInfo.url, '_blank')}
+                  title={`Update from ${updateInfo.current} → ${updateInfo.latest}`}
+                >
+                  ⚡ Update available: v{updateInfo.latest}
+                </span>
+                <div style={{ color: SLATE.muted, marginTop: 2 }}>
+                  {HERMELINCHAT_VERSION.includes('dev') || HERMELINCHAT_VERSION.includes('+')
+                    ? 'Run: git pull && pip install -e .'
+                    : 'Run: pip install --upgrade hermelin-chat'
+                  }
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

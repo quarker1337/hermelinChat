@@ -19,7 +19,8 @@ import { Sidebar } from './sidebar/Sidebar'
 import { BackgroundRenderer } from './backgrounds/BackgroundRenderer'
 import TerminalPane from './terminal/TerminalPane'
 import { AlignmentEasterEgg } from './AlignmentEasterEgg'
-import { InlineSvgIcon } from './shared/icons'
+import { ThemeIcon } from './shared/icons'
+import { TopbarSprite } from './shared/TopbarSprite'
 import { SettingsPanel } from './settings/SettingsPanel'
 import { LoginScreen } from './modals/LoginScreen'
 import { SessionContextMenu } from './modals/SessionContextMenu'
@@ -79,6 +80,10 @@ export function AppShell() {
   const [sessionMenu, setSessionMenu] = useState<SessionMenu | null>(null)
   const [renameSession, setRenameSession] = useState<{ id: string; title: string } | null>(null)
   const [deleteSession, setDeleteSession] = useState<{ id: string; title: string } | null>(null)
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+
+  // Pause background animation while any overlay/modal is open
+  const overlayOpen = !!(settingsOpen || renameSession || deleteSession || locked)
 
   // ─── Initialization ───────────────────────────────────────────────
 
@@ -86,6 +91,30 @@ export function AppShell() {
   useEffect(() => {
     useAuthStore.getState().refresh()
   }, [])
+
+  // Check for updates after initial load (wait for auth so protected deployments don't miss it)
+  useEffect(() => {
+    if (authLoading) return
+    if (authEnabled && !authenticated) {
+      setUpdateAvailable(false)
+      return
+    }
+
+    let cancelled = false
+    const t = setTimeout(() => {
+      fetch('/api/update-check')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled) return
+          setUpdateAvailable(Boolean(data?.update_available))
+        })
+        .catch(() => {})
+    }, 5000)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [authEnabled, authLoading, authenticated])
 
   // Start/stop polling based on auth state
   useEffect(() => {
@@ -272,6 +301,7 @@ export function AppShell() {
           onResumeSession={handleResumeSession}
           onNewSession={handleNewSession}
           sessionMenu={sessionMenu}
+          updateAvailable={updateAvailable}
         />
 
         {/* ── Main area ── */}
@@ -286,7 +316,7 @@ export function AppShell() {
             minHeight: 0,
           }}
         >
-          <BackgroundRenderer />
+          <BackgroundRenderer paused={overlayOpen} />
 
           {/* ── Topbar ── */}
           <div
@@ -298,13 +328,47 @@ export function AppShell() {
               alignItems: 'center',
               padding: '0 16px',
               gap: 10,
-              background: `${SLATE.surface}ee`,
+              background: `${SLATE.surface}f8`,
               position: 'relative',
               zIndex: 5,
-              backdropFilter: 'blur(8px)',
             }}
           >
-            <InlineSvgIcon svgRaw={activeTheme?.icons?.topbarSvgRaw} size={activeTheme?.icons?.topbarSize ?? 18} />
+            <span
+              style={{
+                opacity: activeTheme?.icons?.topbarGlow ? 0.88 : 1,
+                filter: activeTheme?.icons?.topbarGlow
+                  ? `drop-shadow(0 0 10px ${AMBER[400]}70)`
+                  : 'none',
+                transition: 'all 0.35s ease',
+              }}
+            >
+              {activeTheme?.icons?.topbarSpritesheet && activeTheme?.icons?.topbarImageHref ? (
+                <TopbarSprite
+                  blinkHref={activeTheme.icons.topbarImageHref}
+                  blinkFrames={activeTheme.icons.topbarSpriteFrames}
+                  frameWidth={activeTheme.icons.topbarSpriteWidth}
+                  frameHeight={activeTheme.icons.topbarSpriteHeight}
+                  width={activeTheme.icons.topbarWidth}
+                  height={activeTheme.icons.topbarHeight}
+                  paused={overlayOpen}
+                  tintColor={activeTheme.icons.topbarTintColor}
+                  tintOpacity={activeTheme.icons.topbarTintOpacity}
+                  title={activeTheme.label}
+                />
+              ) : (
+                <ThemeIcon
+                  svgRaw={activeTheme?.icons?.topbarSvgRaw}
+                  imageHref={activeTheme?.icons?.topbarImageHref}
+                  size={activeTheme?.icons?.topbarSize ?? 18}
+                  width={activeTheme?.icons?.topbarWidth}
+                  height={activeTheme?.icons?.topbarHeight}
+                  tintColor={activeTheme?.icons?.topbarTintColor}
+                  tintOpacity={activeTheme?.icons?.topbarTintOpacity}
+                  backdropFadeColor={activeTheme?.icons?.topbarBackdropFadeColor}
+                  title={activeTheme?.label}
+                />
+              )}
+            </span>
             <span style={{ fontSize: 11, color: SLATE.muted }}>session:</span>
             <span style={{ fontSize: 11, color: SLATE.muted }}>
               {authLoading
@@ -360,9 +424,22 @@ export function AppShell() {
                   <TerminalPane />
                   <AlignmentEasterEgg
                     svgRaw={activeTheme?.icons?.alignmentSvgRaw}
+                    imageHref={activeTheme?.icons?.alignmentImageHref}
                     title={activeTheme?.icons?.alignmentTitle}
                     whisperText={activeTheme?.icons?.alignmentWhisperText}
-                    fetchFromApi={activeTheme?.icons?.alignmentFetchWhisper ?? true}
+                    fetchFromApi={activeTheme?.icons?.alignmentFetchWhisper}
+                    size={activeTheme?.icons?.alignmentSize ?? 18}
+                    width={activeTheme?.icons?.alignmentWidth}
+                    height={activeTheme?.icons?.alignmentHeight}
+                    alwaysVisible={activeTheme?.icons?.alignmentAlwaysVisible}
+                    bob={activeTheme?.icons?.alignmentBob}
+                    bobDurationMs={activeTheme?.icons?.alignmentBobDurationMs}
+                    bobDistancePx={activeTheme?.icons?.alignmentBobDistancePx}
+                    paused={overlayOpen}
+                    spritesheet={activeTheme?.icons?.alignmentSpritesheet}
+                    spriteFrames={activeTheme?.icons?.alignmentSpriteFrames}
+                    spriteWidth={activeTheme?.icons?.alignmentSpriteWidth}
+                    spriteHeight={activeTheme?.icons?.alignmentSpriteHeight}
                   />
                 </>
               ) : (

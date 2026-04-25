@@ -8,7 +8,7 @@ import { apiCall, apiPost } from '../api/client'
 // ---------------------------------------------------------------------------
 
 export const HERMELINCHAT_VERSION =
-  typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.13'
+  typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.14'
 
 // ---------------------------------------------------------------------------
 // Module-level timer refs (not in store state)

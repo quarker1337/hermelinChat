@@ -30,6 +30,33 @@ colors:
   session_label: "#5a6f6a"
   session_border: "#2a3533"
 
+spinner:
+  waiting_faces:
+    - "(⌐■_■)"
+    - "(■_■)"
+    - "(⊙_⊙)"
+    - "(◎_◎)"
+  thinking_faces:
+    - "(⌐■_■)…"
+    - "(■_■)?"
+    - "(⊙_⊙)!"
+    - "(◎_◎)~"
+    - "(⌐■_■)♦"
+  thinking_verbs:
+    - "following the rabbit"
+    - "decrypting"
+    - "tracing signal"
+    - "bypassing firewall"
+    - "jacking in"
+    - "scanning the matrix"
+    - "unplugging"
+    - "taking the red pill"
+  wings:
+    - ["⟪■_", "_■⟫"]
+    - ["⟪⊙_", "_⊙⟫"]
+    - ["⟪◎_", "_◎⟫"]
+    - ["⟪●_", "_●⟫"]
+
 branding:
   agent_name: "hermelinChat"
   welcome: "Welcome to hermelinChat! Type your message or /help for commands."
@@ -39,6 +66,22 @@ branding:
   help_header: "(^_^)? Available Commands"
 
 tool_prefix: "│"
+
+tool_emojis:
+  terminal: "▶"
+  web_search: "◈"
+  read_file: "▷"
+  write_file: "◆"
+  search_files: "◇"
+  execute_code: "⚡"
+  browser_navigate: "◈"
+  delegate_task: "▣"
+  mixture_of_agents: "⚗"
+  memory: "◐"
+  clarify: "?"
+  cronjob: "↻"
+  process: "⚙"
+  todo: "☐"
 
 banner_logo: |-
   [bold #4dffa1]==================================================================================[/]

@@ -236,3 +236,127 @@ test('appearance settings uses the active theme accent for timestamps', () => {
   assert.match(source, /accentColor:\s*AMBER\[400\]/)
   assert.ok(!source.includes("accentColor: '#f5b731'"))
 })
+
+test('nous theme uses dusk palette and sprite artwork', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  const { THEMES } = loadCompiled('theme/themes.js')
+
+  assert.equal(THEMES.nous.SLATE.bg, '#0e1028')
+  assert.equal(THEMES.nous.SLATE.accent, '#88b8f0')
+  assert.match(THEMES.nous.icons.topbarImageHref || '', /nous-girl-topbar-blink\.png$/)
+  assert.match(THEMES.nous.icons.alignmentImageHref || '', /nous-girl-blink\.png$/)
+  assert.equal(THEMES.nous.icons.topbarTintColor, undefined)
+  assert.equal(THEMES.nous.icons.topbarBackdropFadeColor, undefined)
+  assert.equal(THEMES.nous.icons.topbarSpritesheet, true)
+  assert.equal(THEMES.nous.icons.alignmentSpritesheet, true)
+  assert.equal(THEMES.nous.icons.alignmentAlwaysVisible, true)
+  assert.equal(THEMES.nous.icons.alignmentBob, true)
+  assert.equal(THEMES.nous.icons.alignmentWidth, 64)
+  assert.equal(THEMES.nous.icons.alignmentHeight, 64)
+})
+
+test('theme icon renders masked tint overlay and backdrop fade when requested', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  const React = require('react')
+  const ReactDOMServer = require('react-dom/server')
+  const { ThemeIcon } = loadCompiled('components/shared/icons.js')
+
+  const html = ReactDOMServer.renderToStaticMarkup(
+    React.createElement(ThemeIcon, {
+      imageHref: '/assets/nous-girl.png',
+      title: 'nous girl',
+      width: 64,
+      height: 64,
+      tintColor: '#5888c0',
+      tintOpacity: 0.25,
+      backdropFadeColor: '#141838',
+    }),
+  )
+
+  assert.match(html, /<img/)
+  assert.match(html, /nous-girl\.png/)
+  assert.match(html, /mix-blend-mode:color/)
+  assert.match(html, /background:#5888c0/)
+  assert.match(html, /mask-image:url\(\/assets\/nous-girl\.png\)/)
+  assert.match(html, /radial-gradient\(ellipse at center/)
+})
+
+test('alignment easter egg supports always-on bobbing artwork', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'AlignmentEasterEgg.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /alwaysVisible\?: boolean/)
+  assert.match(source, /bob\?: boolean/)
+  assert.match(source, /@keyframes eggBob/)
+})
+
+test('alignment easter egg disables bob animation and glow while paused', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  const React = require('react')
+  const ReactDOMServer = require('react-dom/server')
+  const { AlignmentEasterEgg } = loadCompiled('components/AlignmentEasterEgg.js')
+
+  const html = ReactDOMServer.renderToStaticMarkup(
+    React.createElement(AlignmentEasterEgg, {
+      imageHref: '/assets/nous-girl.png',
+      title: 'nous girl',
+      width: 64,
+      height: 64,
+      alwaysVisible: true,
+      bob: true,
+      paused: true,
+    }),
+  )
+
+  assert.doesNotMatch(html, /animation:eggBob/)
+  assert.doesNotMatch(html, /drop-shadow/)
+})
+
+test('AppShell pauses the alignment easter egg when overlays are open', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'AppShell.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /<BackgroundRenderer paused=\{overlayOpen\} \/>/)
+  assert.match(source, /<AlignmentEasterEgg[\s\S]*paused=\{overlayOpen\}/)
+})
+
+test('AppShell waits for authentication before probing for updates', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'AppShell.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /if \(authLoading\) return/)
+  assert.match(source, /if \(authEnabled && !authenticated\) \{[\s\S]*setUpdateAvailable\(false\)/)
+  assert.match(source, /setUpdateAvailable\(Boolean\(data\?\.update_available\)\)/)
+  assert.match(source, /\}, \[authEnabled, authLoading, authenticated\]\)/)
+})
+
+test('theme background fields do not snapshot canvas into data URLs on pause', () => {
+  const paths = [
+    path.join(SOURCE_ROOT, 'components', 'backgrounds', 'NousCRTField.tsx'),
+    path.join(SOURCE_ROOT, 'components', 'backgrounds', 'SamaritanField.tsx'),
+    path.join(SOURCE_ROOT, 'components', 'backgrounds', 'ParticleField.tsx'),
+    path.join(SOURCE_ROOT, 'components', 'backgrounds', 'MatrixRainField.tsx'),
+  ]
+
+  for (const sourcePath of paths) {
+    const source = fs.readFileSync(sourcePath, 'utf8')
+    assert.ok(!source.includes('toDataURL('), `${path.basename(sourcePath)} still snapshots canvas`)
+    assert.ok(!source.includes('backgroundImage: `url(${snapshot})`'), `${path.basename(sourcePath)} still renders snapshot overlay`)
+  }
+})
+
+test('samaritan theme uses warm palette and sprite artwork', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  const { THEMES } = loadCompiled('theme/themes.js')
+
+  assert.equal(THEMES.samaritan.SLATE.bg, '#e8e6e1')
+  assert.equal(THEMES.samaritan.SLATE.accent, '#cc3333')
+  assert.equal(THEMES.samaritan.icons.topbarImageHref || '', '')
+  assert.equal(THEMES.samaritan.icons.alignmentImageHref || '', '')
+  assert.equal(THEMES.samaritan.icons.alignmentAlwaysVisible, true)
+  assert.equal(THEMES.samaritan.icons.alignmentBob, true)
+})

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AMBER, SLATE } from '../theme/index'
-import { InlineSvgIcon } from './shared/icons'
+import { ThemeIcon } from './shared/icons'
 import { useToastStore } from '../stores/toast'
 
 // ---------------------------------------------------------------------------
@@ -9,9 +9,22 @@ import { useToastStore } from '../stores/toast'
 
 interface AlignmentEasterEggProps {
   svgRaw?: string
+  imageHref?: string
   title?: string
   whisperText?: string
   fetchFromApi?: boolean
+  size?: number
+  width?: number
+  height?: number
+  alwaysVisible?: boolean
+  bob?: boolean
+  bobDurationMs?: number
+  bobDistancePx?: number
+  paused?: boolean
+  spritesheet?: boolean
+  spriteFrames?: number
+  spriteWidth?: number
+  spriteHeight?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -20,9 +33,22 @@ interface AlignmentEasterEggProps {
 
 export const AlignmentEasterEgg = ({
   svgRaw,
+  imageHref,
   title,
   whisperText,
   fetchFromApi = true,
+  size = 18,
+  width,
+  height,
+  alwaysVisible = false,
+  bob = false,
+  bobDurationMs = 3200,
+  bobDistancePx = 2,
+  paused = false,
+  spritesheet,
+  spriteFrames,
+  spriteWidth,
+  spriteHeight,
 }: AlignmentEasterEggProps) => {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState(false)
@@ -36,7 +62,9 @@ export const AlignmentEasterEgg = ({
   const toastActive = !!toastText
   const toastId = toast?.id || ''
 
-  const opacity = open ? 0.75 : toastActive ? 0.75 : hovered ? 0.25 : 0.08
+  const opacity = alwaysVisible ? (open || toastActive ? 1 : 0.88) : open ? 0.75 : toastActive ? 0.75 : hovered ? 0.25 : 0.08
+  const shouldBob = bob && !paused
+  const glowEnabled = (open || toastActive || alwaysVisible) && !paused
 
   const fetchWhisper = useCallback(async () => {
     try {
@@ -64,6 +92,10 @@ export const AlignmentEasterEgg = ({
     if (fetchFromApi) fetchWhisper()
   }, [open, fetchWhisper, fetchFromApi, baseWhisper])
 
+  const sw = spriteWidth ?? 64
+  const sh = spriteHeight ?? 64
+  const sf = spriteFrames ?? 4
+
   return (
     <div
       onMouseEnter={() => setHovered(true)}
@@ -89,12 +121,39 @@ export const AlignmentEasterEgg = ({
         opacity,
         transition: 'all 0.35s ease',
         transform: open ? 'scale(1.15)' : toastActive ? 'scale(1.1)' : 'scale(1)',
-        filter: open || toastActive ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
+        filter: glowEnabled ? `drop-shadow(0 0 10px ${AMBER[400]}70)` : 'none',
         userSelect: 'none',
       }}
       title={title || 'the stout knows\u2026'}
     >
-      <InlineSvgIcon svgRaw={svgRaw} size={18} />
+      <style>{`@keyframes eggBob { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-${bobDistancePx}px); } }`}</style>
+      <div style={{ animation: shouldBob ? `eggBob ${bobDurationMs}ms ease-in-out infinite` : undefined, willChange: shouldBob ? 'transform' : undefined }}>
+        {spritesheet && imageHref ? (
+          <>
+            <style>{`@keyframes nousBlink {
+  0%, 85% { background-position: 0 0; }
+  88% { background-position: -${sw}px 0; }
+  91% { background-position: -${sw * 2}px 0; }
+  94% { background-position: -${sw * 3}px 0; }
+  97%, 100% { background-position: 0 0; }
+}`}</style>
+            <div
+              style={{
+                width: sw,
+                height: sh,
+                backgroundImage: `url(${imageHref})`,
+                backgroundRepeat: 'no-repeat',
+                backgroundSize: `${sw * sf}px ${sh}px`,
+                imageRendering: 'pixelated',
+                animation: paused ? 'none' : 'nousBlink 4000ms steps(1) infinite',
+              }}
+              title={title}
+            />
+          </>
+        ) : (
+          <ThemeIcon svgRaw={svgRaw} imageHref={imageHref} size={size} width={width} height={height} title={title} />
+        )}
+      </div>
 
       {toastActive && (
         <div

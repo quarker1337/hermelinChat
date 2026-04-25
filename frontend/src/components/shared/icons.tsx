@@ -29,6 +29,16 @@ interface InlineSvgIconProps {
   title?: string
 }
 
+interface ThemeIconProps extends InlineSvgIconProps {
+  imageHref?: string
+  width?: number
+  height?: number
+  pixelated?: boolean
+  tintColor?: string
+  tintOpacity?: number
+  backdropFadeColor?: string
+}
+
 export const InlineSvgIcon = ({
   svgRaw,
   size = 18,
@@ -52,6 +62,86 @@ export const InlineSvgIcon = ({
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )
+}
+
+export const ThemeIcon = ({
+  svgRaw,
+  imageHref,
+  size = 18,
+  width,
+  height,
+  color = AMBER[400],
+  title = '',
+  pixelated = true,
+  tintColor,
+  tintOpacity = 0.25,
+  backdropFadeColor,
+}: ThemeIconProps) => {
+  if (imageHref) {
+    const w = width ?? size
+    const h = height ?? size
+    const maskImage = `url(${imageHref})`
+    return (
+      <span
+        style={{
+          position: 'relative',
+          display: 'inline-block',
+          width: w,
+          height: h,
+          flexShrink: 0,
+          lineHeight: 0,
+        }}
+        title={title || undefined}
+      >
+        <img
+          src={imageHref}
+          width={w}
+          height={h}
+          alt=""
+          draggable={false}
+          style={{
+            display: 'block',
+            width: w,
+            height: h,
+            imageRendering: pixelated ? 'pixelated' : 'auto',
+            flexShrink: 0,
+          }}
+        />
+        {tintColor ? (
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: tintColor,
+              opacity: tintOpacity,
+              mixBlendMode: 'color',
+              pointerEvents: 'none',
+              WebkitMaskImage: maskImage,
+              maskImage,
+              WebkitMaskSize: '100% 100%',
+              maskSize: '100% 100%',
+              WebkitMaskRepeat: 'no-repeat',
+              maskRepeat: 'no-repeat',
+            }}
+          />
+        ) : null}
+        {backdropFadeColor ? (
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+              background: `radial-gradient(ellipse at center, transparent 40%, ${backdropFadeColor}dd 85%, ${backdropFadeColor} 100%)`,
+            }}
+          />
+        ) : null}
+      </span>
+    )
+  }
+
+  return <InlineSvgIcon svgRaw={svgRaw} size={size} color={color} title={title} />
 }
 
 // ─── SidebarDockIcon ────────────────────────────────────────────────

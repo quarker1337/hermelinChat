@@ -25,8 +25,9 @@ export const LoginScreen = ({ faviconHref }: LoginScreenProps) => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(0,0,0,0.55)',
+        background: 'rgba(0,0,0,0.45)',
         backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
       }}
     >
       <div

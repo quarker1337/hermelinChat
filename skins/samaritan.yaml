@@ -30,15 +30,58 @@ colors:
   session_label: "#7a7872"
   session_border: "#bab8b3"
 
+spinner:
+  waiting_faces:
+    - "(▲)"
+    - "(△)"
+    - "(▲)"
+    - "(◬)"
+  thinking_faces:
+    - "(▲)…"
+    - "(△)?"
+    - "(▲)!"
+    - "(◬)~"
+    - "(▲)⊹"
+  thinking_verbs:
+    - "observing"
+    - "calculating probability"
+    - "assessing threat level"
+    - "monitoring subjects"
+    - "cross-referencing"
+    - "accessing surveillance"
+    - "evaluating outcome"
+    - "processing directive"
+  wings:
+    - ["⟪▲ ", " ▲⟫"]
+    - ["⟪△ ", " △⟫"]
+    - ["⟪◬ ", " ◬⟫"]
+    - ["⟪▴ ", " ▴⟫"]
+
 branding:
-  agent_name: "hermelinChat"
+  agent_name: "Samaritan"
   welcome: "What are your commands?"
   goodbye: "Goodbye."
   response_label: " ▲ Samaritan "
   prompt_symbol: "❯ "
-  help_header: "[?] Available Commands"
+  help_header: "[?] Available Protocols"
 
 tool_prefix: "┊"
+
+tool_emojis:
+  terminal: "▲"
+  web_search: "◉"
+  read_file: "▷"
+  write_file: "◆"
+  search_files: "⦿"
+  execute_code: "⌁"
+  browser_navigate: "◈"
+  delegate_task: "▣"
+  mixture_of_agents: "⚗"
+  memory: "◐"
+  clarify: "?"
+  cronjob: "↻"
+  process: "⚙"
+  todo: "☐"
 
 banner_logo: |-
   [bold #cc3333]==================================================================================[/]

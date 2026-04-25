@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AMBER, SLATE } from '../../theme/index'
 
 function clampNum(n: unknown, min: number, max: number): number {
@@ -14,13 +14,18 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 
 interface SamaritanFieldProps {
   intensity?: number
+  paused?: boolean
 }
 
-export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
+export function SamaritanField({ intensity = 50, paused = false }: SamaritanFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pausedRef = useRef(paused)
+  const resumeFnRef = useRef<(() => void) | null>(null)
+  pausedRef.current = paused
+
+
 
   const pct = clampNum(intensity, 0, 100)
-  // 75 == "normal" intensity
   const factor = pct / 75
   const canvasOpacity = clampNum(0.85 * factor, 0, 1)
 
@@ -47,24 +52,16 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
 
     if (prefersReducedMotion) return
 
-    let animId: number
+    let animId = 0
     let t = 0
 
     const f = clampNum(factor, 0, 2)
-
     let blocks: {
-      x: number
-      y: number
-      vx: number
-      vy: number
-      w: number
-      h: number
-      depth: number
-      opacity: number
-      life: number
-      maxLife: number
+      x: number; y: number; vx: number; vy: number
+      w: number; h: number; depth: number; opacity: number
+      life: number; maxLife: number
     }[] = []
-    const maxBlocks = Math.max(10, Math.round(45 * f))
+    const maxBlocks = Math.max(8, Math.round(25 * f))
 
     const nodeCount = Math.max(4, Math.round(8 * f))
     const nodes = Array.from({ length: nodeCount }, () => ({
@@ -105,25 +102,58 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
       }
 
       return {
-        x,
-        y,
-        vx,
-        vy,
-        w,
-        h,
-        depth,
+        x, y, vx, vy, w, h, depth,
         opacity: (0.06 + depth * 0.2) * (0.4 + Math.random() * 0.6) * (0.7 + f * 0.6),
         life: 0,
         maxLife: 600 + Math.random() * 800,
       }
     }
 
+    let staticLayer: HTMLCanvasElement | null = null
+
+    const initStaticLayers = (W: number, H: number) => {
+      staticLayer = document.createElement('canvas')
+      staticLayer.width = W
+      staticLayer.height = H
+      const sCtx = staticLayer.getContext('2d')!
+
+      sCtx.fillStyle = bgHex
+      sCtx.fillRect(0, 0, W, H)
+
+      const vig = sCtx.createRadialGradient(W / 2, H / 2, W * 0.25, W / 2, H / 2, W * 0.8)
+      vig.addColorStop(0, `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},0)`)
+      vig.addColorStop(1, `rgba(${borderRgb.r},${borderRgb.g},${borderRgb.b},${(0.22 * f).toFixed(4)})`)
+      sCtx.fillStyle = vig
+      sCtx.fillRect(0, 0, W, H)
+
+      const gridAlpha = 0.025 * f
+      if (gridAlpha > 0.001) {
+        sCtx.strokeStyle = `rgba(${textRgb.r},${textRgb.g},${textRgb.b},${gridAlpha.toFixed(4)})`
+        sCtx.lineWidth = 0.5
+        for (let x = 0; x < W; x += 70) {
+          sCtx.beginPath(); sCtx.moveTo(x, 0); sCtx.lineTo(x, H); sCtx.stroke()
+        }
+        for (let y = 0; y < H; y += 70) {
+          sCtx.beginPath(); sCtx.moveTo(0, y); sCtx.lineTo(W, y); sCtx.stroke()
+        }
+      }
+
+      const scanAlpha = 0.012 * f
+      if (scanAlpha > 0.001) {
+        sCtx.fillStyle = `rgba(${textRgb.r},${textRgb.g},${textRgb.b},${scanAlpha.toFixed(4)})`
+        for (let y = 0; y < H; y += 3) {
+          sCtx.fillRect(0, y, W, 1)
+        }
+      }
+    }
+
     const init = () => {
       canvas.width = canvas.parentElement?.offsetWidth || window.innerWidth
       canvas.height = canvas.parentElement?.offsetHeight || window.innerHeight
+      initStaticLayers(canvas.width, canvas.height)
 
       blocks = []
-      const seedCount = Math.max(0, Math.round(30 * f))
+      const seedCount = Math.max(0, Math.round(20 * f))
       for (let i = 0; i < seedCount; i++) {
         const b = spawnBlock(canvas.width, canvas.height)
         b.life = Math.random() * b.maxLife
@@ -136,44 +166,30 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
       }
     }
 
-    const draw = () => {
+    const TARGET_FPS = 20
+    const FRAME_MS = 1000 / TARGET_FPS
+    let lastFrame = 0
+
+    const draw = (timestamp: number) => {
+      if (pausedRef.current) {
+        animId = 0
+        return
+      }
+      animId = requestAnimationFrame(draw)
+      if (timestamp - lastFrame < FRAME_MS) return
+
+      const dt = Math.min(timestamp - lastFrame, 100)
+      const dtScale = dt / 16.67
+      lastFrame = timestamp
+
       const W = canvas.width
       const H = canvas.height
 
-      // Base
-      ctx.fillStyle = bgHex
-      ctx.fillRect(0, 0, W, H)
+      if (staticLayer) ctx.drawImage(staticLayer, 0, 0)
 
-      // Vignette
-      const vig = ctx.createRadialGradient(W / 2, H / 2, W * 0.25, W / 2, H / 2, W * 0.8)
-      vig.addColorStop(0, `rgba(${bgRgb.r},${bgRgb.g},${bgRgb.b},0)`)
-      vig.addColorStop(1, `rgba(${borderRgb.r},${borderRgb.g},${borderRgb.b},${(0.22 * f).toFixed(4)})`)
-      ctx.fillStyle = vig
-      ctx.fillRect(0, 0, W, H)
-
-      // Grid
-      const gridAlpha = 0.025 * f
-      if (gridAlpha > 0.001) {
-        ctx.strokeStyle = `rgba(${textRgb.r},${textRgb.g},${textRgb.b},${gridAlpha.toFixed(4)})`
-        ctx.lineWidth = 0.5
-        for (let x = 0; x < W; x += 70) {
-          ctx.beginPath()
-          ctx.moveTo(x, 0)
-          ctx.lineTo(x, H)
-          ctx.stroke()
-        }
-        for (let y = 0; y < H; y += 70) {
-          ctx.beginPath()
-          ctx.moveTo(0, y)
-          ctx.lineTo(W, y)
-          ctx.stroke()
-        }
-      }
-
-      // Connection nodes
       for (const n of nodes) {
-        n.x += n.vx + Math.sin(t * 0.0008 + n.phase) * 0.02
-        n.y += n.vy + Math.cos(t * 0.0006 + n.phase) * 0.015
+        n.x += (n.vx + Math.sin(t * 0.0008 + n.phase) * 0.02) * dtScale
+        n.y += (n.vy + Math.cos(t * 0.0006 + n.phase) * 0.015) * dtScale
         if (n.x < 0) n.x = W
         if (n.x > W) n.x = 0
         if (n.y < 0) n.y = H
@@ -184,8 +200,11 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
         for (let j = i + 1; j < nodes.length; j++) {
           const a = nodes[i]
           const b = nodes[j]
-          const dist = Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2)
-          if (dist < 300) {
+          const dx = a.x - b.x
+          const dy = a.y - b.y
+          const d2 = dx * dx + dy * dy
+          if (d2 < 90000) {
+            const dist = Math.sqrt(d2)
             const alpha = (1 - dist / 300) * 0.03 * f
             ctx.beginPath()
             ctx.moveTo(a.x, a.y)
@@ -203,104 +222,90 @@ export function SamaritanField({ intensity = 50 }: SamaritanFieldProps) {
         }
       }
 
-      // Spawn blocks
       if (blocks.length < maxBlocks && Math.random() < 0.03 * f) {
         blocks.push(spawnBlock(W, H))
       }
 
-      // Draw blocks
       for (let i = blocks.length - 1; i >= 0; i--) {
         const b = blocks[i]
-        b.x += b.vx
-        b.y += b.vy
-        b.life++
+        b.x += b.vx * dtScale
+        b.y += b.vy * dtScale
+        b.life += dtScale
 
-        if (
-          b.life > b.maxLife ||
-          b.x < -200 ||
-          b.x > W + 200 ||
-          b.y < -200 ||
-          b.y > H + 200
-        ) {
+        if (b.life > b.maxLife || b.x < -200 || b.x > W + 200 || b.y < -200 || b.y > H + 200) {
           blocks.splice(i, 1)
           continue
         }
 
-        const alpha =
-          b.opacity *
-          Math.min(b.life / 60, 1) *
-          Math.min((b.maxLife - b.life) / 80, 1)
+        const alpha = b.opacity * Math.min(b.life / 60, 1) * Math.min((b.maxLife - b.life) / 80, 1)
 
         const sp = Math.sqrt(b.vx * b.vx + b.vy * b.vy)
         const bl = sp * 3 * b.depth
 
-        ctx.save()
-        ctx.translate(b.x, b.y)
         ctx.fillStyle = `rgba(${textRgb.r},${textRgb.g},${textRgb.b},${alpha.toFixed(4)})`
-        ctx.fillRect(-b.w / 2 - (b.vx > 0 ? bl : 0), -b.h / 2, b.w + bl, b.h)
+        ctx.fillRect(b.x - b.w / 2 - (b.vx > 0 ? bl : 0), b.y - b.h / 2, b.w + bl, b.h)
         if (bl > 1) {
           ctx.fillStyle = `rgba(${textRgb.r},${textRgb.g},${textRgb.b},${(alpha * 0.15).toFixed(4)})`
-          ctx.fillRect(b.vx > 0 ? -b.w / 2 - bl * 1.5 : b.w / 2, -b.h / 2, bl * 1.5, b.h)
-        }
-        ctx.restore()
-      }
-
-      // Scanlines
-      const scanAlpha = 0.012 * f
-      if (scanAlpha > 0.001) {
-        ctx.fillStyle = `rgba(${textRgb.r},${textRgb.g},${textRgb.b},${scanAlpha.toFixed(4)})`
-        for (let y = 0; y < H; y += 3) {
-          ctx.fillRect(0, y, W, 1)
+          ctx.fillRect(b.vx > 0 ? b.x - b.w / 2 - bl * 1.5 : b.x + b.w / 2, b.y - b.h / 2, bl * 1.5, b.h)
         }
       }
 
-      // Moving scan bar (slight accent)
       const scanY = (t * 0.15) % (H + 60) - 30
       ctx.fillStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${(0.01 * f).toFixed(4)})`
       ctx.fillRect(0, scanY, W, 30)
 
-      t++
-      animId = requestAnimationFrame(draw)
+      t += dtScale
+    }
+
+    const resume = () => {
+      if (!pausedRef.current && !animId) {
+        lastFrame = 0
+        animId = requestAnimationFrame(draw)
+      }
+    }
+    resumeFnRef.current = resume
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(animId)
+        animId = 0
+      } else {
+        resume()
+      }
     }
 
     init()
     window.addEventListener('resize', init)
-    animId = requestAnimationFrame(draw)
+    document.addEventListener('visibilitychange', handleVisibility)
+    if (!paused) animId = requestAnimationFrame(draw)
 
     return () => {
+      resumeFnRef.current = null
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [
-    factor,
-    bgHex,
-    bgRgb.r,
-    bgRgb.g,
-    bgRgb.b,
-    textRgb.r,
-    textRgb.g,
-    textRgb.b,
-    borderRgb.r,
-    borderRgb.g,
-    borderRgb.b,
-    accentRgb.r,
-    accentRgb.g,
-    accentRgb.b,
-  ])
+  }, [factor, bgHex, bgRgb.r, bgRgb.g, bgRgb.b, textRgb.r, textRgb.g, textRgb.b, borderRgb.r, borderRgb.g, borderRgb.b, accentRgb.r, accentRgb.g, accentRgb.b])
+
+  useEffect(() => {
+    if (!paused && resumeFnRef.current) {
+      resumeFnRef.current()
+    }
+  }, [paused])
 
   return (
     <canvas
-      ref={canvasRef}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        opacity: canvasOpacity,
-        zIndex: 0,
-      }}
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          opacity: canvasOpacity,
+          zIndex: 0,
+        }}
     />
   )
 }

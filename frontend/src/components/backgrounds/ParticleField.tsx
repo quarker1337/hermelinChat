@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AMBER } from '../../theme/index'
 
 function clampNum(n: unknown, min: number, max: number): number {
@@ -14,13 +14,18 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 
 interface ParticleFieldProps {
   intensity?: number
+  paused?: boolean
 }
 
-export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
+export function ParticleField({ intensity = 50, paused = false }: ParticleFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pausedRef = useRef(paused)
+  const resumeFnRef = useRef<(() => void) | null>(null)
+  pausedRef.current = paused
+
+
 
   const pct = clampNum(intensity, 0, 100)
-  // 50 == current look
   const factor = pct / 50
   const canvasOpacity = clampNum(0.5 * factor, 0, 1)
 
@@ -33,80 +38,143 @@ export function ParticleField({ intensity = 50 }: ParticleFieldProps) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    let animId: number
-    let particles: { x: number; y: number; vx: number; vy: number; r: number; o: number }[] = []
+    const prefersReducedMotion =
+      !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)')?.matches
+    if (prefersReducedMotion) return
+
+    let animId = 0
+    const TARGET_FPS = 20
+    const FRAME_MS = 1000 / TARGET_FPS
+    let lastFrame = 0
+
+    const count = Math.max(0, Math.round(30 * factor))
+
+    const particles = Array.from({ length: count }, () => ({
+      x: 0,
+      y: 0,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      r: Math.random() * 1.5 + 0.5,
+      o: Math.min(0.22, (Math.random() * 0.15 + 0.03) * factor),
+    }))
+
+    const particleColors = particles.map(p =>
+      `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${p.o})`
+    )
+
+    const connBase = Math.min(0.08, 0.04 * factor)
 
     const init = () => {
       canvas.width = canvas.parentElement?.offsetWidth || 800
       canvas.height = canvas.parentElement?.offsetHeight || 600
-
-      const count = Math.max(0, Math.round(60 * factor))
-      particles = Array.from({ length: count }, () => ({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
-        r: Math.random() * 1.5 + 0.5,
-        o: Math.min(0.22, (Math.random() * 0.15 + 0.03) * factor),
-      }))
+      for (const p of particles) {
+        p.x = Math.random() * canvas.width
+        p.y = Math.random() * canvas.height
+      }
     }
 
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      for (const p of particles) {
-        p.x += p.vx
-        p.y += p.vy
-        if (p.x < 0) p.x = canvas.width
-        if (p.x > canvas.width) p.x = 0
-        if (p.y < 0) p.y = canvas.height
-        if (p.y > canvas.height) p.y = 0
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${p.o})`
-        ctx.fill()
+    const draw = (timestamp: number) => {
+      if (pausedRef.current) {
+        animId = 0
+        return
+      }
+      animId = requestAnimationFrame(draw)
+      if (timestamp - lastFrame < FRAME_MS) return
+
+      const dt = Math.min(timestamp - lastFrame, 100)
+      const dtScale = dt / 16.67
+      lastFrame = timestamp
+
+      const W = canvas.width
+      const H = canvas.height
+      ctx.clearRect(0, 0, W, H)
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i]
+        p.x += p.vx * dtScale
+        p.y += p.vy * dtScale
+        if (p.x < 0) p.x = W
+        if (p.x > W) p.x = 0
+        if (p.y < 0) p.y = H
+        if (p.y > H) p.y = 0
+
+        ctx.fillStyle = particleColors[i]
+        const s = p.r * 2
+        ctx.fillRect(p.x - p.r, p.y - p.r, s, s)
       }
 
-      const connBase = Math.min(0.08, 0.04 * factor)
+      ctx.lineWidth = 0.5
+      ctx.beginPath()
+      let hasLines = false
+
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
           const dx = particles[i].x - particles[j].x
           const dy = particles[i].y - particles[j].y
-          const d = Math.sqrt(dx * dx + dy * dy)
-          if (d < 120) {
-            ctx.beginPath()
+          const d2 = dx * dx + dy * dy
+          if (d2 < 14400) {
             ctx.moveTo(particles[i].x, particles[i].y)
             ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.strokeStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${connBase * (1 - d / 120)})`
-            ctx.lineWidth = 0.5
-            ctx.stroke()
+            hasLines = true
           }
         }
       }
-      animId = requestAnimationFrame(draw)
+
+      if (hasLines) {
+        ctx.strokeStyle = `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${connBase})`
+        ctx.stroke()
+      }
+    }
+
+    const resume = () => {
+      if (!pausedRef.current && !animId) {
+        lastFrame = 0
+        animId = requestAnimationFrame(draw)
+      }
+    }
+    resumeFnRef.current = resume
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(animId)
+        animId = 0
+      } else {
+        resume()
+      }
     }
 
     init()
     window.addEventListener('resize', init)
-    draw()
+    document.addEventListener('visibilitychange', handleVisibility)
+    if (!paused) animId = requestAnimationFrame(draw)
+
     return () => {
+      resumeFnRef.current = null
       cancelAnimationFrame(animId)
       window.removeEventListener('resize', init)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [factor, accentRgb.r, accentRgb.g, accentRgb.b])
 
+  useEffect(() => {
+    if (!paused && resumeFnRef.current) {
+      resumeFnRef.current()
+    }
+  }, [paused])
+
   return (
     <canvas
-      ref={canvasRef}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        opacity: canvasOpacity,
-        zIndex: 0,
-      }}
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          opacity: canvasOpacity,
+          zIndex: 0,
+        }}
     />
   )
 }

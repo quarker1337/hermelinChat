@@ -6,12 +6,14 @@ interface SidebarHeaderProps {
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenSettings: () => void
+  updateAvailable?: boolean
 }
 
 export const SidebarHeader = ({
   collapsed,
   onToggleCollapse,
   onOpenSettings,
+  updateAvailable = false,
 }: SidebarHeaderProps) => {
   const appNameLabel = useUiPrefsStore((s) => s.appNameLabel)
 
@@ -82,11 +84,23 @@ export const SidebarHeader = ({
               justifyContent: 'center',
               color: SLATE.muted,
               userSelect: 'none',
+              position: 'relative',
             }}
             onMouseEnter={(e) => (e.currentTarget.style.color = AMBER[400])}
             onMouseLeave={(e) => (e.currentTarget.style.color = SLATE.muted)}
           >
             <SettingsIcon />
+            {updateAvailable && (
+              <div style={{
+                position: 'absolute',
+                top: -2,
+                right: -2,
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: AMBER[400],
+              }} />
+            )}
           </button>
           <button
             className="hm-btn"
