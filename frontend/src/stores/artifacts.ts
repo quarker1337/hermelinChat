@@ -92,7 +92,17 @@ function mergeArtifactsStable(prevItems: ArtifactTab[], nextItems: ArtifactTab[]
   }
 
   const newcomers = next.filter((item) => !prevById.has(item.id))
-  return [...newcomers, ...preserved]
+  const merged = [...newcomers, ...preserved]
+
+  if (
+    newcomers.length === 0 &&
+    merged.length === prev.length &&
+    merged.every((item, index) => item === prev[index])
+  ) {
+    return prev
+  }
+
+  return merged
 }
 
 // ---------------------------------------------------------------------------

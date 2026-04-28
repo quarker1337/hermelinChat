@@ -222,6 +222,40 @@ test('artifact panel width re-clamps when the window shrinks', () => {
   assert.equal(useArtifactStore.getState().panelWidth, 320)
 })
 
+test('artifact store preserves tab references for unchanged poll payloads', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  const payload = [
+    {
+      id: 'artifact-1',
+      type: 'markdown',
+      title: 'Notes',
+      timestamp: 1713379200000,
+      data: { markdown: '# Notes\n\nselectable text' },
+    },
+  ]
+
+  useArtifactStore.getState().applyArtifacts(payload)
+  const firstTabs = useArtifactStore.getState().tabs
+  const firstArtifact = firstTabs[0]
+
+  // Polling /api/artifacts JSON-parses a fresh payload every time. If the
+  // payload is semantically unchanged, keep both the artifact object and tabs
+  // array references stable so AppShell/ArtifactPanel do not re-render and
+  // disrupt text selection in markdown artifacts.
+  const nextPayload = JSON.parse(JSON.stringify(payload))
+  useArtifactStore.getState().applyArtifacts(nextPayload)
+
+  const secondTabs = useArtifactStore.getState().tabs
+  assert.equal(secondTabs, firstTabs)
+  assert.equal(secondTabs[0], firstArtifact)
+})
+
 test('index.css restores the Google Fonts JetBrains Mono import for terminal parity', () => {
   const indexCssPath = path.join(SOURCE_ROOT, 'index.css')
   const source = fs.readFileSync(indexCssPath, 'utf8')
