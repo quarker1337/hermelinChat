@@ -333,7 +333,21 @@ test('artifact iframe data bridge is bounded and omits iframe transport fields',
   clearCompiledModules()
   setWindow(makeWindow())
 
-  const { createArtifactDataBridgeMessage, resolveArtifactFrameTargetOrigin } = loadCompiled('components/artifacts/ArtifactRenderer.js')
+  const { createArtifactDataBridgeMessage, resolveArtifactFrameTargetOrigin, sanitizeArtifactSrcDoc } = loadCompiled('components/artifacts/ArtifactRenderer.js')
+
+  const sanitizedSrcDoc = sanitizeArtifactSrcDoc(`
+<script>
+console.log('artifact ready')
+//# sourceMappingURL=2
+</script>
+<style>
+body { color: red }
+/*# sourceMappingURL=theme.css.map */
+</style>
+`)
+  assert.match(sanitizedSrcDoc, /console\.log\('artifact ready'\)/)
+  assert.match(sanitizedSrcDoc, /body \{ color: red \}/)
+  assert.doesNotMatch(sanitizedSrcDoc, /sourceMappingURL/)
 
   assert.deepEqual(
     createArtifactDataBridgeMessage('dashboard', {

@@ -165,6 +165,14 @@ export function resolveArtifactFrameTargetOrigin(src?: string): string | null {
   }
 }
 
+export function sanitizeArtifactSrcDoc(srcDoc: string): string {
+  if (!srcDoc) return ''
+
+  return srcDoc
+    .replace(/^\s*\/\/[#@]\s*sourceMappingURL=.*$/gim, '')
+    .replace(/\/\*[#@]\s*sourceMappingURL=[\s\S]*?\*\//gi, '')
+}
+
 function artifactFrameDataWithinBridgeLimit(value: unknown): boolean {
   const seen = new Set<object>()
   const stack: unknown[] = [value]
@@ -640,11 +648,22 @@ function MarkdownArtifact({ artifact }: ArtifactProps) {
 
 function HtmlLikeFrame({ srcDoc, src, title, artifactId, artifactData }: HtmlLikeFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const loadedFrameKeyRef = useRef<string | null>(null)
+  const lastRenderedFrameKeyRef = useRef<string | null>(null)
+  const loadRafRef = useRef<number | null>(null)
+  const [frameReadyVersion, setFrameReadyVersion] = useState(0)
+  const sanitizedSrcDoc = useMemo(() => (srcDoc ? sanitizeArtifactSrcDoc(srcDoc) : undefined), [srcDoc])
+  const frameContentKey = useMemo(() => `${src || ''}\n${sanitizedSrcDoc || ''}`, [src, sanitizedSrcDoc])
   const targetOrigin = resolveArtifactFrameTargetOrigin(src)
   const artifactDataMessage = useMemo(
     () => createArtifactDataBridgeMessage(artifactId || '', artifactData),
     [artifactId, artifactData],
   )
+
+  if (lastRenderedFrameKeyRef.current !== frameContentKey) {
+    loadedFrameKeyRef.current = null
+    lastRenderedFrameKeyRef.current = frameContentKey
+  }
   const postFrameMessage = useCallback(
     (message: unknown): boolean => {
       const target = iframeRef.current?.contentWindow
@@ -720,6 +739,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId, artifactData }: HtmlLik
     }
 
     const postCommandToIframe = (command: BridgeCommand): boolean => {
+      if (loadedFrameKeyRef.current !== frameContentKey) return false
       const target = iframeRef.current?.contentWindow
       if (!target || !command || typeof command !== 'object') return false
       const targetArtifactId = command.artifact_id || command.artifactId || command.id || command.tab_id || artifactId || null
@@ -796,53 +816,71 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId, artifactData }: HtmlLik
       window.removeEventListener('hermes-artifact-command', handleBridgeCommand)
       window.clearTimeout(timer)
     }
-  }, [artifactId, postFrameMessage, src, targetOrigin])
+  }, [artifactId, frameContentKey, postFrameMessage, src, targetOrigin])
 
   useEffect(() => {
+    return () => {
+      if (loadRafRef.current !== null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(loadRafRef.current)
+        loadRafRef.current = null
+      }
+    }
+  }, [])
+
+  const frameReady = frameReadyVersion > 0 && loadedFrameKeyRef.current === frameContentKey
+
+  useEffect(() => {
+    if (!frameReady) return
     postFrameMessage(themeMessage)
-  }, [postFrameMessage, themeMessage])
+  }, [frameContentKey, frameReady, frameReadyVersion, postFrameMessage, themeMessage])
 
   useEffect(() => {
-    if (!artifactDataMessage) return
+    if (!frameReady || !artifactDataMessage) return
     postFrameMessage(artifactDataMessage)
-  }, [artifactDataMessage, postFrameMessage])
+  }, [artifactDataMessage, frameContentKey, frameReady, frameReadyVersion, postFrameMessage])
 
   return (
     <div style={{ padding: '12px 14px', height: '100%', minHeight: 360, boxSizing: 'border-box' }}>
       <iframe
         title={title}
         src={src || undefined}
-        srcDoc={srcDoc || undefined}
+        srcDoc={sanitizedSrcDoc || undefined}
         sandbox={src ? 'allow-scripts allow-forms allow-same-origin' : 'allow-scripts allow-forms'}
         referrerPolicy="no-referrer"
         ref={iframeRef}
         onLoad={() => {
-          try {
-            const store = (window as Window & { __hermesArtifactBridgeCommands?: Record<string, BridgeCommand[]> }).__hermesArtifactBridgeCommands
-            const key = artifactId ? String(artifactId) : '__global__'
-            const queue = store && typeof store === 'object' && Array.isArray(store[key]) ? [...store[key]] : []
-            const target = iframeRef.current?.contentWindow
-            if (!target) return
-            postFrameMessage(themeMessage)
-            if (artifactDataMessage) {
-              postFrameMessage(artifactDataMessage)
-            }
-            queue.forEach((command) => {
-              postFrameMessage({
-                type: 'hermes:artifact-command',
-                artifactId: artifactId || command.artifact_id || command.artifactId || null,
-                channel: command.channel || 'strudel',
-                command: command.command || command.action || '',
-                requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
-                payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
-              })
-            })
-            if (store && typeof store === 'object') {
-              store[key] = []
-            }
-          } catch {
-            // ignore
+          const target = iframeRef.current?.contentWindow
+          if (!target || typeof window === 'undefined') return
+          if (loadRafRef.current !== null) {
+            window.cancelAnimationFrame(loadRafRef.current)
           }
+          const loadedKey = frameContentKey
+          loadRafRef.current = window.requestAnimationFrame(() => {
+            loadRafRef.current = null
+            if (iframeRef.current?.contentWindow !== target) return
+            loadedFrameKeyRef.current = loadedKey
+            setFrameReadyVersion((version) => version + 1)
+            try {
+              const store = (window as Window & { __hermesArtifactBridgeCommands?: Record<string, BridgeCommand[]> }).__hermesArtifactBridgeCommands
+              const key = artifactId ? String(artifactId) : '__global__'
+              const queue = store && typeof store === 'object' && Array.isArray(store[key]) ? [...store[key]] : []
+              queue.forEach((command) => {
+                postFrameMessage({
+                  type: 'hermes:artifact-command',
+                  artifactId: artifactId || command.artifact_id || command.artifactId || null,
+                  channel: command.channel || 'strudel',
+                  command: command.command || command.action || '',
+                  requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
+                  payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
+                })
+              })
+              if (store && typeof store === 'object') {
+                store[key] = []
+              }
+            } catch {
+              // ignore
+            }
+          })
         }}
         style={{
           width: '100%',
