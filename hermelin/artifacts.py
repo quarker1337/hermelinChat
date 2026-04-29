@@ -135,6 +135,131 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _read_runner_pid(path: Path) -> int | None:
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+        pid = int(raw)
+    except Exception:
+        return None
+    return pid if pid > 0 else None
+
+
+def _process_exists(pid: int) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Exists, but current user cannot signal it.
+        return True
+    except Exception:
+        return False
+
+
+def _process_matches_runner(root: Path, artifact_id: str, pid: int) -> bool | None:
+    """Best-effort guard against stale PID files and PID reuse.
+
+    Returns:
+    - True: process looks like this artifact runner
+    - False: process is observable and does not match this artifact runner
+    - None: platform/permissions prevent verification; caller may fall back to
+      the basic liveness check.
+    """
+
+    proc_dir = Path("/proc") / str(pid)
+    if not proc_dir.exists():
+        return None
+
+    projects_dir = artifact_runners_dir(root) / "projects"
+    try:
+        expected_cwd = (projects_dir / artifact_id).resolve()
+    except Exception:
+        expected_cwd = projects_dir / artifact_id
+    try:
+        expected_runner = (artifact_runners_dir(root) / f"{artifact_id}_runner.py").resolve()
+    except Exception:
+        expected_runner = artifact_runners_dir(root) / f"{artifact_id}_runner.py"
+
+    saw_process_metadata = False
+
+    try:
+        cwd = (proc_dir / "cwd").resolve()
+        saw_process_metadata = True
+        if cwd == expected_cwd:
+            return True
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        return None
+    except Exception:
+        pass
+
+    try:
+        raw_cmdline = (proc_dir / "cmdline").read_bytes()
+        saw_process_metadata = True
+        args = [part.decode("utf-8", errors="replace") for part in raw_cmdline.split(b"\0") if part]
+        expected_runner_str = str(expected_runner)
+        expected_runner_name = expected_runner.name
+        for arg in args:
+            if arg == expected_runner_str or arg.endswith(f"/{expected_runner_name}"):
+                return True
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        return None
+    except Exception:
+        pass
+
+    return False if saw_process_metadata else None
+
+
+def _artifact_runner_status(root: Path, artifact_id: str, *, expected_live: bool) -> dict[str, Any]:
+    pid_path = artifact_pids_dir(root) / f"{artifact_id}.pid"
+    status: dict[str, Any] = {
+        "runner_active": False,
+        "runner_status": "not_live" if not expected_live else "stopped",
+    }
+
+    if not pid_path.exists() or not pid_path.is_file():
+        return status
+
+    pid = _read_runner_pid(pid_path)
+    if pid is None:
+        status["runner_status"] = "stale_pid"
+        return status
+
+    if not _process_exists(pid):
+        status["runner_status"] = "stale_pid"
+        return status
+
+    matched = _process_matches_runner(root, artifact_id, pid)
+    if matched is False:
+        status["runner_status"] = "stale_pid"
+        return status
+
+    status["runner_active"] = True
+    status["runner_status"] = "running" if matched is True else "running_unverified"
+    return status
+
+
+def _enrich_artifact_runtime_status(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    artifact_id = str(payload.get("id") or "").strip()
+    if not artifact_id or not is_valid_artifact_id(artifact_id):
+        return payload
+
+    enriched = dict(payload)
+    try:
+        refresh_seconds = int(enriched.get("refresh_seconds") or 0)
+    except Exception:
+        refresh_seconds = 0
+    expected_live = bool(enriched.get("live")) or refresh_seconds > 0
+    enriched.update(_artifact_runner_status(root, artifact_id, expected_live=expected_live))
+    return enriched
+
+
 def _cache_key_for_path(path: Path) -> Path:
     return path.expanduser().resolve()
 
@@ -330,6 +455,7 @@ def list_artifacts(root: Path, *, hermes_home: Path | None = None) -> list[dict[
 
         payload["id"] = artifact_id
         payload["persistent"] = bool(persistent)
+        payload = _enrich_artifact_runtime_status(root, payload)
 
         prev = artifacts_by_id.get(artifact_id)
         if prev is None:
@@ -350,6 +476,7 @@ def list_artifacts(root: Path, *, hermes_home: Path | None = None) -> list[dict[
         payload["id"] = artifact_id
         payload["persistent"] = bool(payload.get("persistent", False))
         payload["default"] = True
+        payload = _enrich_artifact_runtime_status(root, payload)
         artifacts_by_id[artifact_id] = payload
 
     artifacts = list(artifacts_by_id.values())
@@ -365,7 +492,8 @@ def latest_artifact(root: Path, *, hermes_home: Path | None = None) -> dict[str,
         if artifact_id and is_valid_artifact_id(artifact_id):
             if "persistent" not in payload:
                 payload["persistent"] = (artifact_persistent_dir(root) / f"{artifact_id}.json").exists()
-            return payload
+            payload["id"] = artifact_id
+            return _enrich_artifact_runtime_status(root, payload)
 
     artifacts = list_artifacts(root, hermes_home=hermes_home)
     return artifacts[0] if artifacts else None

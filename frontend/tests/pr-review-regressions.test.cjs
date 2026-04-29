@@ -292,6 +292,96 @@ test('artifact store keeps render data stable for timestamp-only live updates', 
   assert.equal(secondArtifact.data, firstData)
 })
 
+test('artifact runtime state distinguishes persisted live expectation from active runner', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { getArtifactRuntimeState } = loadCompiled('components/ArtifactPanel.js')
+
+  assert.deepEqual(
+    getArtifactRuntimeState({ id: 'legacy-live', type: 'iframe', live: true, refresh_seconds: 2 }),
+    {
+      expectedLive: true,
+      hasRuntimeStatus: false,
+      isLive: true,
+      isStopped: false,
+      runnerStatus: '',
+    },
+  )
+
+  assert.deepEqual(
+    getArtifactRuntimeState({ id: 'saved-live', type: 'iframe', live: true, refresh_seconds: 2, runner_active: false, runner_status: 'stopped' }),
+    {
+      expectedLive: true,
+      hasRuntimeStatus: true,
+      isLive: false,
+      isStopped: true,
+      runnerStatus: 'stopped',
+    },
+  )
+
+  assert.deepEqual(
+    getArtifactRuntimeState({ id: 'active-live', type: 'iframe', live: true, runner_active: true, runner_status: 'running' }),
+    {
+      expectedLive: true,
+      hasRuntimeStatus: true,
+      isLive: true,
+      isStopped: false,
+      runnerStatus: 'running',
+    },
+  )
+})
+
+test('artifact store treats runner status-only changes as semantic updates', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  useArtifactStore.getState().applyArtifacts([
+    {
+      id: 'saved-live',
+      type: 'iframe',
+      title: 'Saved live artifact',
+      live: true,
+      refresh_seconds: 2,
+      runner_active: true,
+      runner_status: 'running',
+      timestamp: 1713379200000,
+      updated_at: 1713379200000,
+      data: { src: 'http://127.0.0.1:43123/' },
+    },
+  ])
+  const firstTabs = useArtifactStore.getState().tabs
+  const firstArtifact = firstTabs[0]
+  const firstData = firstArtifact.data
+
+  useArtifactStore.getState().applyArtifacts([
+    {
+      id: 'saved-live',
+      type: 'iframe',
+      title: 'Saved live artifact',
+      live: true,
+      refresh_seconds: 2,
+      runner_active: false,
+      runner_status: 'stopped',
+      timestamp: 1713379200000,
+      updated_at: 1713379200000,
+      data: { src: 'http://127.0.0.1:43123/' },
+    },
+  ])
+
+  const secondTabs = useArtifactStore.getState().tabs
+  assert.notEqual(secondTabs, firstTabs)
+  assert.notEqual(secondTabs[0], firstArtifact)
+  assert.equal(secondTabs[0].runner_active, false)
+  assert.equal(secondTabs[0].runner_status, 'stopped')
+  assert.equal(secondTabs[0].data, firstData)
+})
+
 test('artifact bridge commands do not steal active iframe focus', () => {
   installAssetStubs()
   clearCompiledModules()

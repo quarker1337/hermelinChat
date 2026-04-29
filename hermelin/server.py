@@ -2309,7 +2309,18 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 return True
             prev_updated = float(prev.get("updated_at") or 0.0)
             curr_updated = float(curr.get("updated_at") or 0.0)
-            return prev_updated != curr_updated
+            if prev_updated != curr_updated:
+                return True
+            for key in (
+                "live",
+                "persistent",
+                "refresh_seconds",
+                "runner_active",
+                "runner_status",
+            ):
+                if prev.get(key) != curr.get(key):
+                    return True
+            return False
 
         def _artifact_list_payload(snapshot: dict[str, dict]) -> str:
             payload = sorted(snapshot.values(), key=lambda item: float(item.get("timestamp") or 0.0), reverse=True)

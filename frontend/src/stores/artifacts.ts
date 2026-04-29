@@ -120,6 +120,11 @@ function artifactShallowEqual(a: ArtifactTab, b: ArtifactTab): boolean {
     String(a.id) !== String(b.id) ||
     String(a.type) !== String(b.type) ||
     String(a.title) !== String(b.title) ||
+    String(a.runner_status || '') !== String(b.runner_status || '') ||
+    Boolean(a.live) !== Boolean(b.live) ||
+    Boolean(a.persistent) !== Boolean(b.persistent) ||
+    Boolean(a.runner_active) !== Boolean(b.runner_active) ||
+    Number(a.refresh_seconds || 0) !== Number(b.refresh_seconds || 0) ||
     Number(a.timestamp || 0) !== Number(b.timestamp || 0) ||
     Number(a.updated_at || 0) !== Number(b.updated_at || 0)
   ) {
