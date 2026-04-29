@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
@@ -33,6 +33,14 @@ interface HtmlLikeFrameProps {
   src?: string
   title: string
   artifactId?: string
+  artifactData?: unknown
+}
+
+interface ArtifactFrameDataMessage {
+  type: 'hermes:artifact-data'
+  artifactId: string | null
+  data: Record<string, unknown>
+  artifactData: Record<string, unknown>
 }
 
 interface ArtifactEmptyProps {
@@ -113,6 +121,9 @@ for (const [name, loader] of HLJS_LANGS) {
 // -----------------------------------------------------------------------------
 
 const RUNNER_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '0.0.0.0', '::1'])
+const ARTIFACT_FRAME_DATA_MAX_BYTES = 256 * 1024
+const ARTIFACT_FRAME_DATA_MAX_NODES = 5000
+const ARTIFACT_FRAME_DATA_OMIT_KEYS = new Set(['html', 'srcdoc', 'src'])
 
 // tab_id -> { token, expiresAt, basePath } OR { pending: Promise<...> }
 const runnerTokenCache = new Map<string, RunnerCacheValue>()
@@ -139,6 +150,92 @@ function parseLocalRunnerSrc(src: string): LocalRunnerParts | null {
     }
   } catch {
     return null
+  }
+}
+
+export function resolveArtifactFrameTargetOrigin(src?: string): string | null {
+  if (!src) return '*'
+  if (typeof window === 'undefined' || !window.location?.origin) return null
+
+  try {
+    const url = new URL(src, window.location.href)
+    return url.origin === window.location.origin ? window.location.origin : null
+  } catch {
+    return null
+  }
+}
+
+function artifactFrameDataWithinBridgeLimit(value: unknown): boolean {
+  const seen = new Set<object>()
+  const stack: unknown[] = [value]
+  let bytes = 0
+  let nodes = 0
+
+  while (stack.length) {
+    const item = stack.pop()
+    nodes += 1
+    if (nodes > ARTIFACT_FRAME_DATA_MAX_NODES) return false
+
+    if (item === null || item === undefined) {
+      bytes += 4
+    } else if (typeof item === 'string') {
+      bytes += item.length
+    } else if (typeof item === 'number' || typeof item === 'boolean') {
+      bytes += 8
+    } else if (typeof item === 'object') {
+      if (seen.has(item)) continue
+      seen.add(item)
+
+      if (Array.isArray(item)) {
+        if (nodes + stack.length + item.length > ARTIFACT_FRAME_DATA_MAX_NODES) return false
+        bytes += item.length
+        for (let i = 0; i < item.length; i += 1) {
+          stack.push(item[i])
+        }
+      } else {
+        const record = item as Record<string, unknown>
+        let keyCount = 0
+        for (const key in record) {
+          if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+          keyCount += 1
+          if (nodes + stack.length + keyCount > ARTIFACT_FRAME_DATA_MAX_NODES) return false
+          bytes += key.length
+          stack.push(record[key])
+          if (bytes > ARTIFACT_FRAME_DATA_MAX_BYTES) return false
+        }
+      }
+    } else {
+      bytes += String(item).length
+    }
+
+    if (bytes > ARTIFACT_FRAME_DATA_MAX_BYTES) return false
+  }
+
+  return true
+}
+
+export function createArtifactDataBridgeMessage(artifactId: string, data: unknown): ArtifactFrameDataMessage | null {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+
+  const source = data as Record<string, unknown>
+  const payload: Record<string, unknown> = {}
+  let hasPayload = false
+
+  for (const key in source) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue
+    if (ARTIFACT_FRAME_DATA_OMIT_KEYS.has(key)) continue
+    payload[key] = source[key]
+    hasPayload = true
+  }
+
+  if (!hasPayload) return null
+  if (!artifactFrameDataWithinBridgeLimit(payload)) return null
+
+  return {
+    type: 'hermes:artifact-data',
+    artifactId: artifactId || null,
+    data: payload,
+    artifactData: payload,
   }
 }
 
@@ -541,9 +638,26 @@ function MarkdownArtifact({ artifact }: ArtifactProps) {
   )
 }
 
-function HtmlLikeFrame({ srcDoc, src, title, artifactId }: HtmlLikeFrameProps) {
+function HtmlLikeFrame({ srcDoc, src, title, artifactId, artifactData }: HtmlLikeFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  const targetOrigin = src ? window.location.origin : '*'
+  const targetOrigin = resolveArtifactFrameTargetOrigin(src)
+  const artifactDataMessage = useMemo(
+    () => createArtifactDataBridgeMessage(artifactId || '', artifactData),
+    [artifactId, artifactData],
+  )
+  const postFrameMessage = useCallback(
+    (message: unknown): boolean => {
+      const target = iframeRef.current?.contentWindow
+      if (!target || !targetOrigin) return false
+      try {
+        target.postMessage(message, targetOrigin)
+        return true
+      } catch {
+        return false
+      }
+    },
+    [targetOrigin],
+  )
   const activeTheme = getActiveTheme()
   const themeMessage = useMemo(
     () => ({
@@ -606,22 +720,19 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }: HtmlLikeFrameProps) {
     }
 
     const postCommandToIframe = (command: BridgeCommand): boolean => {
-      const frame = iframeRef.current
-      const target = frame?.contentWindow
+      const target = iframeRef.current?.contentWindow
       if (!target || !command || typeof command !== 'object') return false
       const targetArtifactId = command.artifact_id || command.artifactId || command.id || command.tab_id || artifactId || null
       if (targetArtifactId && artifactId && String(targetArtifactId) !== String(artifactId)) return false
-      target.postMessage(
-        {
-          type: 'hermes:artifact-command',
-          artifactId: artifactId || targetArtifactId || null,
-          channel: command.channel || 'strudel',
-          command: command.command || command.action || '',
-          requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
-          payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
-        },
-        targetOrigin,
-      )
+      const delivered = postFrameMessage({
+        type: 'hermes:artifact-command',
+        artifactId: artifactId || targetArtifactId || null,
+        channel: command.channel || 'strudel',
+        command: command.command || command.action || '',
+        requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
+        payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
+      })
+      if (!delivered) return false
       const commandId = command.command_id || command.commandId || null
       removeQueuedCommand((targetArtifactId || artifactId) as string, commandId || null)
       return true
@@ -644,7 +755,10 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }: HtmlLikeFrameProps) {
       const frame = iframeRef.current
       const target = frame?.contentWindow
       if (!target || event.source !== target) return
-      if (src && event.origin !== window.location.origin) return
+      if (src) {
+        if (!targetOrigin || targetOrigin === '*') return
+        if (event.origin !== targetOrigin) return
+      }
       const data = event.data as Record<string, unknown> | null
       if (!data || typeof data !== 'object' || data.type !== 'hermes:artifact-event') return
       const channel = String(data.channel || 'strudel')
@@ -682,13 +796,16 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }: HtmlLikeFrameProps) {
       window.removeEventListener('hermes-artifact-command', handleBridgeCommand)
       window.clearTimeout(timer)
     }
-  }, [artifactId])
+  }, [artifactId, postFrameMessage, src, targetOrigin])
 
   useEffect(() => {
-    const target = iframeRef.current?.contentWindow
-    if (!target) return
-    target.postMessage(themeMessage, targetOrigin)
-  }, [themeMessage])
+    postFrameMessage(themeMessage)
+  }, [postFrameMessage, themeMessage])
+
+  useEffect(() => {
+    if (!artifactDataMessage) return
+    postFrameMessage(artifactDataMessage)
+  }, [artifactDataMessage, postFrameMessage])
 
   return (
     <div style={{ padding: '12px 14px', height: '100%', minHeight: 360, boxSizing: 'border-box' }}>
@@ -706,19 +823,19 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId }: HtmlLikeFrameProps) {
             const queue = store && typeof store === 'object' && Array.isArray(store[key]) ? [...store[key]] : []
             const target = iframeRef.current?.contentWindow
             if (!target) return
-            target.postMessage(themeMessage, targetOrigin)
+            postFrameMessage(themeMessage)
+            if (artifactDataMessage) {
+              postFrameMessage(artifactDataMessage)
+            }
             queue.forEach((command) => {
-              target.postMessage(
-                {
-                  type: 'hermes:artifact-command',
-                  artifactId: artifactId || command.artifact_id || command.artifactId || null,
-                  channel: command.channel || 'strudel',
-                  command: command.command || command.action || '',
-                  requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
-                  payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
-                },
-                targetOrigin,
-              )
+              postFrameMessage({
+                type: 'hermes:artifact-command',
+                artifactId: artifactId || command.artifact_id || command.artifactId || null,
+                channel: command.channel || 'strudel',
+                command: command.command || command.action || '',
+                requestId: command.request_id || command.requestId || command.command_id || command.commandId || null,
+                payload: command.payload && typeof command.payload === 'object' ? command.payload : {},
+              })
             })
             if (store && typeof store === 'object') {
               store[key] = []
@@ -746,7 +863,7 @@ function HtmlArtifact({ artifact }: ArtifactProps) {
   if (!html) {
     return <ArtifactEmpty title="Invalid html artifact" detail="Expected data.html or data.srcdoc." />
   }
-  return <HtmlLikeFrame title={artifact?.title || 'HTML artifact'} srcDoc={html} artifactId={artifact?.id || ''} />
+  return <HtmlLikeFrame title={artifact?.title || 'HTML artifact'} srcDoc={html} artifactId={artifact?.id || ''} artifactData={data} />
 }
 
 function IframeArtifact({ artifact }: ArtifactProps) {
@@ -810,10 +927,10 @@ function IframeArtifact({ artifact }: ArtifactProps) {
       return <ArtifactEmpty title="Loading runner..." detail="Preparing secure proxy URL for this iframe runner." />
     }
 
-    return <HtmlLikeFrame title={artifact?.title || 'Iframe runner'} src={resolvedSrc} srcDoc={srcDoc} artifactId={artifact?.id || ''} />
+    return <HtmlLikeFrame title={artifact?.title || 'Iframe runner'} src={resolvedSrc} srcDoc={srcDoc} artifactId={artifact?.id || ''} artifactData={data} />
   }
 
-  return <HtmlLikeFrame title={artifact?.title || 'Iframe artifact'} src={rawSrc} srcDoc={srcDoc} artifactId={artifact?.id || ''} />
+  return <HtmlLikeFrame title={artifact?.title || 'Iframe artifact'} src={rawSrc} srcDoc={srcDoc} artifactId={artifact?.id || ''} artifactData={data} />
 }
 
 function LogsArtifact({ artifact }: ArtifactProps) {

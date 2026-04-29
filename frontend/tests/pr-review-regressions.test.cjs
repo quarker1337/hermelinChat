@@ -65,6 +65,10 @@ function makeWindow({ innerWidth = 1400, storageSeed = {} } = {}) {
 
   return {
     innerWidth,
+    location: {
+      origin: 'https://hermelin.test',
+      href: 'https://hermelin.test/',
+    },
     localStorage: makeStorage(storageSeed),
     addEventListener(type, handler) {
       const next = listeners.get(type) || []
@@ -322,6 +326,42 @@ test('artifact bridge commands do not steal active iframe focus', () => {
 
   assert.equal(useArtifactStore.getState().activeId, 'focused-frame')
   assert.equal(useArtifactStore.getState().panelOpen, true)
+})
+
+test('artifact iframe data bridge is bounded and omits iframe transport fields', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createArtifactDataBridgeMessage, resolveArtifactFrameTargetOrigin } = loadCompiled('components/artifacts/ArtifactRenderer.js')
+
+  assert.deepEqual(
+    createArtifactDataBridgeMessage('dashboard', {
+      src: '/api/default-artifacts/dashboard/index.html',
+      srcdoc: '<script>expensive html</script>',
+      html: '<div>inline html</div>',
+      rows: [{ label: 'ok', value: 1 }],
+      title: 'Runtime data',
+    }),
+    {
+      type: 'hermes:artifact-data',
+      artifactId: 'dashboard',
+      data: {
+        rows: [{ label: 'ok', value: 1 }],
+        title: 'Runtime data',
+      },
+      artifactData: {
+        rows: [{ label: 'ok', value: 1 }],
+        title: 'Runtime data',
+      },
+    },
+  )
+
+  assert.equal(createArtifactDataBridgeMessage('empty', { src: '/only/transport.html' }), null)
+  assert.equal(createArtifactDataBridgeMessage('huge', { rows: 'x'.repeat(300 * 1024) }), null)
+  assert.equal(resolveArtifactFrameTargetOrigin(undefined), '*')
+  assert.equal(resolveArtifactFrameTargetOrigin('/api/default-artifacts/strudel/index.html'), 'https://hermelin.test')
+  assert.equal(resolveArtifactFrameTargetOrigin('https://example.com/artifact.html'), null)
 })
 
 test('artifact panel width no-ops when clamped width is unchanged', () => {
