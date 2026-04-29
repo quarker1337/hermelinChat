@@ -6,12 +6,26 @@ import os
 import re
 import signal
 import tempfile
+import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
 from .default_artifacts import load_default_artifacts
 
 logger = logging.getLogger("hermelin.artifacts")
+
+
+@dataclass
+class _ArtifactCacheEntry:
+    mtime_ns: int
+    size: int
+    persistent: bool
+    payload: dict[str, Any] | None
+
+
+_ARTIFACT_CACHE_LOCK = threading.RLock()
+_ARTIFACT_FILE_CACHE: dict[Path, _ArtifactCacheEntry] = {}
 
 
 ARTIFACT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -102,6 +116,45 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _read_artifact_json_cached(path: Path, *, persistent: bool) -> dict[str, Any] | None:
+    """Read one artifact JSON file, reusing parsed payloads while unchanged."""
+
+    try:
+        stat = path.stat()
+    except Exception:
+        return None
+
+    cache_key = path.resolve()
+    with _ARTIFACT_CACHE_LOCK:
+        cached = _ARTIFACT_FILE_CACHE.get(cache_key)
+        if (
+            cached is not None
+            and cached.mtime_ns == stat.st_mtime_ns
+            and cached.size == stat.st_size
+            and cached.persistent == bool(persistent)
+        ):
+            return dict(cached.payload) if cached.payload is not None else None
+
+    payload = _read_json(path)
+    normalized: dict[str, Any] | None = None
+    if payload is not None:
+        artifact_id = str(payload.get("id") or path.stem)
+        if is_valid_artifact_id(artifact_id):
+            normalized = dict(payload)
+            normalized["id"] = artifact_id
+            normalized["persistent"] = bool(persistent)
+
+    with _ARTIFACT_CACHE_LOCK:
+        _ARTIFACT_FILE_CACHE[cache_key] = _ArtifactCacheEntry(
+            mtime_ns=stat.st_mtime_ns,
+            size=stat.st_size,
+            persistent=bool(persistent),
+            payload=normalized,
+        )
+
+    return dict(normalized) if normalized is not None else None
+
+
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
@@ -158,7 +211,7 @@ def list_artifacts(root: Path, *, hermes_home: Path | None = None) -> list[dict[
     artifacts_by_id: dict[str, dict[str, Any]] = {}
 
     for path, persistent in _iter_artifact_files(root):
-        payload = _read_json(path)
+        payload = _read_artifact_json_cached(path, persistent=persistent)
         if payload is None:
             continue
 

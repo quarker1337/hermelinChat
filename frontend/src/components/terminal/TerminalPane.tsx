@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -6,10 +6,113 @@ import '@xterm/xterm/css/xterm.css'
 
 import { buildWsUrl, stripAnsi } from './utils'
 import { handleControlMessage } from '../artifacts/bridge'
+import { useArtifactStore } from '../../stores/artifacts'
 import { useTerminalStore } from '../../stores/terminal'
 import { useUiPrefsStore } from '../../stores/ui-prefs'
 import { AMBER, SLATE } from '../../theme/index'
 import { CURSOR_STYLE_VALUES, DEFAULT_UI_PREFS } from '../../utils/ui-prefs'
+
+// ---------------------------------------------------------------------------
+// Terminal output queue
+// ---------------------------------------------------------------------------
+
+type TerminalWritable = {
+  write(data: string | Uint8Array, callback?: () => void): void
+}
+
+export function createTerminalWriteQueue(term: TerminalWritable) {
+  const pending: Array<string | Uint8Array> = []
+  let writing = false
+  let disposed = false
+
+  const nextBatch = (): string | Uint8Array | null => {
+    const first = pending.shift()
+    if (first === undefined) return null
+
+    if (typeof first === 'string') {
+      let out = first
+      while (pending.length && typeof pending[0] === 'string' && out.length < 65536) {
+        out += pending.shift() as string
+      }
+      return out
+    }
+
+    const chunks: Uint8Array[] = [first]
+    let total = first.byteLength
+    while (pending.length && pending[0] instanceof Uint8Array && total < 65536) {
+      const chunk = pending.shift() as Uint8Array
+      chunks.push(chunk)
+      total += chunk.byteLength
+    }
+
+    if (chunks.length === 1) return first
+
+    const merged = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      merged.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return merged
+  }
+
+  const drain = () => {
+    if (disposed || writing) return
+    const batch = nextBatch()
+    if (batch === null) return
+
+    writing = true
+    try {
+      term.write(batch, () => {
+        writing = false
+        drain()
+      })
+    } catch {
+      writing = false
+      pending.length = 0
+    }
+  }
+
+  return {
+    enqueue(data: string | Uint8Array) {
+      if (disposed) return
+      if (typeof data === 'string' && data.length === 0) return
+      if (data instanceof Uint8Array && data.byteLength === 0) return
+      pending.push(data)
+      drain()
+    },
+    clear() {
+      pending.length = 0
+    },
+    dispose() {
+      disposed = true
+      pending.length = 0
+    },
+    size() {
+      return pending.length + (writing ? 1 : 0)
+    },
+  }
+}
+
+export function createSessionIdDetector(onDetected: (sid: string) => void) {
+  let detectTail = ''
+  let lastDetectedSid: string | null = null
+
+  return (text: string) => {
+    if (!text || lastDetectedSid) return null
+    detectTail = (detectTail + text).slice(-6000)
+    const clean = stripAnsi(detectTail)
+    if (!clean.includes('Session:')) return null
+
+    const match = clean.match(/Session:\s*([0-9]{8}_[0-9]{6}_[0-9a-f]{6})/i)
+    const sid = match?.[1] || null
+    if (!sid || sid === lastDetectedSid) return null
+
+    lastDetectedSid = sid
+    onDetected(sid)
+    return sid
+  }
+}
 
 // ---------------------------------------------------------------------------
 // TerminalPane
@@ -18,7 +121,7 @@ import { CURSOR_STYLE_VALUES, DEFAULT_UI_PREFS } from '../../utils/ui-prefs'
 // to the backend PTY. Everything is tightly coupled so this stays as one file.
 // ---------------------------------------------------------------------------
 
-export default function TerminalPane() {
+function TerminalPane() {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -295,27 +398,18 @@ export default function TerminalPane() {
     let ro: ResizeObserver | null = null
     let resizeTimer: ReturnType<typeof setTimeout> | null = null
     let onDataDisposable: { dispose(): void } | null = null
+    let writeQueue: ReturnType<typeof createTerminalWriteQueue> | null = createTerminalWriteQueue(term)
+    const realtimeToken = `${spawnNonce}:${resumeId ?? ''}:${Date.now()}:${Math.random()}`
 
     const encoder = new TextEncoder()
 
     // Try to detect the Hermes session ID from the terminal output so the UI can
     // auto-select the correct session in the sidebar/topbar.
     const decoder = new TextDecoder('utf-8')
-    let detectTail = ''
-    let lastDetectedSid: string | null = null
-
-    const maybeDetectSessionId = (text: string) => {
+    const maybeDetectSessionId = createSessionIdDetector((sid) => {
       const cb = onDetectedSessionIdRef.current
-      if (!text || !cb) return
-      detectTail = (detectTail + text).slice(-6000)
-      const clean = stripAnsi(detectTail)
-      const m = clean.match(/Session:\s*([0-9]{8}_[0-9]{6}_[0-9a-f]{6})/i)
-      const sid = m?.[1] || null
-      if (sid && sid !== lastDetectedSid) {
-        lastDetectedSid = sid
-        cb(sid)
-      }
-    }
+      if (cb) cb(sid)
+    })
 
     const sendResize = () => {
       try {
@@ -379,22 +473,25 @@ export default function TerminalPane() {
 
       ws.onopen = () => {
         onConnectionChange(true, connectionNonce)
+        useArtifactStore.getState().setRealtimeUpdatesActive(true, realtimeToken)
         // initial fit + resize
         setTimeout(sendResize, 10)
       }
 
       ws.onclose = () => {
         onConnectionChange(false, connectionNonce)
+        useArtifactStore.getState().setRealtimeUpdatesActive(false, realtimeToken)
       }
 
       ws.onerror = () => {
         onConnectionChange(false, connectionNonce)
+        useArtifactStore.getState().setRealtimeUpdatesActive(false, realtimeToken)
       }
 
       ws.onmessage = (ev: MessageEvent) => {
         if (ev.data instanceof ArrayBuffer) {
           const u8 = new Uint8Array(ev.data)
-          term.write(u8)
+          writeQueue?.enqueue(u8)
           try {
             maybeDetectSessionId(decoder.decode(u8, { stream: true }))
           } catch {
@@ -416,7 +513,7 @@ export default function TerminalPane() {
           } catch {
             // not a control message
           }
-          term.write(ev.data)
+          writeQueue?.enqueue(ev.data)
           maybeDetectSessionId(ev.data)
         }
       }
@@ -438,6 +535,17 @@ export default function TerminalPane() {
       }
       try {
         if (resizeTimer) clearTimeout(resizeTimer)
+      } catch {
+        // ignore
+      }
+      try {
+        writeQueue?.dispose()
+        writeQueue = null
+      } catch {
+        // ignore
+      }
+      try {
+        useArtifactStore.getState().setRealtimeUpdatesActive(false, realtimeToken)
       } catch {
         // ignore
       }
@@ -476,3 +584,5 @@ export default function TerminalPane() {
     </div>
   )
 }
+
+export default memo(TerminalPane)

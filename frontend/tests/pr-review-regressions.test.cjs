@@ -19,7 +19,7 @@ function installAssetStubs() {
 
   const originalResolveFilename = Module._resolveFilename
   const originalLoad = Module._load
-  const assetPattern = /\.(svg(\?raw)?|png)$/
+  const assetPattern = /\.(css|svg(\?raw)?|png)$/
 
   Module._resolveFilename = function patchedResolveFilename(request, parent, isMain, options) {
     if (assetPattern.test(request)) return request
@@ -254,6 +254,149 @@ test('artifact store preserves tab references for unchanged poll payloads', () =
   const secondTabs = useArtifactStore.getState().tabs
   assert.equal(secondTabs, firstTabs)
   assert.equal(secondTabs[0], firstArtifact)
+})
+
+test('artifact store keeps render data stable for timestamp-only live updates', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  const payload = [
+    {
+      id: 'live-log',
+      type: 'logs',
+      title: 'Live Log',
+      timestamp: 1713379200000,
+      data: { lines: [{ level: 'info', message: 'still selectable' }] },
+    },
+  ]
+
+  useArtifactStore.getState().applyArtifacts(payload)
+  const firstArtifact = useArtifactStore.getState().tabs[0]
+  const firstData = firstArtifact.data
+
+  const nextPayload = JSON.parse(JSON.stringify(payload))
+  nextPayload[0].timestamp = 1713379205000
+  useArtifactStore.getState().applyArtifacts(nextPayload)
+
+  const secondArtifact = useArtifactStore.getState().tabs[0]
+  assert.notEqual(secondArtifact, firstArtifact)
+  assert.equal(secondArtifact.timestamp, 1713379205000)
+  assert.equal(secondArtifact.data, firstData)
+})
+
+test('artifact panel width no-ops when clamped width is unchanged', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow({ innerWidth: 1400 }))
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+  useArtifactStore.getState().setPanelWidth(640)
+
+  let updates = 0
+  const unsubscribe = useArtifactStore.subscribe(() => {
+    updates += 1
+  })
+
+  try {
+    useArtifactStore.getState().setPanelWidth(640)
+    assert.equal(updates, 0)
+  } finally {
+    unsubscribe()
+  }
+})
+
+test('terminal write queue waits for xterm write callbacks before draining more output', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalWriteQueue } = loadCompiled('components/terminal/TerminalPane.js')
+  const callbacks = []
+  const writes = []
+  const term = {
+    write(data, callback) {
+      writes.push(data)
+      callbacks.push(callback)
+    },
+  }
+
+  const queue = createTerminalWriteQueue(term)
+  queue.enqueue('first')
+  queue.enqueue('second')
+
+  assert.deepEqual(writes, ['first'])
+  assert.equal(callbacks.length, 1)
+
+  callbacks.shift()()
+  assert.deepEqual(writes, ['first', 'second'])
+})
+
+test('terminal session detector handles Session marker split across frames', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createSessionIdDetector } = loadCompiled('components/terminal/TerminalPane.js')
+  const detected = []
+  const detect = createSessionIdDetector((sid) => detected.push(sid))
+
+  assert.equal(detect('Hermes Ses'), null)
+  assert.equal(detect('sion: 20260429_091600_abcdef ready'), '20260429_091600_abcdef')
+  assert.deepEqual(detected, ['20260429_091600_abcdef'])
+
+  // Only detect once; later prompt redraws should not re-trigger session changes.
+  assert.equal(detect('Session: 20260429_091601_123456'), null)
+  assert.deepEqual(detected, ['20260429_091600_abcdef'])
+})
+
+test('artifact realtime token ignores stale websocket disconnects', async () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const originalFetch = global.fetch
+  let calls = 0
+  global.fetch = async () => {
+    calls += 1
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return []
+      },
+    }
+  }
+
+  try {
+    const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+    useArtifactStore.getState().reset()
+    useArtifactStore.getState().startPolling()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const initialCalls = calls
+    assert.equal(initialCalls, 1)
+
+    useArtifactStore.getState().setRealtimeUpdatesActive(true, 'new-socket')
+    useArtifactStore.getState().setRealtimeUpdatesActive(false, 'old-socket')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(calls, initialCalls)
+
+    useArtifactStore.getState().setRealtimeUpdatesActive(false, 'new-socket')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(calls, initialCalls + 1)
+  } finally {
+    try {
+      const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+      useArtifactStore.getState().stopPolling()
+    } catch {}
+    if (originalFetch === undefined) delete global.fetch
+    else global.fetch = originalFetch
+  }
 })
 
 test('index.css restores the Google Fonts JetBrains Mono import for terminal parity', () => {

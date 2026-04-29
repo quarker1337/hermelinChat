@@ -118,6 +118,7 @@ from .config_editor import (
     _set_command_toolset_enabled,
 )
 from .runners import discover_runner_upstream
+from .ws_writer import WebSocketPriorityWriter
 
 
 def _update_env_var_text(text: str, key: str, value: str) -> tuple[str, bool]:
@@ -2372,13 +2373,16 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             except Exception:
                 pass
 
+        writer = WebSocketPriorityWriter(websocket, max_droppable_backlog=2)
+
         async def pump_pty_to_ws() -> None:
             try:
                 while True:
                     data = await asyncio.to_thread(os.read, p.master_fd, 8192)
                     if not data:
                         break
-                    await websocket.send_bytes(data)
+                    if not await writer.send_bytes(data, priority=0):
+                        break
             except Exception:
                 # WebSocket closed, PTY died, etc.
                 logger.debug("pump_pty_to_ws ended", exc_info=True)
@@ -2395,10 +2399,21 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 pass
 
         async def pump_artifacts_to_ws() -> None:
+            async def _load_snapshot() -> dict[str, dict]:
+                return await asyncio.to_thread(_artifact_snapshot)
+
+            async def _send_control(payload: str) -> bool:
+                return await writer.send_text(payload, priority=5, droppable=False)
+
+            async def _send_artifact(payload: str) -> bool:
+                return await writer.send_text(payload, priority=20, droppable=True)
+
             try:
-                previous = _artifact_snapshot()
-                if previous:
-                    await websocket.send_text(_artifact_list_payload(previous))
+                initial = await _load_snapshot()
+                previous: dict[str, dict] = {}
+                if initial:
+                    if await _send_artifact(_artifact_list_payload(initial)):
+                        previous = initial
 
                 # Optional control signal written by Hermes' close_panel tool.
                 close_signal_path = config.artifact_dir / "_close_signal.json"
@@ -2417,7 +2432,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
                 while True:
                     await asyncio.sleep(0.75)
-                    current = _artifact_snapshot()
+                    current = await _load_snapshot()
 
                     # If close_panel() wrote a close_all signal, forward it so the UI can
                     # actually hide the panel (not just remove tabs).
@@ -2430,7 +2445,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                             except Exception:
                                 sig = None
                             if isinstance(sig, dict) and sig.get("action") == "close_all":
-                                await websocket.send_text(json.dumps({"type": "artifact_close", "payload": sig}, ensure_ascii=False))
+                                await _send_control(json.dumps({"type": "artifact_close", "payload": sig}, ensure_ascii=False))
                     except FileNotFoundError:
                         pass
                     except Exception:
@@ -2450,7 +2465,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                             if isinstance(sig, dict) and sig.get("action") == "focus":
                                 tab_id = sig.get("tab_id")
                                 if tab_id:
-                                    await websocket.send_text(
+                                    await _send_control(
                                         json.dumps({"type": "artifact_focus", "payload": sig}, ensure_ascii=False)
                                     )
                                     # Delete the one-shot signal after processing.
@@ -2477,7 +2492,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                             except Exception:
                                 cmd = None
                             if isinstance(cmd, dict):
-                                await websocket.send_text(
+                                await _send_control(
                                     json.dumps({"type": "artifact_bridge_command", "payload": cmd}, ensure_ascii=False)
                                 )
                             try:
@@ -2488,7 +2503,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                         pass
 
                     for artifact_id in sorted(previous.keys() - current.keys()):
-                        await websocket.send_text(_artifact_close_payload(artifact_id))
+                        await _send_control(_artifact_close_payload(artifact_id))
+                        previous.pop(artifact_id, None)
 
                     changed_ids = [
                         artifact_id
@@ -2498,9 +2514,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                     changed_ids.sort(key=lambda artifact_id: float(current[artifact_id].get("timestamp") or 0.0))
 
                     for artifact_id in changed_ids:
-                        await websocket.send_text(_artifact_payload(current[artifact_id]))
-
-                    previous = current
+                        if await _send_artifact(_artifact_payload(current[artifact_id])):
+                            previous[artifact_id] = current[artifact_id]
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -2510,25 +2525,62 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         t1 = asyncio.create_task(pump_pty_to_ws())
         t2 = asyncio.create_task(pump_ws_to_pty())
         t3 = asyncio.create_task(pump_artifacts_to_ws())
+        writer_task = asyncio.create_task(writer.run())
 
-        done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
-        t3.cancel()
-        for task in pending:
-            task.cancel()
         try:
-            await t3
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            pass
+            await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            try:
+                t3.cancel()
+                for task in (t1, t2):
+                    if not task.done():
+                        task.cancel()
 
-        # Ensure subprocess is gone and fds are closed
-        p.terminate()
-        p.close_fds()
-        try:
-            await websocket.close()
-        except Exception:
-            pass
+                try:
+                    await t3
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+
+                try:
+                    await writer.stop()
+                except asyncio.CancelledError:
+                    writer_task.cancel()
+                except Exception:
+                    pass
+
+                if not writer_task.done():
+                    try:
+                        await asyncio.wait_for(writer_task, timeout=2.0)
+                    except asyncio.TimeoutError:
+                        writer_task.cancel()
+                        try:
+                            await writer_task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            pass
+                    except asyncio.CancelledError:
+                        writer_task.cancel()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        await writer_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+            finally:
+                # Ensure subprocess is gone and fds are closed even if websocket task
+                # cancellation interrupts the pumps while the client disconnects.
+                p.terminate()
+                p.close_fds()
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
 
     # Serve built frontend if present
     static_dir = config.static_dir
