@@ -334,6 +334,105 @@ test('terminal write queue waits for xterm write callbacks before draining more 
 
   callbacks.shift()()
   assert.deepEqual(writes, ['first', 'second'])
+  queue.dispose()
+})
+
+test('terminal write queue closes itself when pending output exceeds the byte cap', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalWriteQueue } = loadCompiled('components/terminal/TerminalPane.js')
+  const callbacks = []
+  const reasons = []
+  const term = {
+    write(_data, callback) {
+      callbacks.push(callback)
+    },
+  }
+
+  const queue = createTerminalWriteQueue(term, {
+    maxPendingBytes: 8,
+    writeTimeoutMs: 1000,
+    onBackpressureLimit(reason) {
+      reasons.push(reason)
+    },
+  })
+
+  assert.equal(queue.enqueue('1234'), true)
+  assert.equal(queue.enqueue('56789'), false)
+  assert.deepEqual(reasons, ['overflow'])
+  assert.equal(queue.size(), 0)
+  assert.equal(queue.bytes(), 0)
+  assert.equal(callbacks.length, 1)
+})
+
+test('terminal write queue falls back to safe defaults for invalid option values', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalWriteQueue } = loadCompiled('components/terminal/TerminalPane.js')
+  const callbacks = []
+  const reasons = []
+  const term = {
+    write(_data, callback) {
+      callbacks.push(callback)
+    },
+  }
+
+  const queue = createTerminalWriteQueue(term, {
+    maxPendingBytes: Number.NaN,
+    maxPendingItems: Number.NaN,
+    writeTimeoutMs: Number.NaN,
+    onBackpressureLimit(reason) {
+      reasons.push(reason)
+    },
+  })
+
+  assert.equal(queue.enqueue('1234'), true)
+  assert.equal(queue.enqueue('5678'), true)
+  assert.deepEqual(reasons, [])
+  assert.equal(callbacks.length, 1)
+  queue.dispose()
+})
+
+test('TerminalPane guards websocket lifecycle callbacks against stale sockets', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'terminal', 'TerminalPane.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /const isCurrentSocket = \(\) => !cancelled && !!ws && ws === wsRef\.current/)
+  assert.match(source, /ws\.onopen = \(\) => \{\s*if \(!isCurrentSocket\(\)\) return/)
+  assert.match(source, /ws\.onmessage = \(ev: MessageEvent\) => \{\s*if \(!isCurrentSocket\(\)\) return/)
+})
+
+test('artifact store does not stringify huge payloads to preserve render data', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  const payload = [
+    {
+      id: 'huge-live-log',
+      type: 'logs',
+      title: 'Huge Live Log',
+      timestamp: 1713379200000,
+      data: { markdown: 'x'.repeat(300 * 1024) },
+    },
+  ]
+
+  useArtifactStore.getState().applyArtifacts(payload)
+  const firstArtifact = useArtifactStore.getState().tabs[0]
+  const nextPayload = JSON.parse(JSON.stringify(payload))
+  nextPayload[0].timestamp = 1713379205000
+
+  useArtifactStore.getState().applyArtifacts(nextPayload)
+
+  const secondArtifact = useArtifactStore.getState().tabs[0]
+  assert.notEqual(secondArtifact.data, firstArtifact.data)
 })
 
 test('terminal session detector handles Session marker split across frames', () => {

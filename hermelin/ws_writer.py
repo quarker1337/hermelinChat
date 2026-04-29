@@ -39,11 +39,13 @@ class WebSocketPriorityWriter:
         max_droppable_backlog: int = 2,
         max_pending_messages: int = 256,
         max_pending_bytes: int = 1024 * 1024,
+        max_single_message_bytes: int = 8 * 1024 * 1024,
     ) -> None:
         self.websocket = websocket
         self.max_droppable_backlog = max(0, int(max_droppable_backlog))
         self.max_pending_messages = max(1, int(max_pending_messages))
         self.max_pending_bytes = max(1, int(max_pending_bytes))
+        self.max_single_message_bytes = max(self.max_pending_bytes, int(max_single_message_bytes))
         self._condition = asyncio.Condition()
         self._queue: list[_QueuedWebSocketMessage] = []
         self._sequence = 0
@@ -80,9 +82,11 @@ class WebSocketPriorityWriter:
         return len(payload.encode("utf-8", errors="ignore"))
 
     def _queue_is_full_for(self, size: int) -> bool:
-        # A single oversized message is allowed when the queue is otherwise
-        # empty; otherwise it could never be enqueued. Once anything is queued,
-        # use message and byte high-water marks for backpressure.
+        # A single moderately oversized message is allowed when the queue is
+        # otherwise empty; otherwise it could never be enqueued. Very large
+        # messages are refused so one artifact frame cannot monopolize memory.
+        if size > self.max_single_message_bytes:
+            return True
         if not self._queue:
             return False
         return len(self._queue) >= self.max_pending_messages or (self._pending_bytes + size) > self.max_pending_bytes
@@ -96,6 +100,8 @@ class WebSocketPriorityWriter:
         droppable: bool,
     ) -> bool:
         size = self._payload_size(payload)
+        if size > self.max_single_message_bytes:
+            return False
         async with self._condition:
             while not self._stopping and not droppable and self._queue_is_full_for(size):
                 await self._condition.wait()
@@ -137,41 +143,54 @@ class WebSocketPriorityWriter:
         self._condition.notify_all()
 
     async def stop(self) -> None:
+        await self._mark_stopping()
+
+    async def _mark_stopping(self, *, clear_queue: bool = False) -> None:
         async with self._condition:
             self._stopping = True
+            if clear_queue:
+                self._queue.clear()
+                self._pending_bytes = 0
+                self._droppable_backlog = 0
             self._condition.notify_all()
 
     async def run(self) -> None:
-        while True:
-            async with self._condition:
-                while not self._queue and not self._stopping:
-                    await self._condition.wait()
-                if not self._queue:
-                    return
-                message = heapq.heappop(self._queue)
-                self._pending_bytes = max(0, self._pending_bytes - message.size)
-                if message.droppable and self._droppable_backlog > 0:
-                    self._droppable_backlog -= 1
-                self._condition.notify_all()
-
-            # Give freshly-read PTY bytes one event-loop turn to enqueue before
-            # starting a large droppable artifact send. Once send_text starts it
-            # cannot be preempted, so this cheap yield improves the common case
-            # where terminal output and artifact updates arrive in the same tick.
-            if message.droppable:
-                await asyncio.sleep(0)
+        try:
+            while True:
                 async with self._condition:
-                    if self._queue and self._queue[0].priority < message.priority and not self._stopping:
-                        self._push_message(
-                            message.kind,
-                            message.payload,
-                            priority=message.priority,
-                            droppable=message.droppable,
-                            size=message.size,
-                        )
-                        continue
+                    while not self._queue and not self._stopping:
+                        await self._condition.wait()
+                    if not self._queue:
+                        return
+                    message = heapq.heappop(self._queue)
+                    self._pending_bytes = max(0, self._pending_bytes - message.size)
+                    if message.droppable and self._droppable_backlog > 0:
+                        self._droppable_backlog -= 1
+                    self._condition.notify_all()
 
-            if message.kind == "bytes":
-                await self.websocket.send_bytes(message.payload)  # type: ignore[arg-type]
-            else:
-                await self.websocket.send_text(message.payload)  # type: ignore[arg-type]
+                # Give freshly-read PTY bytes one event-loop turn to enqueue before
+                # starting a large droppable artifact send. Once send_text starts it
+                # cannot be preempted, so this cheap yield improves the common case
+                # where terminal output and artifact updates arrive in the same tick.
+                if message.droppable:
+                    await asyncio.sleep(0)
+                    async with self._condition:
+                        if self._queue and self._queue[0].priority < message.priority and not self._stopping:
+                            self._push_message(
+                                message.kind,
+                                message.payload,
+                                priority=message.priority,
+                                droppable=message.droppable,
+                                size=message.size,
+                            )
+                            continue
+
+                if message.kind == "bytes":
+                    await self.websocket.send_bytes(message.payload)  # type: ignore[arg-type]
+                else:
+                    await self.websocket.send_text(message.payload)  # type: ignore[arg-type]
+        finally:
+            # If the underlying websocket send raises or this task is cancelled,
+            # wake blocked producers so PTY/artifact pumps can exit instead of
+            # waiting forever on queue backpressure with no writer draining it.
+            await self._mark_stopping(clear_queue=True)

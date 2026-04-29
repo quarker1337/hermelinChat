@@ -50,9 +50,62 @@ function normalizeArtifacts(items: unknown[]): ArtifactTab[] {
     })) as ArtifactTab[]
 }
 
+const ARTIFACT_DATA_COMPARE_MAX_BYTES = 256 * 1024
+const ARTIFACT_DATA_COMPARE_MAX_NODES = 5000
+
+function artifactDataWithinCompareLimit(value: unknown): boolean {
+  const seen = new Set<object>()
+  const stack: unknown[] = [value]
+  let bytes = 0
+  let nodes = 0
+
+  while (stack.length) {
+    const item = stack.pop()
+    nodes += 1
+    if (nodes > ARTIFACT_DATA_COMPARE_MAX_NODES) return false
+
+    if (item === null || item === undefined) {
+      bytes += 4
+    } else if (typeof item === 'string') {
+      bytes += item.length
+    } else if (typeof item === 'number' || typeof item === 'boolean') {
+      bytes += 8
+    } else if (typeof item === 'object') {
+      if (seen.has(item)) continue
+      seen.add(item)
+
+      if (Array.isArray(item)) {
+        if (nodes + stack.length + item.length > ARTIFACT_DATA_COMPARE_MAX_NODES) return false
+        bytes += item.length
+        for (let i = 0; i < item.length; i += 1) {
+          stack.push(item[i])
+        }
+      } else {
+        const record = item as Record<string, unknown>
+        let keyCount = 0
+        for (const key in record) {
+          if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+          keyCount += 1
+          if (nodes + stack.length + keyCount > ARTIFACT_DATA_COMPARE_MAX_NODES) return false
+          bytes += key.length
+          stack.push(record[key])
+          if (bytes > ARTIFACT_DATA_COMPARE_MAX_BYTES) return false
+        }
+      }
+    } else {
+      bytes += String(item).length
+    }
+
+    if (bytes > ARTIFACT_DATA_COMPARE_MAX_BYTES) return false
+  }
+
+  return true
+}
+
 function artifactDataEqual(aData: unknown, bData: unknown): boolean {
   if (aData === bData) return true
   if (!aData || !bData) return false
+  if (!artifactDataWithinCompareLimit(aData) || !artifactDataWithinCompareLimit(bData)) return false
   try {
     return JSON.stringify(aData) === JSON.stringify(bData)
   } catch {

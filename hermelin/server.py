@@ -2528,7 +2528,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         writer_task = asyncio.create_task(writer.run())
 
         try:
-            await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait({t1, t2, writer_task}, return_when=asyncio.FIRST_COMPLETED)
         finally:
             try:
                 t3.cancel()

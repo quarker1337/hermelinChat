@@ -16,33 +16,87 @@ import { CURSOR_STYLE_VALUES, DEFAULT_UI_PREFS } from '../../utils/ui-prefs'
 // Terminal output queue
 // ---------------------------------------------------------------------------
 
+type TerminalWriteQueueReason = 'overflow' | 'write-timeout' | 'write-error'
+
+type TerminalWriteQueueOptions = {
+  maxPendingBytes?: number
+  maxPendingItems?: number
+  writeTimeoutMs?: number
+  onBackpressureLimit?: (reason: TerminalWriteQueueReason) => void
+}
+
+type QueuedTerminalWrite = {
+  data: string | Uint8Array
+  size: number
+}
+
 type TerminalWritable = {
   write(data: string | Uint8Array, callback?: () => void): void
 }
 
-export function createTerminalWriteQueue(term: TerminalWritable) {
-  const pending: Array<string | Uint8Array> = []
-  let writing = false
-  let disposed = false
+function terminalWriteSize(data: string | Uint8Array): number {
+  return typeof data === 'string' ? data.length : data.byteLength
+}
 
-  const nextBatch = (): string | Uint8Array | null => {
+function positiveQueueNumber(value: unknown, fallback: number): number {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
+}
+
+export function createTerminalWriteQueue(term: TerminalWritable, options: TerminalWriteQueueOptions = {}) {
+  const maxPendingBytes = positiveQueueNumber(options.maxPendingBytes, 4 * 1024 * 1024)
+  const maxPendingItems = positiveQueueNumber(options.maxPendingItems, 2048)
+  const writeTimeoutMs = positiveQueueNumber(options.writeTimeoutMs, 5000)
+
+  const pending: QueuedTerminalWrite[] = []
+  let pendingBytes = 0
+  let writing = false
+  let writingBytes = 0
+  let disposed = false
+  let writeTimer: ReturnType<typeof setTimeout> | null = null
+
+  const clearWriteTimer = () => {
+    if (writeTimer !== null) {
+      clearTimeout(writeTimer)
+      writeTimer = null
+    }
+  }
+
+  const fail = (reason: TerminalWriteQueueReason) => {
+    if (disposed) return
+    disposed = true
+    writing = false
+    writingBytes = 0
+    pending.length = 0
+    pendingBytes = 0
+    clearWriteTimer()
+    options.onBackpressureLimit?.(reason)
+  }
+
+  const nextBatch = (): QueuedTerminalWrite | null => {
     const first = pending.shift()
     if (first === undefined) return null
+    pendingBytes = Math.max(0, pendingBytes - first.size)
 
-    if (typeof first === 'string') {
-      let out = first
-      while (pending.length && typeof pending[0] === 'string' && out.length < 65536) {
-        out += pending.shift() as string
+    if (typeof first.data === 'string') {
+      let out = first.data
+      let size = first.size
+      while (pending.length && typeof pending[0].data === 'string' && out.length < 65536) {
+        const chunk = pending.shift() as QueuedTerminalWrite
+        pendingBytes = Math.max(0, pendingBytes - chunk.size)
+        out += chunk.data as string
+        size += chunk.size
       }
-      return out
+      return { data: out, size }
     }
 
-    const chunks: Uint8Array[] = [first]
-    let total = first.byteLength
-    while (pending.length && pending[0] instanceof Uint8Array && total < 65536) {
-      const chunk = pending.shift() as Uint8Array
-      chunks.push(chunk)
-      total += chunk.byteLength
+    const chunks: Uint8Array[] = [first.data]
+    let total = first.data.byteLength
+    while (pending.length && pending[0].data instanceof Uint8Array && total < 65536) {
+      const chunk = pending.shift() as QueuedTerminalWrite
+      pendingBytes = Math.max(0, pendingBytes - chunk.size)
+      chunks.push(chunk.data as Uint8Array)
+      total += chunk.size
     }
 
     if (chunks.length === 1) return first
@@ -53,7 +107,7 @@ export function createTerminalWriteQueue(term: TerminalWritable) {
       merged.set(chunk, offset)
       offset += chunk.byteLength
     }
-    return merged
+    return { data: merged, size: total }
   }
 
   const drain = () => {
@@ -62,34 +116,62 @@ export function createTerminalWriteQueue(term: TerminalWritable) {
     if (batch === null) return
 
     writing = true
+    writingBytes = batch.size
+    clearWriteTimer()
+    writeTimer = setTimeout(() => {
+      fail('write-timeout')
+    }, writeTimeoutMs)
+
     try {
-      term.write(batch, () => {
+      term.write(batch.data, () => {
+        if (disposed) return
+        clearWriteTimer()
         writing = false
+        writingBytes = 0
         drain()
       })
     } catch {
-      writing = false
-      pending.length = 0
+      fail('write-error')
     }
   }
 
   return {
     enqueue(data: string | Uint8Array) {
-      if (disposed) return
-      if (typeof data === 'string' && data.length === 0) return
-      if (data instanceof Uint8Array && data.byteLength === 0) return
-      pending.push(data)
+      if (disposed) return false
+      if (typeof data === 'string' && data.length === 0) return true
+      if (data instanceof Uint8Array && data.byteLength === 0) return true
+
+      const size = terminalWriteSize(data)
+      if (
+        size > maxPendingBytes
+        || pending.length >= maxPendingItems
+        || pendingBytes + writingBytes + size > maxPendingBytes
+      ) {
+        fail('overflow')
+        return false
+      }
+
+      pending.push({ data, size })
+      pendingBytes += size
       drain()
+      return true
     },
     clear() {
       pending.length = 0
+      pendingBytes = 0
     },
     dispose() {
       disposed = true
       pending.length = 0
+      pendingBytes = 0
+      writingBytes = 0
+      clearWriteTimer()
     },
     size() {
       return pending.length + (writing ? 1 : 0)
+    },
+    bytes() {
+      return pendingBytes + writingBytes
     },
   }
 }
@@ -398,8 +480,27 @@ function TerminalPane() {
     let ro: ResizeObserver | null = null
     let resizeTimer: ReturnType<typeof setTimeout> | null = null
     let onDataDisposable: { dispose(): void } | null = null
-    let writeQueue: ReturnType<typeof createTerminalWriteQueue> | null = createTerminalWriteQueue(term)
+    let outputBackpressureClosed = false
+    const closeForOutputBackpressure = (reason: 'overflow' | 'write-timeout' | 'write-error') => {
+      if (outputBackpressureClosed) return
+      outputBackpressureClosed = true
+      try {
+        term.write(`\r\n\u001b[31mTerminal output ${reason}; disconnected to protect the browser.\u001b[0m\r\n`)
+      } catch {
+        // ignore
+      }
+      try {
+        ws?.close(4000, 'terminal output backlog')
+      } catch {
+        // ignore
+      }
+    }
+    let writeQueue: ReturnType<typeof createTerminalWriteQueue> | null = createTerminalWriteQueue(term, {
+      onBackpressureLimit: closeForOutputBackpressure,
+    })
     const realtimeToken = `${spawnNonce}:${resumeId ?? ''}:${Date.now()}:${Math.random()}`
+
+    const isCurrentSocket = () => !cancelled && !!ws && ws === wsRef.current
 
     const encoder = new TextEncoder()
 
@@ -412,6 +513,7 @@ function TerminalPane() {
     })
 
     const sendResize = () => {
+      if (!isCurrentSocket()) return
       try {
         fit.fit()
       } catch {
@@ -464,7 +566,7 @@ function TerminalPane() {
       window.addEventListener('resize', scheduleResize)
 
       onDataDisposable = term.onData((data) => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (isCurrentSocket() && ws && ws.readyState === WebSocket.OPEN) {
           ws.send(encoder.encode(data))
         }
       })
@@ -472,6 +574,7 @@ function TerminalPane() {
       const connectionNonce = spawnNonce
 
       ws.onopen = () => {
+        if (!isCurrentSocket()) return
         onConnectionChange(true, connectionNonce)
         useArtifactStore.getState().setRealtimeUpdatesActive(true, realtimeToken)
         // initial fit + resize
@@ -479,16 +582,19 @@ function TerminalPane() {
       }
 
       ws.onclose = () => {
+        if (!isCurrentSocket()) return
         onConnectionChange(false, connectionNonce)
         useArtifactStore.getState().setRealtimeUpdatesActive(false, realtimeToken)
       }
 
       ws.onerror = () => {
+        if (!isCurrentSocket()) return
         onConnectionChange(false, connectionNonce)
         useArtifactStore.getState().setRealtimeUpdatesActive(false, realtimeToken)
       }
 
       ws.onmessage = (ev: MessageEvent) => {
+        if (!isCurrentSocket()) return
         if (ev.data instanceof ArrayBuffer) {
           const u8 = new Uint8Array(ev.data)
           writeQueue?.enqueue(u8)

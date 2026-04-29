@@ -16,9 +16,27 @@ from .default_artifacts import load_default_artifacts
 logger = logging.getLogger("hermelin.artifacts")
 
 
+def _cache_limit_from_env(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+# Keep parsed artifact caching bounded. The cache is an optimization for the
+# websocket polling loop, not a source of truth; oversized or high-churn artifact
+# payloads should miss the cache instead of growing backend memory forever.
+_ARTIFACT_CACHE_MAX_ENTRIES = _cache_limit_from_env("HERMELIN_ARTIFACT_CACHE_MAX_ENTRIES", 512)
+_ARTIFACT_CACHE_MAX_BYTES = _cache_limit_from_env("HERMELIN_ARTIFACT_CACHE_MAX_BYTES", 32 * 1024 * 1024)
+_ARTIFACT_CACHE_MAX_FILE_BYTES = _cache_limit_from_env("HERMELIN_ARTIFACT_CACHE_MAX_FILE_BYTES", 4 * 1024 * 1024)
+_ARTIFACT_READ_MAX_FILE_BYTES = _cache_limit_from_env("HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES", 8 * 1024 * 1024)
+
+
 @dataclass
 class _ArtifactCacheEntry:
     mtime_ns: int
+    ctime_ns: int
+    inode: int
     size: int
     persistent: bool
     payload: dict[str, Any] | None
@@ -26,6 +44,7 @@ class _ArtifactCacheEntry:
 
 _ARTIFACT_CACHE_LOCK = threading.RLock()
 _ARTIFACT_FILE_CACHE: dict[Path, _ArtifactCacheEntry] = {}
+_ARTIFACT_CACHE_BYTES = 0
 
 
 ARTIFACT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -116,6 +135,73 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _cache_key_for_path(path: Path) -> Path:
+    return path.expanduser().resolve()
+
+
+def _artifact_cache_put(cache_key: Path, entry: _ArtifactCacheEntry) -> None:
+    global _ARTIFACT_CACHE_BYTES
+
+    old = _ARTIFACT_FILE_CACHE.pop(cache_key, None)
+    if old is not None:
+        _ARTIFACT_CACHE_BYTES = max(0, _ARTIFACT_CACHE_BYTES - old.size)
+
+    if (
+        _ARTIFACT_CACHE_MAX_ENTRIES <= 0
+        or _ARTIFACT_CACHE_MAX_BYTES <= 0
+        or entry.size > _ARTIFACT_CACHE_MAX_FILE_BYTES
+        or entry.size > _ARTIFACT_CACHE_MAX_BYTES
+    ):
+        return
+
+    _ARTIFACT_FILE_CACHE[cache_key] = entry
+    _ARTIFACT_CACHE_BYTES += entry.size
+
+    while _ARTIFACT_FILE_CACHE and (
+        len(_ARTIFACT_FILE_CACHE) > _ARTIFACT_CACHE_MAX_ENTRIES
+        or _ARTIFACT_CACHE_BYTES > _ARTIFACT_CACHE_MAX_BYTES
+    ):
+        oldest_key = next(iter(_ARTIFACT_FILE_CACHE))
+        removed = _ARTIFACT_FILE_CACHE.pop(oldest_key)
+        _ARTIFACT_CACHE_BYTES = max(0, _ARTIFACT_CACHE_BYTES - removed.size)
+
+
+def _invalidate_artifact_cache_path(path: Path) -> None:
+    global _ARTIFACT_CACHE_BYTES
+    try:
+        cache_key = _cache_key_for_path(path)
+    except Exception:
+        return
+    with _ARTIFACT_CACHE_LOCK:
+        removed = _ARTIFACT_FILE_CACHE.pop(cache_key, None)
+        if removed is not None:
+            _ARTIFACT_CACHE_BYTES = max(0, _ARTIFACT_CACHE_BYTES - removed.size)
+
+
+def _invalidate_artifact_cache_under(root: Path) -> None:
+    global _ARTIFACT_CACHE_BYTES
+    try:
+        resolved_root = root.expanduser().resolve()
+    except Exception:
+        return
+    with _ARTIFACT_CACHE_LOCK:
+        for cache_key in list(_ARTIFACT_FILE_CACHE.keys()):
+            try:
+                cache_key.relative_to(resolved_root)
+            except ValueError:
+                continue
+            removed = _ARTIFACT_FILE_CACHE.pop(cache_key, None)
+            if removed is not None:
+                _ARTIFACT_CACHE_BYTES = max(0, _ARTIFACT_CACHE_BYTES - removed.size)
+
+
+def _clear_artifact_cache() -> None:
+    global _ARTIFACT_CACHE_BYTES
+    with _ARTIFACT_CACHE_LOCK:
+        _ARTIFACT_FILE_CACHE.clear()
+        _ARTIFACT_CACHE_BYTES = 0
+
+
 def _read_artifact_json_cached(path: Path, *, persistent: bool) -> dict[str, Any] | None:
     """Read one artifact JSON file, reusing parsed payloads while unchanged."""
 
@@ -124,15 +210,33 @@ def _read_artifact_json_cached(path: Path, *, persistent: bool) -> dict[str, Any
     except Exception:
         return None
 
-    cache_key = path.resolve()
+    if _ARTIFACT_READ_MAX_FILE_BYTES > 0 and stat.st_size > _ARTIFACT_READ_MAX_FILE_BYTES:
+        _invalidate_artifact_cache_path(path)
+        logger.debug(
+            "skipping oversized artifact %s (%d bytes > %d byte read limit)",
+            path,
+            stat.st_size,
+            _ARTIFACT_READ_MAX_FILE_BYTES,
+        )
+        return None
+
+    try:
+        cache_key = _cache_key_for_path(path)
+    except Exception:
+        return None
     with _ARTIFACT_CACHE_LOCK:
         cached = _ARTIFACT_FILE_CACHE.get(cache_key)
         if (
             cached is not None
             and cached.mtime_ns == stat.st_mtime_ns
+            and cached.ctime_ns == getattr(stat, "st_ctime_ns", 0)
+            and cached.inode == getattr(stat, "st_ino", 0)
             and cached.size == stat.st_size
             and cached.persistent == bool(persistent)
         ):
+            # Mark as recently used for bounded eviction.
+            _ARTIFACT_FILE_CACHE.pop(cache_key, None)
+            _ARTIFACT_FILE_CACHE[cache_key] = cached
             return dict(cached.payload) if cached.payload is not None else None
 
     payload = _read_json(path)
@@ -145,11 +249,16 @@ def _read_artifact_json_cached(path: Path, *, persistent: bool) -> dict[str, Any
             normalized["persistent"] = bool(persistent)
 
     with _ARTIFACT_CACHE_LOCK:
-        _ARTIFACT_FILE_CACHE[cache_key] = _ArtifactCacheEntry(
-            mtime_ns=stat.st_mtime_ns,
-            size=stat.st_size,
-            persistent=bool(persistent),
-            payload=normalized,
+        _artifact_cache_put(
+            cache_key,
+            _ArtifactCacheEntry(
+                mtime_ns=stat.st_mtime_ns,
+                ctime_ns=getattr(stat, "st_ctime_ns", 0),
+                inode=getattr(stat, "st_ino", 0),
+                size=stat.st_size,
+                persistent=bool(persistent),
+                payload=normalized,
+            ),
         )
 
     return dict(normalized) if normalized is not None else None
@@ -295,6 +404,7 @@ def delete_artifact(root: Path, artifact_id: str) -> bool:
         if not target.exists():
             continue
         target.unlink()
+        _invalidate_artifact_cache_path(target)
         removed_any = True
 
     recompute_latest(root)
@@ -399,6 +509,7 @@ def cleanup_session_artifacts(root: Path) -> dict[str, Any]:
     for path in sorted(session_paths, key=lambda p: p.name):
         try:
             path.unlink()
+            _invalidate_artifact_cache_path(path)
             removed_artifacts += 1
             removed_ids.append(path.stem)
         except Exception:
