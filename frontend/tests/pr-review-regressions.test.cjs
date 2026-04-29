@@ -288,6 +288,42 @@ test('artifact store keeps render data stable for timestamp-only live updates', 
   assert.equal(secondArtifact.data, firstData)
 })
 
+test('artifact bridge commands do not steal active iframe focus', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  const { handleControlMessage } = loadCompiled('components/artifacts/bridge.js')
+  useArtifactStore.getState().reset()
+
+  useArtifactStore.getState().applyArtifacts([
+    {
+      id: 'focused-frame',
+      type: 'iframe',
+      title: 'Focused frame',
+      timestamp: 1,
+      data: { srcdoc: '<button>typing here</button>' },
+    },
+    {
+      id: 'background-frame',
+      type: 'iframe',
+      title: 'Background frame',
+      timestamp: 2,
+      data: { srcdoc: '<button>background</button>' },
+    },
+  ])
+  useArtifactStore.getState().setActiveId('focused-frame')
+
+  assert.equal(handleControlMessage({
+    type: 'artifact_bridge_command',
+    payload: { artifact_id: 'background-frame', command: 'ping' },
+  }), true)
+
+  assert.equal(useArtifactStore.getState().activeId, 'focused-frame')
+  assert.equal(useArtifactStore.getState().panelOpen, true)
+})
+
 test('artifact panel width no-ops when clamped width is unchanged', () => {
   installAssetStubs()
   clearCompiledModules()

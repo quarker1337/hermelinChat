@@ -84,12 +84,10 @@ export function handleControlMessage(payload: unknown): boolean {
     const artifactId =
       command.artifact_id || command.artifactId || command.id || command.tab_id || null
 
-    if (artifactId) {
-      store.setActiveId(String(artifactId))
-      useArtifactStore.setState({ panelDismissed: false })
-      store.openPanel()
-    }
-
+    // Bridge commands are delivery instructions, not focus instructions. A
+    // background runner may receive queued commands while the user is typing in
+    // a different iframe; switching tabs here would steal iframe focus. If a
+    // caller really wants to reveal an artifact, it should send artifact_focus.
     if (typeof window !== 'undefined') {
       const bridgeStore = (window.__hermesArtifactBridgeCommands =
         window.__hermesArtifactBridgeCommands || {})
