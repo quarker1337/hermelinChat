@@ -12,6 +12,7 @@ def _env_bool(name: str, default: str = "0") -> bool:
 _DEFAULT_HERMES_HOME = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
 _DEFAULT_META_DB = _DEFAULT_HERMES_HOME / "hermelin_meta.db"
 _DEFAULT_SPAWN_CWD = _DEFAULT_HERMES_HOME / "artifacts" / "runners" / "projects"
+DEFAULT_HERMELIN_HERMES_CMD = 'hermes chat --toolsets "hermes-cli, artifacts"'
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,10 @@ class HermelinConfig:
     #   hermes chat --toolsets "hermes-cli, artifacts, strudel"
     hermes_cmd: str = os.getenv(
         "HERMELIN_HERMES_CMD",
-        'hermes chat --toolsets "hermes-cli, artifacts"',
+        DEFAULT_HERMELIN_HERMES_CMD,
+    )
+    hermes_cmd_override: bool = _env_bool("HERMELIN_HERMES_CMD_OVERRIDE", "0") and bool(
+        os.getenv("HERMELIN_HERMES_CMD", "").strip()
     )
 
     # Hermes Agent home (contains state.db, config.yaml, etc.)

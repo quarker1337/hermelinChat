@@ -97,7 +97,7 @@ from .auth import (
     verify_runner_token,
     verify_session_token,
 )
-from .config import HermelinConfig
+from .config import DEFAULT_HERMELIN_HERMES_CMD, HermelinConfig
 from .default_artifacts import list_default_artifact_settings, resolve_default_artifact_path
 from .meta_db import (
     delete_title,
@@ -115,6 +115,8 @@ from .config_editor import (
     _update_display_skin_config_text,
     _update_nested_bool_flag_config_text,
     _update_default_artifact_flag_config_text,
+    _update_hermelin_launch_mode_config_text,
+    _update_platform_toolset_enabled_config_text,
     _set_command_toolset_enabled,
 )
 from .runners import discover_runner_upstream
@@ -156,15 +158,129 @@ def _update_env_var_text(text: str, key: str, value: str) -> tuple[str, bool]:
     return out, True
 
 
+_DEFAULT_CLASSIC_HERMES_TOOLSETS = ("hermes-cli", "artifacts")
+_DEFAULT_HERMELIN_HERMES_CMD = DEFAULT_HERMELIN_HERMES_CMD
+
+
+def _normalize_hermes_launch_mode(value: object) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in {"chat", "tui"} else "chat"
+
+
+def _build_hermes_command_for_launch_mode(
+    mode: object,
+    *,
+    strudel_enabled: bool = False,
+    hermes_executable: str = "hermes",
+) -> str:
+    normalized = _normalize_hermes_launch_mode(mode)
+    executable = shlex.quote(str(hermes_executable or "hermes").strip() or "hermes")
+    if normalized == "tui":
+        return f"{executable} chat --tui"
+
+    toolsets = list(_DEFAULT_CLASSIC_HERMES_TOOLSETS)
+    if strudel_enabled and "strudel" not in toolsets:
+        toolsets.append("strudel")
+    return f'{executable} chat --toolsets "{", ".join(toolsets)}"'
+
+
+def _managed_hermes_executable(command: str) -> str:
+    if not _is_managed_hermes_command(command):
+        return "hermes"
+    try:
+        argv = shlex.split(str(command or "").strip())
+    except Exception:
+        return "hermes"
+    if argv and Path(argv[0]).name == "hermes":
+        return argv[0]
+    return "hermes"
+
+
+def _is_managed_hermes_command(command: str) -> bool:
+    """Return true for Hermelin-generated classic commands, not custom overrides."""
+    cmd = str(command or "").strip()
+    if not cmd:
+        return False
+    try:
+        argv = shlex.split(cmd)
+    except Exception:
+        return False
+    if len(argv) not in {3, 4}:
+        return False
+    if len(argv) < 2 or Path(argv[0]).name != "hermes" or argv[1] != "chat":
+        return False
+
+    toolsets_raw = None
+    if len(argv) == 4 and argv[2] == "--toolsets":
+        toolsets_raw = argv[3]
+    elif len(argv) == 3 and argv[2].startswith("--toolsets="):
+        toolsets_raw = argv[2].split("=", 1)[1]
+    if toolsets_raw is None:
+        return False
+
+    items = [part.strip() for part in toolsets_raw.split(",") if part.strip()]
+    return items in [
+        list(_DEFAULT_CLASSIC_HERMES_TOOLSETS),
+        [*_DEFAULT_CLASSIC_HERMES_TOOLSETS, "strudel"],
+    ]
+
+
+_CONFIG_VALUE_MISSING = object()
+
+
+def _get_config_value(raw: dict, path: tuple[str, ...], default: object = None) -> object:
+    """Read nested config values while accepting Hermes-style dotted keys."""
+    if not isinstance(raw, dict):
+        return default
+
+    node: object = raw
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            node = _CONFIG_VALUE_MISSING
+            break
+        node = node[key]
+    if node is not _CONFIG_VALUE_MISSING:
+        return node
+
+    dotted = ".".join(path)
+    return raw.get(dotted, default)
+
+
+def _hermelin_toolset_enabled(raw: dict, toolset: str) -> bool:
+    value = _get_config_value(raw, ("hermelin", "toolsets", toolset), None)
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
     config = config or HermelinConfig()
-    hermes_cmd_runtime = [config.hermes_cmd]
+    env_hermes_cmd = os.getenv("HERMELIN_HERMES_CMD", "").strip()
+    env_cmd_override = _env_flag("HERMELIN_HERMES_CMD_OVERRIDE")
+    config_hermes_cmd = str(config.hermes_cmd or "").strip()
+    config_explicit_override = bool(getattr(config, "hermes_cmd_override", False))
+    env_hermes_cmd_override = bool(env_hermes_cmd) and (env_cmd_override or not _is_managed_hermes_command(env_hermes_cmd))
+    config_custom_override = bool(config_hermes_cmd) and not _is_managed_hermes_command(config_hermes_cmd)
+    initial_hermes_cmd = config_hermes_cmd if config_explicit_override or not env_hermes_cmd_override else env_hermes_cmd
+    hermes_cmd_runtime = [initial_hermes_cmd]
+    hermes_cmd_override_runtime = [
+        config_explicit_override or env_hermes_cmd_override or config_custom_override
+    ]
 
     def _get_hermes_cmd() -> str:
         return str(hermes_cmd_runtime[0] or "").strip()
 
     def _set_hermes_cmd(value: str) -> None:
         hermes_cmd_runtime[0] = str(value or "").strip()
+
+    def _has_hermes_cmd_override() -> bool:
+        return bool(hermes_cmd_override_runtime[0])
 
     def _resolve_hermelin_env_file() -> Path | None:
         raw = os.getenv("HERMELIN_ENV_FILE", "").strip()
@@ -1434,6 +1550,38 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             logger.debug("failed to parse config.yaml at %s", cfg_path, exc_info=True)
             return {}
 
+    def _get_hermes_launch_mode(raw: dict | None = None) -> str:
+        raw = raw if isinstance(raw, dict) else _read_config_yaml()
+        return _normalize_hermes_launch_mode(_get_config_value(raw, ("hermelin", "hermes_launch_mode")))
+
+    def _get_effective_hermes_cmd(raw: dict | None = None) -> str:
+        if _has_hermes_cmd_override():
+            return _get_hermes_cmd()
+        raw = raw if isinstance(raw, dict) else _read_config_yaml()
+        mode = _get_hermes_launch_mode(raw)
+        strudel_enabled = _hermelin_toolset_enabled(raw, "strudel")
+        hermes_executable = _managed_hermes_executable(_get_hermes_cmd())
+        return _build_hermes_command_for_launch_mode(
+            mode,
+            strudel_enabled=strudel_enabled,
+            hermes_executable=hermes_executable,
+        )
+
+    def _write_config_text(updated: str) -> tuple[bool, str]:
+        cfg_path = config.hermes_home / "config.yaml"
+        tmp_path = cfg_path.with_name(f".{cfg_path.name}.{int(time.time() * 1000)}.tmp")
+        try:
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path.write_text(updated, encoding="utf-8")
+            os.replace(tmp_path, cfg_path)
+            return True, ""
+        except Exception as exc:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False, str(exc)
+
     def _set_display_skin(skin: str) -> bool:
         """Best-effort: set display.skin in Hermes' config.yaml.
 
@@ -1517,6 +1665,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         threshold_pct = int(round(threshold * 100))
         threshold_pct = max(50, min(99, threshold_pct))
 
+        launch_mode = _normalize_hermes_launch_mode(_get_config_value(raw, ("hermelin", "hermes_launch_mode")))
+
         return {
             "agent": {
                 "max_turns": max(1, min(500, _as_int(max_turns, 60))),
@@ -1541,6 +1691,11 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 "backend": str(terminal.get("backend") or terminal.get("env_type") or "local").strip() or "local",
                 "cwd": str(terminal.get("cwd") or ".").strip() or ".",
                 "timeout": max(1, min(3600, _as_int(terminal.get("timeout"), 60))),
+            },
+            "hermelin": {
+                "hermes_launch_mode": launch_mode,
+                "hermes_cmd_override": _has_hermes_cmd_override(),
+                "effective_hermes_cmd": "custom Hermes command override" if _has_hermes_cmd_override() else _get_effective_hermes_cmd(raw),
             },
             "config_path": str(config.hermes_home / "config.yaml"),
         }
@@ -1597,6 +1752,23 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "config_path": str(config.hermes_home / "config.yaml"),
         }
 
+    def _sync_tui_platform_toolsets_config_text(text: str) -> tuple[str, bool]:
+        updated = text or ""
+        try:
+            raw_cfg = yaml.safe_load(updated) or {}
+        except Exception:
+            raw_cfg = {}
+        if not isinstance(raw_cfg, dict):
+            raw_cfg = {}
+        strudel_enabled = _hermelin_toolset_enabled(raw_cfg, "strudel")
+
+        changed_any = False
+        updated, changed = _update_platform_toolset_enabled_config_text(updated, "cli", "artifacts", True)
+        changed_any = changed_any or changed
+        updated, changed = _update_platform_toolset_enabled_config_text(updated, "cli", "strudel", strudel_enabled)
+        changed_any = changed_any or changed
+        return updated, changed_any
+
     def _set_default_artifact_flags(flags: dict[str, bool]) -> tuple[bool, str]:
         supported_ids = {str(item.get("id") or "").strip() for item in list_default_artifact_settings(hermes_home=config.hermes_home)}
         unsupported = sorted(key for key in flags.keys() if key not in supported_ids)
@@ -1615,6 +1787,15 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             updated, changed = _update_default_artifact_flag_config_text(updated, artifact_id, bool(enabled))
             changed_any = changed_any or changed
             updated, changed = _update_nested_bool_flag_config_text(updated, ("hermelin", "toolsets", artifact_id), bool(enabled))
+            changed_any = changed_any or changed
+
+        # Hermes TUI resolves enabled tools from platform_toolsets.cli rather
+        # than from the classic `hermes chat --toolsets ...` command line.
+        # Keep Hermelin's tools visible there without clobbering user entries.
+        updated, changed = _update_platform_toolset_enabled_config_text(updated, "cli", "artifacts", True)
+        changed_any = changed_any or changed
+        if "strudel" in flags:
+            updated, changed = _update_platform_toolset_enabled_config_text(updated, "cli", "strudel", bool(flags.get("strudel", False)))
             changed_any = changed_any or changed
 
         if not changed_any:
@@ -1675,6 +1856,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         memory_in = payload.get("memory") if isinstance(payload.get("memory"), dict) else {}
         compression_in = payload.get("compression") if isinstance(payload.get("compression"), dict) else {}
         terminal_in = payload.get("terminal") if isinstance(payload.get("terminal"), dict) else {}
+        hermelin_in = payload.get("hermelin") if isinstance(payload.get("hermelin"), dict) else {}
 
         # Build normalized draft
         draft = {
@@ -1705,6 +1887,11 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "terminal": {
                 "cwd": str(terminal_in.get("cwd") or cur["terminal"]["cwd"]).strip() or cur["terminal"]["cwd"],
                 "timeout": max(1, min(3600, _as_int(terminal_in.get("timeout"), cur["terminal"]["timeout"]))),
+            },
+            "hermelin": {
+                "hermes_launch_mode": _normalize_hermes_launch_mode(
+                    hermelin_in.get("hermes_launch_mode", cur["hermelin"]["hermes_launch_mode"])
+                ),
             },
         }
 
@@ -1752,6 +1939,20 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         ok, err = await asyncio.to_thread(_apply_all)
         if not ok:
             return JSONResponse({"detail": "failed to save", "error": err}, status_code=500)
+
+        cfg_path = config.hermes_home / "config.yaml"
+        try:
+            existing = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
+        except Exception:
+            existing = ""
+        updated, changed_any = _update_hermelin_launch_mode_config_text(existing, draft["hermelin"]["hermes_launch_mode"])
+        if draft["hermelin"]["hermes_launch_mode"] == "tui":
+            updated, changed = _sync_tui_platform_toolsets_config_text(updated)
+            changed_any = changed_any or changed
+        if changed_any:
+            ok, err = await asyncio.to_thread(_write_config_text, updated)
+            if not ok:
+                return JSONResponse({"detail": "failed to save", "error": f"hermelin.hermes_launch_mode: {err}"}, status_code=500)
 
         # Return fresh values
         return {"ok": True, **_get_cfg()}
@@ -2100,7 +2301,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 await websocket.close(code=1008)
                 return
 
-        argv = shlex.split(_get_hermes_cmd())
+        argv = shlex.split(_get_effective_hermes_cmd())
 
         # -------------------------------------------------------------
         # hermelinChat UI theme -> Hermes CLI skin (upstream skin system)

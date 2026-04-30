@@ -276,6 +276,10 @@ function TerminalPane() {
         allowTransparency: true,
         // Needed for term.unicode.* (Unicode11Addon)
         allowProposedApi: true,
+        // Full-screen TUIs enable mouse tracking, which normally prevents xterm
+        // selection. Let macOS Option-drag force regular selection; xterm's
+        // built-in Shift-drag force selection covers Linux/Windows.
+        macOptionClickForcesSelection: true,
         theme: {
           // Transparent terminal so the ParticleField (and grain) can show through.
           // NOTE: allowTransparency must be true for this to work.
