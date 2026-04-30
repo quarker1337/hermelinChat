@@ -179,10 +179,10 @@ class DashboardThemeSyncTests(unittest.TestCase):
 
     def test_theme_definitions_use_advanced_dashboard_skin_controls(self):
         expectations = {
-            "hermelin": {"layout": "standard"},
-            "matrix": {"layout": "tiled"},
-            "nous": {"layout": "standard"},
-            "samaritan": {"layout": "standard"},
+            "hermelin": {"layout": "standard", "bg": "#08080a"},
+            "matrix": {"layout": "tiled", "bg": "#0c0f0e"},
+            "nous": {"layout": "standard", "bg": "#0e1028"},
+            "samaritan": {"layout": "standard", "bg": "#e8e6e1"},
         }
 
         for ui_theme, expected in expectations.items():
@@ -191,14 +191,19 @@ class DashboardThemeSyncTests(unittest.TestCase):
 
                 self.assertEqual(theme["palette"]["noiseOpacity"], 0.0)
                 self.assertEqual(theme["layoutVariant"], expected["layout"])
-                self.assertIn("bg", theme["assets"])
-                self.assertIn("gradient", theme["assets"]["bg"])
+                self.assertEqual(theme["assets"]["bg"], expected["bg"])
+                self.assertNotIn("gradient", theme["assets"]["bg"])
                 self.assertNotIn("repeating-", theme["assets"]["bg"])
                 self.assertIn("backdrop", theme["componentStyles"])
                 self.assertIn("fillerOpacity", theme["componentStyles"]["backdrop"])
                 self.assertIn("card", theme["componentStyles"])
+                self.assertNotIn("gradient", theme["componentStyles"]["card"]["background"])
+                self.assertNotIn("borderImage", theme["componentStyles"]["card"])
                 self.assertIn("boxShadow", theme["componentStyles"]["card"])
                 self.assertIn("hermelinchat-dashboard-skin", theme["customCSS"])
+                self.assertNotIn("body::before", theme["customCSS"])
+                self.assertNotIn("body::after", theme["customCSS"])
+                self.assertNotIn("gradient", theme["customCSS"])
                 self.assertNotIn("repeating-", theme["customCSS"])
 
     def test_theme_text_colors_match_hermelinchat_palettes(self):
@@ -258,7 +263,8 @@ class DashboardThemeSyncTests(unittest.TestCase):
 
         self.assertEqual(theme_yaml["palette"]["noiseOpacity"], 0.0)
         self.assertEqual(theme_yaml["componentStyles"]["backdrop"]["fillerOpacity"], "0")
-        self.assertIn("linear-gradient", theme_yaml["assets"]["bg"])
+        self.assertEqual(theme_yaml["assets"]["bg"], "#e8e6e1")
+        self.assertNotIn("gradient", theme_yaml["assets"]["bg"])
         self.assertIn("hermelinchat-dashboard-skin", theme_yaml["customCSS"])
 
 
