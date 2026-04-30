@@ -112,6 +112,28 @@ class HermesDashboardManagerTests(unittest.TestCase):
         self.assertTrue(cwd_exists)
         self.assertEqual(last_error, "")
 
+    def test_dashboard_stop_prevents_proxy_auto_restart_until_explicit_start(self):
+        from hermelin.hermes_dashboard import HermesDashboardManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manager = HermesDashboardManager(
+                hermes_command=str(root / "missing-hermes"),
+                hermes_home=root / "home",
+                cwd=root / "cwd",
+                port=45678,
+                base_path=DASHBOARD_BASE_PATH,
+            )
+
+            stopped = asyncio.run(manager.stop())
+            auto_started = asyncio.run(manager.ensure_started())
+
+        self.assertFalse(stopped["running"])
+        self.assertTrue(stopped["stopped_by_user"])
+        self.assertFalse(auto_started["running"])
+        self.assertTrue(auto_started["stopped_by_user"])
+        self.assertEqual(auto_started["last_error"], "")
+
     def test_dashboard_rewrites_upstream_locations_to_proxy_prefix(self):
         from hermelin.hermes_dashboard import rewrite_prefixed_location
 
@@ -155,6 +177,8 @@ class _FakeDashboardManager:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.started = False
+        self.stopped_by_user = False
+        self.start_count = 0
         _FakeDashboardManager.instances.append(self)
 
     def status(self):
@@ -166,23 +190,30 @@ class _FakeDashboardManager:
             "proxy_path": self.kwargs.get("base_path"),
             "host": "127.0.0.1",
             "port": 45678,
+            "stopped_by_user": self.stopped_by_user,
             "last_error": "",
         }
 
     async def start(self):
         self.started = True
+        self.stopped_by_user = False
+        self.start_count += 1
         return self.status()
 
     async def restart(self):
         self.started = True
+        self.stopped_by_user = False
+        self.start_count += 1
         return self.status()
 
     async def stop(self):
         self.started = False
+        self.stopped_by_user = True
         return self.status()
 
     async def ensure_started(self):
-        self.started = True
+        if not self.started and not self.stopped_by_user:
+            return await self.start()
         return self.status()
 
     def upstream(self):
@@ -363,6 +394,34 @@ class HermesDashboardEndpointTests(unittest.TestCase):
         self.assertNotIn("x-real-ip", headers)
         self.assertNotIn("cookie", headers)
         self.assertNotIn("authorization", headers)
+
+    def test_dashboard_proxy_does_not_auto_restart_after_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
+                app = create_app(config)
+            capture_client = _CaptureDashboardHttpClient()
+            app.state.httpx_client = capture_client
+
+            started = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/start"))
+            stopped = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/stop"))
+            stale_iframe_response = asyncio.run(_asgi_request(app, "GET", f"{DASHBOARD_BASE_PATH}/api/status"))
+            manager = _FakeDashboardManager.instances[0]
+
+        self.assertEqual(started.status_code, 200)
+        self.assertTrue(started.json()["running"])
+        self.assertEqual(stopped.status_code, 200)
+        self.assertFalse(stopped.json()["running"])
+        self.assertEqual(stale_iframe_response.status_code, 503)
+        self.assertEqual(manager.start_count, 1)
+        self.assertEqual(capture_client.requests, [])
 
     def test_dashboard_http_endpoints_require_auth_when_password_enabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -199,6 +199,7 @@ class HermesDashboardManager:
         self._port: int | None = None
         self._last_error = ""
         self._started_at: float | None = None
+        self._stopped_by_user = False
         self._lock = asyncio.Lock()
         self._log_handle: Any = None
         self._base_path_supported: bool | None = None
@@ -291,6 +292,7 @@ class HermesDashboardManager:
             "proxy_path": f"{self.base_path}/",
             "tui": self.tui,
             "base_path_supported": self._base_path_supported,
+            "stopped_by_user": self._stopped_by_user,
             "last_error": self._last_error,
             "started_at": self._started_at,
         }
@@ -298,12 +300,15 @@ class HermesDashboardManager:
     async def ensure_started(self) -> dict[str, Any]:
         if self._running():
             return self.status()
+        if self._stopped_by_user:
+            return self.status()
         return await self.start()
 
     async def start(self) -> dict[str, Any]:
         async with self._lock:
             if self._running():
                 return self.status()
+            self._stopped_by_user = False
             self._last_error = ""
 
             if not self.enabled:
@@ -359,6 +364,8 @@ class HermesDashboardManager:
 
     async def stop(self) -> dict[str, Any]:
         async with self._lock:
+            self._stopped_by_user = True
+            self._last_error = ""
             proc = self._proc
             self._proc = None
             if proc is not None and proc.poll() is None:
