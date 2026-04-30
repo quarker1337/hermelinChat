@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import hmac
+import inspect
 import json
 import os
 import re
@@ -99,6 +100,15 @@ from .auth import (
 )
 from .config import DEFAULT_HERMELIN_HERMES_CMD, HermelinConfig
 from .default_artifacts import list_default_artifact_settings, resolve_default_artifact_path
+from .hermes_dashboard import (
+    DASHBOARD_RUNNER_ID,
+    DEFAULT_DASHBOARD_BASE_PATH,
+    HermesDashboardManager,
+    normalize_base_path,
+    rewrite_dashboard_body,
+    rewrite_prefixed_location,
+    should_rewrite_dashboard_body,
+)
 from .meta_db import (
     delete_title,
     ensure_meta_db,
@@ -259,6 +269,51 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _path_is_or_under(path: str, prefix: str) -> bool:
+    normalized_path = str(path or "").rstrip("/") or "/"
+    normalized_prefix = str(prefix or "").rstrip("/") or "/"
+    return normalized_path == normalized_prefix or normalized_path.startswith(f"{normalized_prefix}/")
+
+
+_DASHBOARD_BASE_PATH_RE = re.compile(r"^/[A-Za-z0-9._~/-]+$")
+
+
+def _dashboard_base_path_is_safe(path: str) -> bool:
+    candidate = str(path or "")
+    if not candidate.startswith("/api/"):
+        return False
+
+    # Keep custom dashboard mount points as plain, unambiguous URL paths.
+    # Percent-encoded slashes/dots and literal dot-segments can be normalized
+    # differently by proxies, ASGI routing, and browsers, so reject them rather
+    # than trying to canonicalize a security boundary.
+    if not _DASHBOARD_BASE_PATH_RE.fullmatch(candidate):
+        return False
+    segments = candidate.split("/")[1:]
+    if any(segment in {"", ".", ".."} for segment in segments):
+        return False
+
+    public_or_reserved_prefixes = (
+        "/api/auth",
+        "/api/default-artifacts",
+        "/api/hermes-dashboard",
+    )
+    return not any(_path_is_or_under(candidate, prefix) for prefix in public_or_reserved_prefixes)
+
+
+def _websockets_connect_kwargs(*, subprotocols: list[str] | None, extra_headers: dict[str, str]) -> dict[str, object]:
+    """Build websockets.connect kwargs across websockets 12+ header API names."""
+
+    kwargs: dict[str, object] = {"subprotocols": subprotocols}
+    try:
+        params = inspect.signature(websockets.connect).parameters
+    except Exception:
+        params = {}
+    header_kw = "additional_headers" if "additional_headers" in params else "extra_headers"
+    kwargs[header_kw] = extra_headers
+    return kwargs
+
+
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
     config = config or HermelinConfig()
     env_hermes_cmd = os.getenv("HERMELIN_HERMES_CMD", "").strip()
@@ -311,14 +366,41 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         logger.warning("failed to initialize meta DB at %s", config.meta_db_path, exc_info=True)
         pass
 
+    dashboard_base_path = normalize_base_path(
+        getattr(config, "hermes_dashboard_base_path", DEFAULT_DASHBOARD_BASE_PATH)
+    )
+    if not _dashboard_base_path_is_safe(dashboard_base_path):
+        logger.warning(
+            "ignoring unsafe Hermes dashboard base path: %s",
+            dashboard_base_path,
+        )
+        dashboard_base_path = DEFAULT_DASHBOARD_BASE_PATH
+    dashboard_command = str(getattr(config, "hermes_dashboard_cmd", "") or "").strip()
+    if not dashboard_command:
+        dashboard_command = _managed_hermes_executable(_get_hermes_cmd())
+    dashboard_manager = HermesDashboardManager(
+        hermes_command=dashboard_command,
+        hermes_home=config.hermes_home,
+        cwd=config.spawn_cwd,
+        enabled=bool(getattr(config, "hermes_dashboard_enabled", True)),
+        port=int(getattr(config, "hermes_dashboard_port", 0) or 0),
+        base_path=dashboard_base_path,
+        tui=bool(getattr(config, "hermes_dashboard_tui", False)),
+        startup_timeout_seconds=float(getattr(config, "hermes_dashboard_startup_timeout_seconds", 20.0) or 20.0),
+    )
+
     @asynccontextmanager
     async def _lifespan(app):
         app.state.httpx_client = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=5.0, read=None, write=60.0, pool=5.0),
             follow_redirects=False,
         )
-        yield
-        await app.state.httpx_client.aclose()
+        app.state.hermes_dashboard_manager = dashboard_manager
+        try:
+            yield
+        finally:
+            await app.state.httpx_client.aclose()
+            await dashboard_manager.aclose()
 
     app = FastAPI(title="hermelinChat", version=__version__, docs_url="/api/docs", redoc_url=None, lifespan=_lifespan)
     # CORS: disabled by default (same-origin UI does not need it).
@@ -443,8 +525,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     async def _security_headers(request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        # Default artifact assets are served inside iframes — allow SAMEORIGIN for those.
-        if request.url.path.startswith("/api/default-artifacts/"):
+        # Default artifact assets and the authenticated Hermes dashboard iframe are served inside iframes.
+        if _path_is_or_under(request.url.path, "/api/default-artifacts") or _path_is_or_under(request.url.path, dashboard_base_path):
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
         else:
             response.headers["X-Frame-Options"] = "DENY"
@@ -593,6 +675,264 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         return {"ok": True, "artifact_id": artifact_id, "channel": channel, "event": event_name, "request_id": request_id or None}
 
     # ---------------------------------------------------------------------
+    # Native Hermes dashboard proxy
+    # ---------------------------------------------------------------------
+
+    _DASHBOARD_PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+
+    _DASHBOARD_STRIP_REQUEST_HEADERS = {
+        # Keep hermelinChat auth material scoped to hermelinChat.
+        "cookie",
+        "authorization",
+        # Do not let a browser/client spoof proxy context into the loopback
+        # dashboard. hermelinChat sets canonical forwarded headers below.
+        "forwarded",
+        "x-real-ip",
+    }
+
+    def _dashboard_filter_request_headers(request: Request) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for k, v in request.headers.items():
+            lk = k.lower()
+            if lk in _RUNNER_HOP_BY_HOP_HEADERS:
+                continue
+            if lk in _DASHBOARD_STRIP_REQUEST_HEADERS or lk.startswith("x-forwarded-"):
+                continue
+            if lk == "host":
+                continue
+            out[k] = v
+        out["X-Forwarded-Host"] = request.headers.get("host", "")
+        out["X-Forwarded-Proto"] = request.url.scheme
+        out["X-Forwarded-Prefix"] = dashboard_base_path
+        return out
+
+    def _dashboard_filter_response_headers(headers: httpx.Headers, *, upstream_port: int) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for k, v in headers.items():
+            lk = k.lower()
+            if lk in _RUNNER_HOP_BY_HOP_HEADERS:
+                continue
+            if lk in _RUNNER_STRIP_RESPONSE_HEADERS:
+                continue
+            if lk == "content-length":
+                continue
+            if lk == "location":
+                v = rewrite_prefixed_location(v, base_path=dashboard_base_path, upstream_port=upstream_port)
+            out[k] = v
+        return out
+
+    def _dashboard_proxy_error(detail: str, status_code: int = 503) -> JSONResponse:
+        return JSONResponse({"detail": detail}, status_code=status_code)
+
+    @app.get("/api/hermes-dashboard/status")
+    async def api_hermes_dashboard_status():
+        return dashboard_manager.status()
+
+    @app.post("/api/hermes-dashboard/start")
+    async def api_hermes_dashboard_start():
+        return await dashboard_manager.start()
+
+    @app.post("/api/hermes-dashboard/restart")
+    async def api_hermes_dashboard_restart():
+        return await dashboard_manager.restart()
+
+    @app.post("/api/hermes-dashboard/stop")
+    async def api_hermes_dashboard_stop():
+        return await dashboard_manager.stop()
+
+    @app.api_route(dashboard_base_path, methods=_DASHBOARD_PROXY_METHODS)
+    @app.api_route(f"{dashboard_base_path}/{{path:path}}", methods=_DASHBOARD_PROXY_METHODS)
+    async def hermes_dashboard_proxy(request: Request, path: str = ""):
+        if request.method == "OPTIONS":
+            return Response(status_code=204)
+
+        status = await dashboard_manager.ensure_started()
+        upstream = dashboard_manager.upstream()
+        if not upstream:
+            detail = str(status.get("last_error") or "Hermes dashboard unavailable")
+            return _dashboard_proxy_error(detail, status_code=503)
+
+        scheme, host, port = upstream
+        upstream_path = f"/{path}" if path else "/"
+        upstream_url = f"{scheme}://{host}:{port}{upstream_path}"
+        if request.url.query:
+            upstream_url += f"?{request.url.query}"
+
+        try:
+            body = await request.body()
+        except Exception:
+            body = b""
+
+        client = getattr(request.app.state, "httpx_client", None)
+        close_client = False
+        if client is None:
+            client = httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=5.0, read=None, write=60.0, pool=5.0),
+                follow_redirects=False,
+            )
+            close_client = True
+
+        try:
+            req = client.build_request(
+                method=request.method,
+                url=upstream_url,
+                headers=_dashboard_filter_request_headers(request),
+                content=body,
+            )
+            upstream_resp = await client.send(req, stream=True)
+        except Exception:
+            logger.exception("Hermes dashboard proxy error")
+            if close_client:
+                await client.aclose()
+            return _dashboard_proxy_error("Hermes dashboard proxy unavailable", status_code=502)
+
+        resp_headers = _dashboard_filter_response_headers(upstream_resp.headers, upstream_port=port)
+
+        if should_rewrite_dashboard_body(upstream_path, upstream_resp.headers.get("content-type", "")):
+            try:
+                raw_body = await upstream_resp.aread()
+                body = rewrite_dashboard_body(
+                    raw_body,
+                    content_type=upstream_resp.headers.get("content-type", ""),
+                    base_path=dashboard_base_path,
+                )
+                for header_name in list(resp_headers):
+                    if header_name.lower() in {"content-encoding", "content-length"}:
+                        resp_headers.pop(header_name, None)
+            finally:
+                try:
+                    await upstream_resp.aclose()
+                except Exception:
+                    pass
+                if close_client:
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        pass
+            return Response(
+                content=body,
+                status_code=upstream_resp.status_code,
+                headers=resp_headers,
+            )
+
+        async def _iter_bytes():
+            try:
+                async for chunk in upstream_resp.aiter_raw():
+                    yield chunk
+            finally:
+                try:
+                    await upstream_resp.aclose()
+                except Exception:
+                    pass
+                if close_client:
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        pass
+
+        return StreamingResponse(
+            _iter_bytes(),
+            status_code=upstream_resp.status_code,
+            headers=resp_headers,
+        )
+
+    @app.websocket(dashboard_base_path)
+    @app.websocket(f"{dashboard_base_path}/{{path:path}}")
+    async def ws_hermes_dashboard_proxy(websocket: WebSocket, path: str = ""):
+        client_ip = extract_client_ip(
+            client_host=websocket.client.host if websocket.client else "",
+            headers=websocket.headers,
+            trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
+        )
+
+        await websocket.accept()
+        if not _check_allowed(client_ip):
+            await websocket.close(code=1008)
+            return
+
+        if auth_enabled:
+            token = extract_cookie_value(websocket.headers.get("cookie", ""), cookie_name)
+            if not _is_authenticated(token):
+                await websocket.close(code=1008)
+                return
+
+        status = await dashboard_manager.ensure_started()
+        upstream = dashboard_manager.upstream()
+        if not upstream:
+            logger.warning("Hermes dashboard websocket unavailable: %s", status.get("last_error"))
+            await websocket.close(code=1011)
+            return
+
+        scheme, host, port = upstream
+        ws_scheme = "wss" if scheme == "https" else "ws"
+        upstream_path = f"/{path}" if path else "/"
+        qs = websocket.scope.get("query_string", b"")
+        try:
+            qs_s = qs.decode("utf-8") if isinstance(qs, (bytes, bytearray)) else str(qs)
+        except Exception:
+            qs_s = ""
+        upstream_url = f"{ws_scheme}://{host}:{port}{upstream_path}"
+        if qs_s:
+            upstream_url += f"?{qs_s}"
+
+        subp_header = websocket.headers.get("sec-websocket-protocol")
+        subprotocols = [p.strip() for p in subp_header.split(",") if p.strip()] if subp_header else None
+        extra_headers = {
+            "X-Forwarded-Host": websocket.headers.get("host", ""),
+            "X-Forwarded-Proto": "https" if websocket.url.scheme == "wss" else "http",
+            "X-Forwarded-Prefix": dashboard_base_path,
+        }
+
+        try:
+            async with websockets.connect(
+                upstream_url,
+                **_websockets_connect_kwargs(subprotocols=subprotocols, extra_headers=extra_headers),
+            ) as upstream_ws:
+
+                async def _client_to_upstream():
+                    while True:
+                        msg = await websocket.receive()
+                        mt = msg.get("type")
+                        if mt == "websocket.disconnect":
+                            try:
+                                await upstream_ws.close()
+                            except Exception:
+                                pass
+                            break
+                        if mt != "websocket.receive":
+                            continue
+                        if msg.get("text") is not None:
+                            await upstream_ws.send(msg["text"])
+                        elif msg.get("bytes") is not None:
+                            await upstream_ws.send(msg["bytes"])
+
+                async def _upstream_to_client():
+                    async for message in upstream_ws:
+                        if isinstance(message, (bytes, bytearray)):
+                            await websocket.send_bytes(bytes(message))
+                        else:
+                            await websocket.send_text(str(message))
+
+                t1 = asyncio.create_task(_client_to_upstream())
+                t2 = asyncio.create_task(_upstream_to_client())
+                done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+                for task in pending:
+                    task.cancel()
+        except Exception:
+            logger.warning("Hermes dashboard WebSocket proxy connection failed", exc_info=True)
+            try:
+                await websocket.close(code=1011)
+            except Exception:
+                pass
+            return
+
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+    # ---------------------------------------------------------------------
     # Runner gateway (iframe runners)
     # ---------------------------------------------------------------------
 
@@ -607,7 +947,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         authenticate without cookies.
         """
 
-        if not is_valid_artifact_id(tab_id):
+        if tab_id == DASHBOARD_RUNNER_ID or not is_valid_artifact_id(tab_id):
             return JSONResponse({"detail": "invalid tab id"}, status_code=400)
 
         ttl = int(getattr(config, "runner_token_ttl_seconds", 1800) or 1800)

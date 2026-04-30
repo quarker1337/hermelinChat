@@ -12,6 +12,7 @@ import { AppearanceSettings } from './AppearanceSettings'
 import { BackgroundSettings } from './BackgroundSettings'
 import { TerminalCursorSettings } from './TerminalCursorSettings'
 import { VideoFxSettings } from './VideoFxSettings'
+import { HermesDashboardSettings } from './HermesDashboardSettings'
 
 import type { UiPrefs } from '../../types'
 
@@ -213,7 +214,7 @@ export const SettingsPanel = ({
           top: 0,
           right: 0,
           bottom: 0,
-          width: 380,
+          width: openPanel === 'hermesDashboard' ? 'min(1180px, calc(100vw - 28px))' : 380,
           borderLeft: `1px solid ${SLATE.border}`,
           background: `${SLATE.surface}f8`,
           padding: 16,
@@ -260,6 +261,14 @@ export const SettingsPanel = ({
             onToggle={() => togglePanel('agent')}
           >
             <AgentSettings locked={locked} saving={saving} handleRef={setAgentHandle} />
+          </CollapsiblePanel>
+
+          <CollapsiblePanel
+            title="Hermes Dashboard"
+            open={openPanel === 'hermesDashboard'}
+            onToggle={() => togglePanel('hermesDashboard')}
+          >
+            <HermesDashboardSettings locked={locked} />
           </CollapsiblePanel>
 
           <CollapsiblePanel

@@ -845,3 +845,16 @@ test('samaritan theme uses warm palette and sprite artwork', () => {
   assert.equal(THEMES.samaritan.icons.alignmentAlwaysVisible, true)
   assert.equal(THEMES.samaritan.icons.alignmentBob, true)
 })
+
+test('Hermes dashboard settings panel uses same-origin authenticated proxy URL', () => {
+  const dashboardPath = path.join(SOURCE_ROOT, 'components', 'settings', 'HermesDashboardSettings.tsx')
+  const settingsPanelPath = path.join(SOURCE_ROOT, 'components', 'settings', 'SettingsPanel.tsx')
+  const dashboardSource = fs.readFileSync(dashboardPath, 'utf8')
+  const settingsSource = fs.readFileSync(settingsPanelPath, 'utf8')
+
+  assert.match(dashboardSource, /\/api\/runners\/hermes-dashboard\//)
+  assert.match(dashboardSource, /\/api\/hermes-dashboard\/status/)
+  assert.match(dashboardSource, /\/api\/hermes-dashboard\/start/)
+  assert.ok(!dashboardSource.includes('127.0.0.1'))
+  assert.match(settingsSource, /HermesDashboardSettings/)
+})

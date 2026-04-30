@@ -13,6 +13,7 @@ _DEFAULT_HERMES_HOME = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"
 _DEFAULT_META_DB = _DEFAULT_HERMES_HOME / "hermelin_meta.db"
 _DEFAULT_SPAWN_CWD = _DEFAULT_HERMES_HOME / "artifacts" / "runners" / "projects"
 DEFAULT_HERMELIN_HERMES_CMD = 'hermes chat --toolsets "hermes-cli, artifacts"'
+DEFAULT_HERMES_DASHBOARD_BASE_PATH = "/api/runners/hermes-dashboard"
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,20 @@ class HermelinConfig:
     # runner proxy URL path so the iframe can authenticate without cookies.
     runner_token_ttl_seconds: int = int(os.getenv("HERMELIN_RUNNER_TOKEN_TTL_SECONDS", "1800"))  # 30m
     runner_token_bind_ip: bool = _env_bool("HERMELIN_RUNNER_TOKEN_BIND_IP", "1")
+
+    # Native Hermes Agent dashboard integration. hermelinChat starts the dashboard
+    # on loopback only and exposes it through the authenticated same-origin proxy.
+    hermes_dashboard_enabled: bool = _env_bool("HERMELIN_HERMES_DASHBOARD_ENABLED", "1")
+    hermes_dashboard_cmd: str = os.getenv("HERMELIN_HERMES_DASHBOARD_CMD", "").strip()
+    hermes_dashboard_port: int = int(os.getenv("HERMELIN_HERMES_DASHBOARD_PORT", "0") or "0")
+    hermes_dashboard_tui: bool = _env_bool("HERMELIN_HERMES_DASHBOARD_TUI", "0")
+    hermes_dashboard_base_path: str = os.getenv(
+        "HERMELIN_HERMES_DASHBOARD_BASE_PATH",
+        DEFAULT_HERMES_DASHBOARD_BASE_PATH,
+    ).strip() or DEFAULT_HERMES_DASHBOARD_BASE_PATH
+    hermes_dashboard_startup_timeout_seconds: float = float(
+        os.getenv("HERMELIN_HERMES_DASHBOARD_STARTUP_TIMEOUT_SECONDS", "20") or "20"
+    )
 
     # Only enable this if running behind a trusted reverse proxy.
     trust_x_forwarded_for: bool = _env_bool("HERMELIN_TRUST_X_FORWARDED_FOR", "0")
