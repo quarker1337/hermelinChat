@@ -161,6 +161,27 @@ class HermesTuiModeTests(unittest.TestCase):
         self.assertEqual(data["platform_toolsets"]["cli"], ["hermes-cli", "artifacts", "web", "strudel"])
         self.assertEqual(data["model"], "foo/bar")
 
+    def test_update_platform_toolset_enabled_handles_same_indent_sequence_items(self):
+        text = (
+            "platform_toolsets:\n"
+            "  cli:\n"
+            "  - hermes-cli\n"
+            "  - artifacts\n"
+            "  discord:\n"
+            "  - hermes-discord\n"
+            "  homeassistant:\n"
+            "  - hermes-homeassistant\n"
+        )
+
+        updated, changed = _update_platform_toolset_enabled_config_text(text, "cli", "strudel", True)
+        data = yaml.safe_load(updated)
+
+        self.assertTrue(changed)
+        self.assertEqual(data["platform_toolsets"]["cli"], ["hermes-cli", "artifacts", "strudel"])
+        self.assertEqual(data["platform_toolsets"]["discord"], ["hermes-discord"])
+        self.assertEqual(data["platform_toolsets"]["homeassistant"], ["hermes-homeassistant"])
+        self.assertNotIn("\n  - hermes-cli", updated)
+
     def test_agent_settings_post_tui_syncs_platform_toolsets_from_existing_tool_flags(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)

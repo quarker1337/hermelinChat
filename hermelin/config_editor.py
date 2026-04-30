@@ -503,6 +503,30 @@ def _update_platform_toolset_enabled_config_text(text: str, platform: str, tools
                 break
         return end
 
+    def _platform_value_end(start_idx: int, platform_indent_len: int) -> int:
+        """Return the end of a platform_toolsets.<platform> value block.
+
+        PyYAML often emits sequence values as:
+            cli:
+            - terminal
+        where the list items are indented at the same level as the key. Treat
+        same-indent dash lines as part of the current value, but stop at the
+        next same-indent platform key.
+        """
+        end = len(lines)
+        for j in range(start_idx + 1, len(lines)):
+            s = lines[j].strip()
+            if not s:
+                continue
+            indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+            if indent_len < platform_indent_len:
+                end = j
+                break
+            if indent_len == platform_indent_len and not s.startswith("-"):
+                end = j
+                break
+        return end
+
     def _first_child_indent(start_idx: int, end_idx: int, parent_indent_len: int) -> int:
         for j in range(start_idx + 1, end_idx):
             s = lines[j].strip()
@@ -538,7 +562,7 @@ def _update_platform_toolset_enabled_config_text(text: str, platform: str, tools
             if not re.match(rf"^{platform_re}\s*:", s):
                 continue
 
-            platform_end = _block_end(j, child_indent_len)
+            platform_end = _platform_value_end(j, child_indent_len)
             platform_indent = " " * child_indent_len
             next_lines = list(lines)
             replacement = [f"{platform_indent}{platform}:"] + _render_items(child_indent_len + 2)
