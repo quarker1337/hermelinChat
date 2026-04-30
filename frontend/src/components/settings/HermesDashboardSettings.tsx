@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useUiPrefsStore } from '../../stores/ui-prefs'
 import { AMBER, SLATE } from '../../theme/index'
 
 const DEFAULT_HERMES_DASHBOARD_PROXY_URL = '/api/runners/hermes-dashboard/'
 const HERMES_DASHBOARD_STATUS_URL = '/api/hermes-dashboard/status'
+const HERMES_DASHBOARD_THEME_URL = '/api/hermes-dashboard/theme'
 const HERMES_DASHBOARD_START_URL = '/api/hermes-dashboard/start'
 const HERMES_DASHBOARD_RESTART_URL = '/api/hermes-dashboard/restart'
 const HERMES_DASHBOARD_STOP_URL = '/api/hermes-dashboard/stop'
@@ -18,8 +20,20 @@ interface DashboardStatus {
   proxy_path?: string
   tui?: boolean
   base_path_supported?: boolean | null
+  stopped_by_user?: boolean
+  dashboard_theme?: string
+  theme_sync?: DashboardThemeSyncStatus
   last_error?: string
   started_at?: number | null
+}
+
+interface DashboardThemeSyncStatus {
+  ok?: boolean
+  ui_theme?: string
+  dashboard_theme?: string
+  config_changed?: boolean
+  theme_files_changed?: boolean
+  changed?: boolean
 }
 
 interface HermesDashboardSettingsProps {
@@ -33,8 +47,23 @@ async function fetchDashboardStatus(): Promise<DashboardStatus> {
   return data as DashboardStatus
 }
 
-async function postDashboardAction(url: string): Promise<DashboardStatus> {
-  const res = await fetch(url, { method: 'POST' })
+async function syncDashboardTheme(uiTheme: string): Promise<DashboardThemeSyncStatus> {
+  const res = await fetch(HERMES_DASHBOARD_THEME_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ui_theme: uiTheme }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.detail || data?.error || `http ${res.status}`)
+  return data as DashboardThemeSyncStatus
+}
+
+async function postDashboardAction(url: string, uiTheme: string): Promise<DashboardStatus> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ui_theme: uiTheme }),
+  })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data?.detail || data?.error || `http ${res.status}`)
   return data as DashboardStatus
@@ -46,7 +75,9 @@ function normalizeDashboardProxyUrl(value?: string): string {
 }
 
 export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSettingsProps) => {
+  const uiTheme = useUiPrefsStore((s) => s.prefs.theme)
   const [status, setStatus] = useState<DashboardStatus | null>(null)
+  const [themeSync, setThemeSync] = useState<DashboardThemeSyncStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -87,13 +118,36 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
     }
   }, [refresh])
 
+  useEffect(() => {
+    if (locked) {
+      setThemeSync(null)
+      return
+    }
+
+    let cancelled = false
+    syncDashboardTheme(uiTheme)
+      .then((next) => {
+        if (cancelled) return
+        setThemeSync(next)
+        setStatus((prev) => (prev ? { ...prev, dashboard_theme: next.dashboard_theme, theme_sync: next } : prev))
+        if (next.changed) setFrameNonce((n) => n + 1)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'dashboard theme sync failed')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [locked, uiTheme])
+
   const runAction = useCallback(
     async (url: string, reloadFrame = false) => {
       if (locked || busy) return
       setBusy(true)
       setError('')
       try {
-        const next = await postDashboardAction(url)
+        const next = await postDashboardAction(url, uiTheme)
         setStatus(next)
         if (reloadFrame) setFrameNonce((n) => n + 1)
       } catch (err) {
@@ -102,7 +156,7 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
         setBusy(false)
       }
     },
-    [busy, locked],
+    [busy, locked, uiTheme],
   )
 
   const buttonStyle = (active = true): CSSProperties => ({
@@ -122,11 +176,12 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
   const lastError = error || status?.last_error || ''
   const unsupportedBasePath = status?.base_path_supported === false && !!lastError
   const dashboardProxyUrl = normalizeDashboardProxyUrl(status?.proxy_path || status?.base_path)
+  const matchedDashboardTheme = themeSync?.dashboard_theme || status?.dashboard_theme || status?.theme_sync?.dashboard_theme || ''
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-        Native Hermes Agent dashboard, started on loopback and exposed through hermelinChat auth. Use this for advanced Hermes config, credentials, skills, cron jobs and logs.
+        Native Hermes Agent dashboard, started on loopback and exposed through hermelinChat auth. hermelinChat also installs matching native dashboard themes and keeps <span style={{ color: AMBER[500] }}>dashboard.theme</span> synced to the selected UI theme.
       </div>
 
       <div
@@ -209,6 +264,11 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
 
       <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
         iframe source: <span style={{ color: AMBER[500] }}>{dashboardProxyUrl}</span>
+        {matchedDashboardTheme && (
+          <>
+            {' · '}dashboard theme: <span style={{ color: AMBER[500] }}>{matchedDashboardTheme}</span>
+          </>
+        )}
       </div>
 
       {running && showFrame && (

@@ -129,6 +129,7 @@ from .config_editor import (
     _update_platform_toolset_enabled_config_text,
     _set_command_toolset_enabled,
 )
+from .dashboard_themes import sync_dashboard_theme_for_ui_theme
 from .runners import discover_runner_upstream
 from .ws_writer import WebSocketPriorityWriter
 
@@ -724,17 +725,39 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     def _dashboard_proxy_error(detail: str, status_code: int = 503) -> JSONResponse:
         return JSONResponse({"detail": detail}, status_code=status_code)
 
+    async def _sync_dashboard_theme_from_payload(payload: dict | None) -> dict:
+        ui_theme = ""
+        if isinstance(payload, dict):
+            ui_theme = str(payload.get("ui_theme") or payload.get("theme") or "").strip()
+        return await asyncio.to_thread(sync_dashboard_theme_for_ui_theme, config.hermes_home, ui_theme)
+
     @app.get("/api/hermes-dashboard/status")
     async def api_hermes_dashboard_status():
         return dashboard_manager.status()
 
+    @app.post("/api/hermes-dashboard/theme")
+    async def api_hermes_dashboard_theme(payload: dict | None = Body(None)):
+        try:
+            return await _sync_dashboard_theme_from_payload(payload)
+        except Exception as exc:
+            logger.warning("failed to sync Hermes dashboard theme", exc_info=True)
+            return JSONResponse({"detail": "failed to sync dashboard theme", "error": str(exc)}, status_code=500)
+
     @app.post("/api/hermes-dashboard/start")
-    async def api_hermes_dashboard_start():
-        return await dashboard_manager.start()
+    async def api_hermes_dashboard_start(payload: dict | None = Body(None)):
+        theme_sync = await _sync_dashboard_theme_from_payload(payload)
+        status = await dashboard_manager.start()
+        if isinstance(status, dict):
+            return {**status, "dashboard_theme": theme_sync.get("dashboard_theme"), "theme_sync": theme_sync}
+        return status
 
     @app.post("/api/hermes-dashboard/restart")
-    async def api_hermes_dashboard_restart():
-        return await dashboard_manager.restart()
+    async def api_hermes_dashboard_restart(payload: dict | None = Body(None)):
+        theme_sync = await _sync_dashboard_theme_from_payload(payload)
+        status = await dashboard_manager.restart()
+        if isinstance(status, dict):
+            return {**status, "dashboard_theme": theme_sync.get("dashboard_theme"), "theme_sync": theme_sync}
+        return status
 
     @app.post("/api/hermes-dashboard/stop")
     async def api_hermes_dashboard_stop():

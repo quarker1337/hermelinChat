@@ -135,6 +135,138 @@ def _update_display_skin_config_text(text: str, skin: str) -> tuple[str, bool]:
     return _join(next_lines), True
 
 
+def _update_dashboard_theme_config_text(text: str, theme: str) -> tuple[str, bool]:
+    """Update the effective Hermes Dashboard theme without full YAML rewrite.
+
+    Hermes' dashboard loader reads the nested form (`dashboard: theme:`).  The
+    config UI exposes the key as `dashboard.theme`, and older/manual files may
+    contain that dotted top-level key, but leaving only the dotted form would be
+    ignored by the dashboard runtime.  Prefer the nested block and convert a lone
+    dotted key into that effective shape while preserving nearby comments.
+    """
+
+    raw = text or ""
+    theme = str(theme or "").strip()
+    if not theme:
+        return raw, False
+
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    had_trailing_newline = raw.endswith(("\n", "\r"))
+    lines = raw.splitlines()
+    scalar = _yaml_inline_scalar(theme)
+
+    def _join(next_lines: list[str]) -> str:
+        out = newline.join(next_lines)
+        if next_lines and (had_trailing_newline or not raw):
+            out += newline
+        return out
+
+    # Prefer the nested block because that is what Hermes' dashboard runtime
+    # reads after load_config() merges user config with defaults.
+    for idx, line in enumerate(lines):
+        if line[:1].isspace():
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not re.match(r"^dashboard\s*:\s*(?:#.*)?$", stripped):
+            continue
+
+        block_end = len(lines)
+        for j in range(idx + 1, len(lines)):
+            s = lines[j].strip()
+            if not s:
+                continue
+            if not lines[j][:1].isspace():
+                block_end = j
+                break
+
+        child_indent_len = None
+        for j in range(idx + 1, block_end):
+            s = lines[j].strip()
+            if not s or s.startswith("#"):
+                continue
+            indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+            if indent_len > 0:
+                child_indent_len = indent_len
+                break
+        child_indent_len = child_indent_len or 2
+        child_indent = " " * child_indent_len
+
+        for j in range(idx + 1, block_end):
+            s = lines[j].strip()
+            if not s or s.startswith("#"):
+                continue
+            indent_len = len(lines[j]) - len(lines[j].lstrip(" "))
+            if indent_len != child_indent_len:
+                continue
+            m = re.match(r"^(\s*theme\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", lines[j])
+            if not m:
+                continue
+            updated = f"{m.group(1)}{scalar}{m.group(3) or ''}"
+            if updated == lines[j]:
+                return raw, False
+            next_lines = list(lines)
+            next_lines[j] = updated
+            return _join(next_lines), True
+
+        insert_at = idx + 1
+        while insert_at < block_end:
+            s = lines[insert_at].strip()
+            if not s:
+                insert_at += 1
+                continue
+            indent_len = len(lines[insert_at]) - len(lines[insert_at].lstrip(" "))
+            if indent_len > 0 and s.startswith("#"):
+                insert_at += 1
+                continue
+            break
+
+        next_lines = list(lines)
+        next_lines.insert(insert_at, f"{child_indent}theme: {scalar}")
+        return _join(next_lines), True
+
+    # Convert a lone dotted key into the nested shape the dashboard actually
+    # reads. Preserve an inline comment by moving it to the child value line.
+    for idx, line in enumerate(lines):
+        if line[:1].isspace():
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m = re.match(r"^(dashboard\.theme\s*:\s*)([^#\r\n]*?)(\s*(?:#.*)?)?$", line)
+        if not m:
+            continue
+        comment = m.group(3) or ""
+        replacement = ["dashboard:", f"  theme: {scalar}{comment}"]
+        next_lines = list(lines)
+        next_lines[idx : idx + 1] = replacement
+        return _join(next_lines), True
+
+    # Avoid appending a duplicate top-level section when the file uses an
+    # inline mapping (`dashboard: {theme: old}`). In that uncommon case,
+    # preserve semantics over exact formatting.
+    try:
+        parsed = yaml.safe_load(raw) or {}
+    except Exception:
+        parsed = {}
+    if isinstance(parsed, dict) and isinstance(parsed.get("dashboard"), dict):
+        dashboard = parsed.get("dashboard") or {}
+        if str(dashboard.get("theme") or "").strip() == theme:
+            return raw, False
+        next_data = dict(parsed)
+        next_dashboard = dict(dashboard)
+        next_dashboard["theme"] = theme
+        next_data["dashboard"] = next_dashboard
+        return _dump_yaml_mapping(next_data, newline, had_trailing_newline or not raw), True
+
+    next_lines = list(lines)
+    if next_lines and next_lines[-1].strip():
+        next_lines.append("")
+    next_lines.extend(["dashboard:", f"  theme: {scalar}"])
+    return _join(next_lines), True
+
+
 def _update_nested_bool_flag_config_text(text: str, path: tuple[str, ...], enabled: bool) -> tuple[str, bool]:
     raw = text or ""
     keys = [str(k or "").strip() for k in path if str(k or "").strip()]
