@@ -633,6 +633,35 @@ test('terminal session detector handles Session marker split across frames', () 
   assert.deepEqual(detected, ['20260429_091600_abcdef'])
 })
 
+test('terminal output filter strips TUI mouse tracking while preserving other modes', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { stripTerminalMouseModeSequences } = loadCompiled('components/terminal/TerminalPane.js')
+  const esc = '\u001b'
+
+  assert.equal(stripTerminalMouseModeSequences(`a${esc}[?1000h${esc}[?1006hb`), 'ab')
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?1000;1006l`), '')
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?1049;1000;1006h`), `${esc}[?1049h`)
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?25lcursor${esc}[?2004h`), `${esc}[?25lcursor${esc}[?2004h`)
+})
+
+test('terminal mouse mode filter handles private mode sequences split across frames', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalMouseModeFilter } = loadCompiled('components/terminal/TerminalPane.js')
+  const esc = '\u001b'
+  const filter = createTerminalMouseModeFilter()
+
+  assert.equal(filter.filter(`before${esc}[?10`), 'before')
+  assert.equal(filter.filter('00;1006hafter'), 'after')
+  assert.equal(filter.filter(`x${esc}[?2`), 'x')
+  assert.equal(filter.filter('5ly'), `${esc}[?25ly`)
+})
+
 test('artifact realtime token ignores stale websocket disconnects', async () => {
   installAssetStubs()
   clearCompiledModules()

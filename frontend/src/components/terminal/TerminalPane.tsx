@@ -43,6 +43,73 @@ function positiveQueueNumber(value: unknown, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
 }
 
+const TERMINAL_MOUSE_MODE_IDS = new Set([
+  // X10 / VT200 / button-event / any-event mouse reporting.
+  '9',
+  '1000',
+  '1001',
+  '1002',
+  '1003',
+  // Mouse encoding / wheel variants commonly paired with the modes above.
+  '1005',
+  '1006',
+  '1007',
+  '1015',
+  '1016',
+])
+
+export function stripTerminalMouseModeSequences(text: string): string {
+  if (!text || !text.includes('\u001b[?')) return text
+
+  return text.replace(/\u001b\[\?([0-9;]*)([hl])/g, (sequence, params: string, final: string) => {
+    const modeIds = params.split(';').filter(Boolean)
+    if (modeIds.length === 0) return sequence
+
+    const keep = modeIds.filter((modeId) => !TERMINAL_MOUSE_MODE_IDS.has(modeId))
+    if (keep.length === modeIds.length) return sequence
+    if (keep.length === 0) return ''
+
+    return `\u001b[?${keep.join(';')}${final}`
+  })
+}
+
+function splitTrailingIncompletePrivateModeSequence(text: string): readonly [string, string] {
+  const idx = text.lastIndexOf('\u001b[?')
+  if (idx < 0) return [text, '']
+
+  const tail = text.slice(idx)
+  if (/^\u001b\[\?[0-9;]*$/.test(tail)) {
+    return [text.slice(0, idx), tail]
+  }
+
+  return [text, '']
+}
+
+export function createTerminalMouseModeFilter() {
+  let pendingPrivateMode = ''
+  const decoder = new TextDecoder('utf-8')
+  const encoder = new TextEncoder()
+
+  const filterText = (text: string) => {
+    const combined = pendingPrivateMode + text
+    const [complete, pending] = splitTrailingIncompletePrivateModeSequence(combined)
+    pendingPrivateMode = pending
+    return stripTerminalMouseModeSequences(complete)
+  }
+
+  return {
+    filter(data: string | Uint8Array): string | Uint8Array {
+      if (typeof data === 'string') return filterText(data)
+      return encoder.encode(filterText(decoder.decode(data, { stream: true })))
+    },
+    flush(): string {
+      const text = pendingPrivateMode + decoder.decode()
+      pendingPrivateMode = ''
+      return stripTerminalMouseModeSequences(text)
+    },
+  }
+}
+
 export function createTerminalWriteQueue(term: TerminalWritable, options: TerminalWriteQueueOptions = {}) {
   const maxPendingBytes = positiveQueueNumber(options.maxPendingBytes, 4 * 1024 * 1024)
   const maxPendingItems = positiveQueueNumber(options.maxPendingItems, 2048)
@@ -277,9 +344,10 @@ function TerminalPane() {
         allowTransparency: true,
         // Needed for term.unicode.* (Unicode11Addon)
         allowProposedApi: true,
-        // Full-screen TUIs enable mouse tracking, which normally prevents xterm
-        // selection. Let macOS Option-drag force regular selection; xterm's
-        // built-in Shift-drag force selection covers Linux/Windows.
+        // Full-screen TUIs usually enable terminal mouse reporting. We strip
+        // those sequences from PTY output below so plain drag selects text like
+        // classic Hermes chat. Keep the xterm modifier escape hatch enabled for
+        // any custom commands that still manage to enter mouse mode.
         macOptionClickForcesSelection: true,
         theme: {
           // Transparent terminal so the ParticleField (and grain) can show through.
@@ -568,6 +636,7 @@ function TerminalPane() {
     // Try to detect the Hermes session ID from the terminal output so the UI can
     // auto-select the correct session in the sidebar/topbar.
     const decoder = new TextDecoder('utf-8')
+    const terminalMouseModeFilter = createTerminalMouseModeFilter()
     const maybeDetectSessionId = createSessionIdDetector((sid) => {
       const cb = onDetectedSessionIdRef.current
       if (cb) cb(sid)
@@ -658,7 +727,10 @@ function TerminalPane() {
         if (!isCurrentSocket()) return
         if (ev.data instanceof ArrayBuffer) {
           const u8 = new Uint8Array(ev.data)
-          writeQueue?.enqueue(u8)
+          const filteredOutput = terminalMouseModeFilter.filter(u8)
+          if (filteredOutput instanceof Uint8Array && filteredOutput.byteLength > 0) {
+            writeQueue?.enqueue(filteredOutput)
+          }
           try {
             maybeDetectSessionId(decoder.decode(u8, { stream: true }))
           } catch {
@@ -680,7 +752,10 @@ function TerminalPane() {
           } catch {
             // not a control message
           }
-          writeQueue?.enqueue(ev.data)
+          const filteredOutput = terminalMouseModeFilter.filter(ev.data)
+          if (typeof filteredOutput === 'string' && filteredOutput.length > 0) {
+            writeQueue?.enqueue(filteredOutput)
+          }
           maybeDetectSessionId(ev.data)
         }
       }

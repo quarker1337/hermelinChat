@@ -331,7 +331,7 @@ export const AgentSettings = ({ locked = false, saving = false, handleRef }: Age
 
           {draft.hermelin.hermes_launch_mode === 'tui' && (
             <div style={{ marginTop: 6, fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-              TUI mouse mode: hold Option on macOS, or Shift on Linux/Windows, while dragging to select; then Ctrl/Cmd+C to copy.
+              TUI mouse reporting is muted in the browser terminal so normal drag selection and Ctrl/Cmd+C copying work like classic chat.
             </div>
           )}
 
