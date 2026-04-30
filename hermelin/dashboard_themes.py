@@ -102,8 +102,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "background": {"hex": "#08080a", "alpha": 1},
             "midground": {"hex": "#e8e8f0", "alpha": 1},
             "foreground": {"hex": "#ffffff", "alpha": 0},
-            "warmGlow": "rgba(245, 183, 49, 0.22)",
-            "noiseOpacity": 0.28,
+            "warmGlow": "rgba(245, 183, 49, 0.18)",
+            "noiseOpacity": 0.0,
         },
         "typography": {
             "fontSans": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
@@ -126,8 +126,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             edge_color="rgba(245, 183, 49, 0.36)",
             accent_color="#f5b731",
             filler_opacity="0.88",
-            overlay_background="repeating-linear-gradient(0deg, rgba(245, 183, 49, 0.14) 0 1px, transparent 1px 5px)",
-            overlay_opacity="0.045",
+            overlay_background="linear-gradient(180deg, transparent 0%, rgba(245, 183, 49, 0.10) 52%, transparent 100%)",
+            overlay_opacity="0.018",
         ),
         "colorOverrides": {
             "card": "#0e0e12",
@@ -139,7 +139,7 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "secondary": "#16161d",
             "secondaryForeground": "#b8b8cc",
             "muted": "#16161d",
-            "mutedForeground": "#77778c",
+            "mutedForeground": "#55556a",
             "accent": "#3d2a08",
             "accentForeground": "#ffd480",
             "destructive": "#e84057",
@@ -159,8 +159,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "background": {"hex": "#0c0f0e", "alpha": 1},
             "midground": {"hex": "#e8f0ec", "alpha": 1},
             "foreground": {"hex": "#ffffff", "alpha": 0},
-            "warmGlow": "rgba(77, 255, 161, 0.18)",
-            "noiseOpacity": 0.72,
+            "warmGlow": "rgba(77, 255, 161, 0.14)",
+            "noiseOpacity": 0.0,
         },
         "typography": {
             "fontSans": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace",
@@ -173,8 +173,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
         **_dashboard_skin(
             "matrix",
             bg=(
-                "radial-gradient(circle at 15% 0%, rgba(77, 255, 161, 0.16) 0%, transparent 24%), "
-                "repeating-linear-gradient(90deg, rgba(77, 255, 161, 0.07) 0 1px, transparent 1px 72px), "
+                "radial-gradient(circle at 15% 0%, rgba(77, 255, 161, 0.14) 0%, transparent 24%), "
+                "radial-gradient(circle at 88% 16%, rgba(77, 255, 161, 0.08) 0%, transparent 30%), "
                 "linear-gradient(180deg, rgba(4, 12, 8, 0.94) 0%, rgba(7, 18, 13, 0.98) 100%)"
             ),
             chrome_background="linear-gradient(180deg, rgba(6, 18, 13, 0.96), rgba(2, 8, 5, 0.92))",
@@ -184,11 +184,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             accent_color="#4dffa1",
             filler_opacity="0.82",
             layout_variant="tiled",
-            overlay_background=(
-                "repeating-linear-gradient(0deg, rgba(77, 255, 161, 0.16) 0 1px, transparent 1px 4px), "
-                "repeating-linear-gradient(90deg, rgba(77, 255, 161, 0.08) 0 1px, transparent 1px 48px)"
-            ),
-            overlay_opacity="0.055",
+            overlay_background="linear-gradient(180deg, transparent 0%, rgba(77, 255, 161, 0.10) 50%, transparent 100%)",
+            overlay_opacity="0.02",
         ),
         "colorOverrides": {
             "card": "#111514",
@@ -200,7 +197,7 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "secondary": "#1a201f",
             "secondaryForeground": "#c8d8d3",
             "muted": "#1a201f",
-            "mutedForeground": "#7b938d",
+            "mutedForeground": "#5a6f6a",
             "accent": "#0a3019",
             "accentForeground": "#b7ffd6",
             "destructive": "#fb7185",
@@ -220,8 +217,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "background": {"hex": "#0e1028", "alpha": 1},
             "midground": {"hex": "#d0d8f0", "alpha": 1},
             "foreground": {"hex": "#ffffff", "alpha": 0},
-            "warmGlow": "rgba(136, 184, 240, 0.18)",
-            "noiseOpacity": 0.18,
+            "warmGlow": "rgba(136, 184, 240, 0.14)",
+            "noiseOpacity": 0.0,
         },
         "typography": {
             "fontSans": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
@@ -315,7 +312,7 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "muted": "#d2d0cb",
             "mutedForeground": "#7a7872",
             "accent": "#f0d8d2",
-            "accentForeground": "#aa2020",
+            "accentForeground": "#e06666",
             "destructive": "#aa2020",
             "destructiveForeground": "#f7f3eb",
             "success": "#2da565",

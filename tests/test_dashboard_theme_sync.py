@@ -179,25 +179,72 @@ class DashboardThemeSyncTests(unittest.TestCase):
 
     def test_theme_definitions_use_advanced_dashboard_skin_controls(self):
         expectations = {
-            "hermelin": {"max_noise": 0.35, "layout": "standard"},
-            "matrix": {"max_noise": 0.75, "layout": "tiled"},
-            "nous": {"max_noise": 0.25, "layout": "standard"},
-            "samaritan": {"max_noise": 0.0, "layout": "standard"},
+            "hermelin": {"layout": "standard"},
+            "matrix": {"layout": "tiled"},
+            "nous": {"layout": "standard"},
+            "samaritan": {"layout": "standard"},
         }
 
         for ui_theme, expected in expectations.items():
             with self.subTest(ui_theme=ui_theme):
                 theme = dashboard_theme_definition_for_ui_theme(ui_theme)
 
-                self.assertLessEqual(theme["palette"]["noiseOpacity"], expected["max_noise"])
+                self.assertEqual(theme["palette"]["noiseOpacity"], 0.0)
                 self.assertEqual(theme["layoutVariant"], expected["layout"])
                 self.assertIn("bg", theme["assets"])
                 self.assertIn("gradient", theme["assets"]["bg"])
+                self.assertNotIn("repeating-", theme["assets"]["bg"])
                 self.assertIn("backdrop", theme["componentStyles"])
                 self.assertIn("fillerOpacity", theme["componentStyles"]["backdrop"])
                 self.assertIn("card", theme["componentStyles"])
                 self.assertIn("boxShadow", theme["componentStyles"]["card"])
                 self.assertIn("hermelinchat-dashboard-skin", theme["customCSS"])
+                self.assertNotIn("repeating-", theme["customCSS"])
+
+    def test_theme_text_colors_match_hermelinchat_palettes(self):
+        expected = {
+            "hermelin": {
+                "midground": "#e8e8f0",
+                "text": "#b8b8cc",
+                "muted": "#55556a",
+                "accent": "#f5b731",
+                "accent_soft": "#ffd480",
+            },
+            "matrix": {
+                "midground": "#e8f0ec",
+                "text": "#c8d8d3",
+                "muted": "#5a6f6a",
+                "accent": "#4dffa1",
+                "accent_soft": "#b7ffd6",
+            },
+            "nous": {
+                "midground": "#d0d8f0",
+                "text": "#a0b0d0",
+                "muted": "#6878a0",
+                "accent": "#88b8f0",
+                "accent_soft": "#b7ccff",
+            },
+            "samaritan": {
+                "midground": "#1a1816",
+                "text": "#3a3835",
+                "muted": "#7a7872",
+                "accent": "#cc3333",
+                "accent_soft": "#e06666",
+            },
+        }
+
+        for ui_theme, colors in expected.items():
+            with self.subTest(ui_theme=ui_theme):
+                theme = dashboard_theme_definition_for_ui_theme(ui_theme)
+                overrides = theme["colorOverrides"]
+
+                self.assertEqual(theme["palette"]["midground"]["hex"], colors["midground"])
+                self.assertEqual(overrides["cardForeground"], colors["midground"])
+                self.assertEqual(overrides["popoverForeground"], colors["midground"])
+                self.assertEqual(overrides["secondaryForeground"], colors["text"])
+                self.assertEqual(overrides["mutedForeground"], colors["muted"])
+                self.assertEqual(overrides["primary"], colors["accent"])
+                self.assertEqual(overrides["accentForeground"], colors["accent_soft"])
 
     def test_sync_persists_advanced_theme_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
