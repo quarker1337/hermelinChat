@@ -245,6 +245,7 @@ function TerminalPane() {
     if (!container) return
 
     let disposed = false
+    let removeCopyListener: (() => void) | null = null
 
     const start = async () => {
       // Wait for webfonts before opening xterm, otherwise it can measure the grid
@@ -290,26 +291,38 @@ function TerminalPane() {
         },
       })
 
+      const refocusTerminalSoon = () => {
+        setTimeout(() => {
+          try {
+            term.focus()
+          } catch {
+            // ignore
+          }
+        }, 0)
+      }
+
       // Windows Terminal-like clipboard shortcuts:
       // - Ctrl/Cmd+C copies selection (when something is selected)
       // - Ctrl/Cmd+V pastes (browser handles paste into xterm textarea)
       const copyTextToClipboard = async (text: string) => {
         const t = (text || '').toString()
-        if (!t) return
+        if (!t) return false
 
         // Async Clipboard API (requires HTTPS or localhost)
         try {
           if (window.isSecureContext && navigator?.clipboard?.writeText) {
             await navigator.clipboard.writeText(t)
-            return
+            return true
           }
         } catch {
-          // ignore
+          // ignore and fall back
         }
 
-        // Fallback for http://<ip>: execCommand('copy')
+        // Fallback for http://<ip>: use a real copy command against a temporary
+        // textarea. Firefox/LAN installs can reject navigator.clipboard even
+        // when the shortcut came from an actual user gesture.
+        const ta = document.createElement('textarea')
         try {
-          const ta = document.createElement('textarea')
           ta.value = t
           ta.setAttribute('readonly', 'true')
           ta.style.position = 'fixed'
@@ -319,12 +332,57 @@ function TerminalPane() {
           document.body.appendChild(ta)
           ta.focus()
           ta.select()
-          document.execCommand('copy')
-          document.body.removeChild(ta)
+          return document.execCommand('copy')
         } catch {
-          // ignore
+          return false
+        } finally {
+          try {
+            if (ta.parentNode) ta.parentNode.removeChild(ta)
+          } catch {
+            // ignore
+          }
         }
       }
+
+      const copySelectionToClipboard = () => {
+        const selectedText = term.getSelection()
+        if (!selectedText) return false
+
+        // First prefer the browser's real copy event. The handler below writes
+        // xterm's virtual selection into event.clipboardData, which is more
+        // reliable than async clipboard calls in Firefox or over plain HTTP.
+        let copiedByNativeCopyEvent = false
+        try {
+          copiedByNativeCopyEvent = document.execCommand('copy')
+        } catch {
+          copiedByNativeCopyEvent = false
+        }
+
+        if (!copiedByNativeCopyEvent) {
+          void copyTextToClipboard(selectedText)
+        }
+
+        term.clearSelection()
+        refocusTerminalSoon()
+        return true
+      }
+
+      const handleTerminalCopy = (ev: ClipboardEvent) => {
+        const selectedText = term.getSelection()
+        if (!selectedText) return
+
+        const clipboardData = ev.clipboardData
+        if (!clipboardData) return
+
+        try {
+          clipboardData.setData('text/plain', selectedText)
+          ev.preventDefault()
+        } catch {
+          // If direct clipboardData write fails, let the key handler fallback run.
+        }
+      }
+      container.addEventListener('copy', handleTerminalCopy)
+      removeCopyListener = () => container.removeEventListener('copy', handleTerminalCopy)
 
       term.attachCustomKeyEventHandler((ev) => {
         if (ev.type !== 'keydown') return true
@@ -332,19 +390,12 @@ function TerminalPane() {
         const key = (ev.key || '').toLowerCase()
         const ctrlOrMeta = ev.ctrlKey || ev.metaKey
 
-        // Ctrl/Cmd+C: copy selection instead of sending ^C
+        // Ctrl/Cmd+C: copy selection instead of sending ^C. Without a selection,
+        // keep normal terminal behavior so Ctrl+C still interrupts the PTY.
         if (ctrlOrMeta && key === 'c' && term.hasSelection()) {
           ev.preventDefault()
           ev.stopPropagation()
-          void copyTextToClipboard(term.getSelection())
-          term.clearSelection()
-          setTimeout(() => {
-            try {
-              term.focus()
-            } catch {
-              // ignore
-            }
-          }, 0)
+          copySelectionToClipboard()
           return false
         }
 
@@ -405,6 +456,12 @@ function TerminalPane() {
 
     return () => {
       disposed = true
+      try {
+        removeCopyListener?.()
+        removeCopyListener = null
+      } catch {
+        // ignore
+      }
       try {
         termRef.current?.dispose()
       } catch {
