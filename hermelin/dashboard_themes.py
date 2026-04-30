@@ -18,6 +18,81 @@ DEFAULT_UI_THEME = "hermelin"
 # themes. These are written into $HERMES_HOME/dashboard-themes/ so the
 # dashboard's own ThemeSwitcher and config key (`dashboard.theme`) can stay in
 # charge, while hermelinChat remains the upstream source of visual truth.
+_CARD_CLIP = "polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)"
+_TAB_CLIP = "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%, 0 8px)"
+
+
+def _dashboard_skin(
+    marker: str,
+    *,
+    bg: str,
+    chrome_background: str,
+    card_background: str,
+    card_shadow: str,
+    edge_color: str,
+    accent_color: str,
+    filler_opacity: str,
+    filler_blend_mode: str = "normal",
+    layout_variant: str = "standard",
+    overlay_background: str,
+    overlay_opacity: str,
+) -> dict[str, Any]:
+    """Return native dashboard skin controls shared by generated themes."""
+
+    border_image = f"linear-gradient(135deg, {edge_color}, transparent 42%, {accent_color}) 1"
+    return {
+        "layoutVariant": layout_variant,
+        "assets": {"bg": bg},
+        "componentStyles": {
+            "backdrop": {
+                "fillerOpacity": filler_opacity,
+                "fillerBlendMode": filler_blend_mode,
+                "backgroundSize": "cover",
+                "backgroundPosition": "center",
+            },
+            "card": {
+                "clipPath": _CARD_CLIP,
+                "borderImage": border_image,
+                "background": card_background,
+                "boxShadow": card_shadow,
+            },
+            "header": {
+                "background": chrome_background,
+                "borderImage": border_image,
+                "clipPath": "polygon(0 0, 100% 0, 100% 100%, 0 100%)",
+            },
+            "sidebar": {
+                "background": chrome_background,
+                "borderImage": border_image,
+            },
+            "tab": {"clipPath": _TAB_CLIP},
+        },
+        "customCSS": f"""/* hermelinchat-dashboard-skin: {marker} */
+body::before {{
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 102;
+  background: {overlay_background};
+  opacity: {overlay_opacity};
+  mix-blend-mode: soft-light;
+}}
+body::after {{
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 103;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, {accent_color} 18%, transparent), inset 0 0 72px rgba(0, 0, 0, 0.18);
+}}
+@media (prefers-reduced-motion: reduce) {{
+  body::before {{ opacity: calc({overlay_opacity} * 0.45); }}
+}}
+""",
+    }
+
+
 _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
     "hermelin": {
         "name": "hermelinchat-hermelin",
@@ -27,8 +102,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "background": {"hex": "#08080a", "alpha": 1},
             "midground": {"hex": "#e8e8f0", "alpha": 1},
             "foreground": {"hex": "#ffffff", "alpha": 0},
-            "warmGlow": "rgba(245, 183, 49, 0.28)",
-            "noiseOpacity": 0.9,
+            "warmGlow": "rgba(245, 183, 49, 0.22)",
+            "noiseOpacity": 0.28,
         },
         "typography": {
             "fontSans": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
@@ -38,6 +113,22 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "letterSpacing": "0",
         },
         "layout": {"radius": "0.75rem", "density": "comfortable"},
+        **_dashboard_skin(
+            "hermelin",
+            bg=(
+                "radial-gradient(circle at 12% 0%, rgba(245, 183, 49, 0.20) 0%, transparent 30%), "
+                "radial-gradient(circle at 100% 10%, rgba(255, 212, 128, 0.10) 0%, transparent 32%), "
+                "linear-gradient(135deg, rgba(8, 8, 10, 0.96) 0%, rgba(22, 17, 8, 0.94) 48%, rgba(8, 8, 10, 0.98) 100%)"
+            ),
+            chrome_background="linear-gradient(180deg, rgba(14, 14, 18, 0.96), rgba(8, 8, 10, 0.92))",
+            card_background="linear-gradient(180deg, rgba(18, 18, 24, 0.92) 0%, rgba(10, 10, 13, 0.86) 100%)",
+            card_shadow="0 0 0 1px rgba(245, 183, 49, 0.16) inset, 0 22px 52px rgba(0, 0, 0, 0.32), 0 0 32px rgba(245, 183, 49, 0.08)",
+            edge_color="rgba(245, 183, 49, 0.36)",
+            accent_color="#f5b731",
+            filler_opacity="0.88",
+            overlay_background="repeating-linear-gradient(0deg, rgba(245, 183, 49, 0.14) 0 1px, transparent 1px 5px)",
+            overlay_opacity="0.045",
+        ),
         "colorOverrides": {
             "card": "#0e0e12",
             "cardForeground": "#e8e8f0",
@@ -68,8 +159,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "background": {"hex": "#0c0f0e", "alpha": 1},
             "midground": {"hex": "#e8f0ec", "alpha": 1},
             "foreground": {"hex": "#ffffff", "alpha": 0},
-            "warmGlow": "rgba(77, 255, 161, 0.22)",
-            "noiseOpacity": 1.05,
+            "warmGlow": "rgba(77, 255, 161, 0.18)",
+            "noiseOpacity": 0.72,
         },
         "typography": {
             "fontSans": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace",
@@ -79,6 +170,26 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "letterSpacing": "0.015em",
         },
         "layout": {"radius": "0.35rem", "density": "compact"},
+        **_dashboard_skin(
+            "matrix",
+            bg=(
+                "radial-gradient(circle at 15% 0%, rgba(77, 255, 161, 0.16) 0%, transparent 24%), "
+                "repeating-linear-gradient(90deg, rgba(77, 255, 161, 0.07) 0 1px, transparent 1px 72px), "
+                "linear-gradient(180deg, rgba(4, 12, 8, 0.94) 0%, rgba(7, 18, 13, 0.98) 100%)"
+            ),
+            chrome_background="linear-gradient(180deg, rgba(6, 18, 13, 0.96), rgba(2, 8, 5, 0.92))",
+            card_background="linear-gradient(180deg, rgba(8, 22, 15, 0.92) 0%, rgba(3, 10, 7, 0.88) 100%)",
+            card_shadow="0 0 0 1px rgba(77, 255, 161, 0.20) inset, 0 18px 42px rgba(0, 0, 0, 0.38), 0 0 28px rgba(77, 255, 161, 0.09)",
+            edge_color="rgba(77, 255, 161, 0.40)",
+            accent_color="#4dffa1",
+            filler_opacity="0.82",
+            layout_variant="tiled",
+            overlay_background=(
+                "repeating-linear-gradient(0deg, rgba(77, 255, 161, 0.16) 0 1px, transparent 1px 4px), "
+                "repeating-linear-gradient(90deg, rgba(77, 255, 161, 0.08) 0 1px, transparent 1px 48px)"
+            ),
+            overlay_opacity="0.055",
+        ),
         "colorOverrides": {
             "card": "#111514",
             "cardForeground": "#e8f0ec",
@@ -109,8 +220,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "background": {"hex": "#0e1028", "alpha": 1},
             "midground": {"hex": "#d0d8f0", "alpha": 1},
             "foreground": {"hex": "#ffffff", "alpha": 0},
-            "warmGlow": "rgba(136, 184, 240, 0.24)",
-            "noiseOpacity": 0.85,
+            "warmGlow": "rgba(136, 184, 240, 0.18)",
+            "noiseOpacity": 0.18,
         },
         "typography": {
             "fontSans": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
@@ -120,6 +231,22 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "letterSpacing": "0",
         },
         "layout": {"radius": "0.85rem", "density": "comfortable"},
+        **_dashboard_skin(
+            "nous",
+            bg=(
+                "radial-gradient(circle at 15% 0%, rgba(136, 184, 240, 0.22) 0%, transparent 32%), "
+                "radial-gradient(circle at 92% 18%, rgba(80, 104, 184, 0.16) 0%, transparent 36%), "
+                "linear-gradient(135deg, rgba(10, 12, 32, 0.96) 0%, rgba(18, 24, 56, 0.96) 52%, rgba(9, 10, 24, 0.98) 100%)"
+            ),
+            chrome_background="linear-gradient(180deg, rgba(18, 22, 48, 0.94), rgba(10, 12, 32, 0.90))",
+            card_background="linear-gradient(180deg, rgba(20, 24, 56, 0.88) 0%, rgba(12, 14, 34, 0.82) 100%)",
+            card_shadow="0 0 0 1px rgba(136, 184, 240, 0.16) inset, 0 22px 48px rgba(0, 0, 0, 0.28), 0 0 36px rgba(136, 184, 240, 0.07)",
+            edge_color="rgba(136, 184, 240, 0.32)",
+            accent_color="#88b8f0",
+            filler_opacity="0.9",
+            overlay_background="linear-gradient(120deg, transparent 0%, rgba(136, 184, 240, 0.16) 50%, transparent 100%)",
+            overlay_opacity="0.03",
+        ),
         "colorOverrides": {
             "card": "#141838",
             "cardForeground": "#d0d8f0",
@@ -150,8 +277,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "background": {"hex": "#e8e6e1", "alpha": 1},
             "midground": {"hex": "#1a1816", "alpha": 1},
             "foreground": {"hex": "#ffffff", "alpha": 0},
-            "warmGlow": "rgba(204, 51, 51, 0.18)",
-            "noiseOpacity": 0.35,
+            "warmGlow": "rgba(204, 51, 51, 0.08)",
+            "noiseOpacity": 0.0,
         },
         "typography": {
             "fontSans": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
@@ -161,6 +288,21 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "letterSpacing": "0",
         },
         "layout": {"radius": "0.45rem", "density": "comfortable"},
+        **_dashboard_skin(
+            "samaritan",
+            bg=(
+                "linear-gradient(135deg, rgba(247, 243, 235, 0.96) 0%, rgba(232, 230, 225, 0.96) 54%, rgba(220, 216, 208, 0.96) 100%), "
+                "radial-gradient(circle at 82% 6%, rgba(204, 51, 51, 0.10) 0%, transparent 28%)"
+            ),
+            chrome_background="linear-gradient(180deg, rgba(247, 243, 235, 0.94), rgba(226, 223, 216, 0.90))",
+            card_background="linear-gradient(180deg, rgba(247, 243, 235, 0.90) 0%, rgba(221, 219, 214, 0.86) 100%)",
+            card_shadow="0 0 0 1px rgba(170, 32, 32, 0.12) inset, 0 18px 36px rgba(26, 24, 22, 0.10)",
+            edge_color="rgba(170, 32, 32, 0.22)",
+            accent_color="#cc3333",
+            filler_opacity="0",
+            overlay_background="linear-gradient(90deg, transparent 0%, rgba(204, 51, 51, 0.12) 50%, transparent 100%)",
+            overlay_opacity="0.025",
+        ),
         "colorOverrides": {
             "card": "#dddbd6",
             "cardForeground": "#1a1816",

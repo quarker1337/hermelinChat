@@ -12,6 +12,7 @@ from hermelin.config import HermelinConfig
 from hermelin.config_editor import _update_dashboard_theme_config_text
 from hermelin.dashboard_themes import (
     available_ui_themes,
+    dashboard_theme_definition_for_ui_theme,
     dashboard_theme_name_for_ui_theme,
     sync_dashboard_theme_for_ui_theme,
 )
@@ -175,6 +176,43 @@ class DashboardThemeSyncTests(unittest.TestCase):
 
     def test_unknown_ui_theme_falls_back_to_hermelin(self):
         self.assertEqual(dashboard_theme_name_for_ui_theme("missing-theme"), "hermelinchat-hermelin")
+
+    def test_theme_definitions_use_advanced_dashboard_skin_controls(self):
+        expectations = {
+            "hermelin": {"max_noise": 0.35, "layout": "standard"},
+            "matrix": {"max_noise": 0.75, "layout": "tiled"},
+            "nous": {"max_noise": 0.25, "layout": "standard"},
+            "samaritan": {"max_noise": 0.0, "layout": "standard"},
+        }
+
+        for ui_theme, expected in expectations.items():
+            with self.subTest(ui_theme=ui_theme):
+                theme = dashboard_theme_definition_for_ui_theme(ui_theme)
+
+                self.assertLessEqual(theme["palette"]["noiseOpacity"], expected["max_noise"])
+                self.assertEqual(theme["layoutVariant"], expected["layout"])
+                self.assertIn("bg", theme["assets"])
+                self.assertIn("gradient", theme["assets"]["bg"])
+                self.assertIn("backdrop", theme["componentStyles"])
+                self.assertIn("fillerOpacity", theme["componentStyles"]["backdrop"])
+                self.assertIn("card", theme["componentStyles"])
+                self.assertIn("boxShadow", theme["componentStyles"]["card"])
+                self.assertIn("hermelinchat-dashboard-skin", theme["customCSS"])
+
+    def test_sync_persists_advanced_theme_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hermes_home = Path(tmpdir) / "hermes-home"
+            hermes_home.mkdir()
+
+            sync_dashboard_theme_for_ui_theme(hermes_home, "samaritan")
+
+            theme_file = hermes_home / "dashboard-themes" / "hermelinchat-samaritan.yaml"
+            theme_yaml = yaml.safe_load(theme_file.read_text(encoding="utf-8"))
+
+        self.assertEqual(theme_yaml["palette"]["noiseOpacity"], 0.0)
+        self.assertEqual(theme_yaml["componentStyles"]["backdrop"]["fillerOpacity"], "0")
+        self.assertIn("linear-gradient", theme_yaml["assets"]["bg"])
+        self.assertIn("hermelinchat-dashboard-skin", theme_yaml["customCSS"])
 
 
 class _FakeDashboardManager:
