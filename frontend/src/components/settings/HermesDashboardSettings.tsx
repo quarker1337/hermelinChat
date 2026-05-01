@@ -68,21 +68,6 @@ async function postDashboardAction(url: string, uiTheme: string): Promise<Dashbo
 
 export function normalizeDashboardProxyUrl(value?: string): string {
   const raw = (value || '').trim()
-  if (!raw) return DEFAULT_HERMES_DASHBOARD_PROXY_URL
-
-  const lower = raw.toLowerCase()
-  if (
-    lower.startsWith('http://') ||
-    lower.startsWith('https://') ||
-    lower.startsWith('//') ||
-    lower.startsWith('ws://') ||
-    lower.startsWith('wss://') ||
-    lower.startsWith('javascript:') ||
-    lower.startsWith('data:')
-  ) {
-    return DEFAULT_HERMES_DASHBOARD_PROXY_URL
-  }
-
   if (!raw.startsWith('/api/')) return DEFAULT_HERMES_DASHBOARD_PROXY_URL
   if (raw.includes('\\') || raw.includes('?') || raw.includes('#')) return DEFAULT_HERMES_DASHBOARD_PROXY_URL
   return raw.endsWith('/') ? raw : `${raw}/`

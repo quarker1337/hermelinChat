@@ -878,6 +878,7 @@ test('Hermes dashboard proxy path validator rejects non-same-origin values', () 
     'wss://evil.example/api/ws',
     'javascript:alert(1)',
     'data:text/html,pwned',
+    'vbscript:msgbox(1)',
     '/r/hermes-dashboard/',
     'api/missing-leading-slash',
     '',
