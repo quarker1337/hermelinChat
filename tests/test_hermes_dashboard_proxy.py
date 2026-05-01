@@ -223,6 +223,30 @@ class _FakeDashboardManager:
         self.started = False
 
 
+class _LeakyDashboardManager(_FakeDashboardManager):
+    secret = "secret stack detail from /tmp/private/hermes-token"
+
+    def status(self):
+        data = super().status()
+        data["running"] = False
+        data["last_error"] = self.secret
+        return data
+
+    async def start(self):
+        self.start_count += 1
+        return self.status()
+
+    async def restart(self):
+        self.start_count += 1
+        return self.status()
+
+    async def ensure_started(self):
+        return self.status()
+
+    def upstream(self):
+        return None
+
+
 class _CaptureDashboardHttpClient:
     def __init__(self):
         self.requests = []
@@ -293,6 +317,68 @@ class HermesDashboardEndpointTests(unittest.TestCase):
         self.assertTrue(started["running"])
         self.assertTrue(restarted["running"])
         self.assertFalse(stopped["running"])
+
+    def test_dashboard_public_endpoints_do_not_expose_manager_error_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _LeakyDashboardManager):
+                app = create_app(config)
+
+            status = asyncio.run(_asgi_request(app, "GET", "/api/hermes-dashboard/status"))
+            started = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/start"))
+            restarted = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/restart"))
+            proxied = asyncio.run(_asgi_request(app, "GET", f"{DASHBOARD_BASE_PATH}/api/status"))
+
+        for response in (status, started, restarted, proxied):
+            body = response.text
+            self.assertNotIn(_LeakyDashboardManager.secret, body)
+            self.assertNotIn("/tmp/private", body)
+            self.assertNotIn("stack detail", body)
+
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(restarted.status_code, 200)
+        self.assertEqual(proxied.status_code, 503)
+        self.assertEqual(
+            status.json()["last_error"],
+            "Hermes dashboard unavailable. Check hermelinChat server logs for details.",
+        )
+        self.assertEqual(
+            proxied.json()["detail"],
+            "Hermes dashboard unavailable. Check hermelinChat server logs for details.",
+        )
+
+    def test_dashboard_theme_sync_errors_do_not_expose_exception_details(self):
+        secret = "secret stack detail from /tmp/private/dashboard-theme"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
+                app = create_app(config)
+
+            with patch("hermelin.server.logger"):
+                with patch("hermelin.server.sync_dashboard_theme_for_ui_theme", side_effect=RuntimeError(secret)):
+                    response = asyncio.run(
+                        _asgi_request(app, "POST", "/api/hermes-dashboard/theme", json={"ui_theme": "matrix"})
+                    )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "failed to sync dashboard theme")
+        self.assertNotIn(secret, response.text)
+        self.assertNotIn("/tmp/private", response.text)
 
     def test_dashboard_proxy_routes_honor_safe_custom_base_path(self):
         custom_base_path = "/api/hermes-dashboard-frame"

@@ -722,8 +722,63 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             out[k] = v
         return out
 
-    def _dashboard_proxy_error(detail: str, status_code: int = 503) -> JSONResponse:
-        return JSONResponse({"detail": detail}, status_code=status_code)
+    _DASHBOARD_PUBLIC_ERROR = "Hermes dashboard unavailable. Check hermelinChat server logs for details."
+    _DASHBOARD_THEME_SYNC_ERROR = "failed to sync dashboard theme"
+
+    def _dashboard_public_int(value: object) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int) and value > 0:
+            return value
+        return None
+
+    def _dashboard_public_float(value: object) -> float | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)) and value > 0:
+            return float(value)
+        return None
+
+    def _dashboard_public_status(status: object) -> dict[str, object]:
+        """Return dashboard status without exposing internal exception text.
+
+        The dashboard manager keeps detailed startup failures in `last_error`
+        for server-side diagnosis. Those values can include exception messages
+        or local paths, so public API responses only expose a generic error
+        marker and otherwise rebuild the response from controlled fields.
+        """
+
+        raw = status if isinstance(status, dict) else {}
+        public: dict[str, object] = {
+            "ok": bool(raw.get("ok", True)),
+            "enabled": bool(raw.get("enabled", False)),
+            "running": bool(raw.get("running", False)),
+            "host": "127.0.0.1",
+            "port": _dashboard_public_int(raw.get("port")),
+            "pid": _dashboard_public_int(raw.get("pid")),
+            "base_path": dashboard_base_path,
+            "proxy_path": f"{dashboard_base_path}/",
+            "tui": bool(raw.get("tui", False)),
+            "base_path_supported": raw.get("base_path_supported") if isinstance(raw.get("base_path_supported"), bool) else None,
+            "stopped_by_user": bool(raw.get("stopped_by_user", False)),
+            "last_error": _DASHBOARD_PUBLIC_ERROR if raw.get("last_error") else "",
+            "started_at": _dashboard_public_float(raw.get("started_at")),
+        }
+        return public
+
+    def _dashboard_public_theme_sync(theme_sync: object) -> dict[str, object]:
+        raw = theme_sync if isinstance(theme_sync, dict) else {}
+        return {
+            "ok": bool(raw.get("ok", False)),
+            "ui_theme": str(raw.get("ui_theme") or ""),
+            "dashboard_theme": str(raw.get("dashboard_theme") or ""),
+            "config_changed": bool(raw.get("config_changed", False)),
+            "theme_files_changed": bool(raw.get("theme_files_changed", False)),
+            "changed": bool(raw.get("changed", False)),
+        }
+
+    def _dashboard_proxy_error(status_code: int = 503) -> JSONResponse:
+        return JSONResponse({"detail": _DASHBOARD_PUBLIC_ERROR}, status_code=status_code)
 
     async def _sync_dashboard_theme_from_payload(payload: dict | None) -> dict:
         ui_theme = ""
@@ -731,37 +786,40 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             ui_theme = str(payload.get("ui_theme") or payload.get("theme") or "").strip()
         return await asyncio.to_thread(sync_dashboard_theme_for_ui_theme, config.hermes_home, ui_theme)
 
+    async def _sync_dashboard_theme_response(payload: dict | None) -> dict[str, object] | JSONResponse:
+        try:
+            return _dashboard_public_theme_sync(await _sync_dashboard_theme_from_payload(payload))
+        except Exception:
+            logger.warning("failed to sync Hermes dashboard theme", exc_info=True)
+            return JSONResponse({"detail": _DASHBOARD_THEME_SYNC_ERROR}, status_code=500)
+
     @app.get("/api/hermes-dashboard/status")
     async def api_hermes_dashboard_status():
-        return dashboard_manager.status()
+        return _dashboard_public_status(dashboard_manager.status())
 
     @app.post("/api/hermes-dashboard/theme")
     async def api_hermes_dashboard_theme(payload: dict | None = Body(None)):
-        try:
-            return await _sync_dashboard_theme_from_payload(payload)
-        except Exception as exc:
-            logger.warning("failed to sync Hermes dashboard theme", exc_info=True)
-            return JSONResponse({"detail": "failed to sync dashboard theme", "error": str(exc)}, status_code=500)
+        return await _sync_dashboard_theme_response(payload)
 
     @app.post("/api/hermes-dashboard/start")
     async def api_hermes_dashboard_start(payload: dict | None = Body(None)):
-        theme_sync = await _sync_dashboard_theme_from_payload(payload)
-        status = await dashboard_manager.start()
-        if isinstance(status, dict):
-            return {**status, "dashboard_theme": theme_sync.get("dashboard_theme"), "theme_sync": theme_sync}
-        return status
+        theme_sync = await _sync_dashboard_theme_response(payload)
+        if isinstance(theme_sync, JSONResponse):
+            return theme_sync
+        status = _dashboard_public_status(await dashboard_manager.start())
+        return {**status, "dashboard_theme": theme_sync.get("dashboard_theme"), "theme_sync": theme_sync}
 
     @app.post("/api/hermes-dashboard/restart")
     async def api_hermes_dashboard_restart(payload: dict | None = Body(None)):
-        theme_sync = await _sync_dashboard_theme_from_payload(payload)
-        status = await dashboard_manager.restart()
-        if isinstance(status, dict):
-            return {**status, "dashboard_theme": theme_sync.get("dashboard_theme"), "theme_sync": theme_sync}
-        return status
+        theme_sync = await _sync_dashboard_theme_response(payload)
+        if isinstance(theme_sync, JSONResponse):
+            return theme_sync
+        status = _dashboard_public_status(await dashboard_manager.restart())
+        return {**status, "dashboard_theme": theme_sync.get("dashboard_theme"), "theme_sync": theme_sync}
 
     @app.post("/api/hermes-dashboard/stop")
     async def api_hermes_dashboard_stop():
-        return await dashboard_manager.stop()
+        return _dashboard_public_status(await dashboard_manager.stop())
 
     @app.api_route(dashboard_base_path, methods=_DASHBOARD_PROXY_METHODS)
     @app.api_route(f"{dashboard_base_path}/{{path:path}}", methods=_DASHBOARD_PROXY_METHODS)
@@ -769,11 +827,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         if request.method == "OPTIONS":
             return Response(status_code=204)
 
-        status = await dashboard_manager.ensure_started()
+        await dashboard_manager.ensure_started()
         upstream = dashboard_manager.upstream()
         if not upstream:
-            detail = str(status.get("last_error") or "Hermes dashboard unavailable")
-            return _dashboard_proxy_error(detail, status_code=503)
+            return _dashboard_proxy_error(status_code=503)
 
         scheme, host, port = upstream
         upstream_path = f"/{path}" if path else "/"
@@ -807,7 +864,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             logger.exception("Hermes dashboard proxy error")
             if close_client:
                 await client.aclose()
-            return _dashboard_proxy_error("Hermes dashboard proxy unavailable", status_code=502)
+            return _dashboard_proxy_error(status_code=502)
 
         resp_headers = _dashboard_filter_response_headers(upstream_resp.headers, upstream_port=port)
 
