@@ -15,6 +15,8 @@ _LOCALHOST_HOSTS = {
     "::1",
 }
 
+_RESERVED_RUNNER_IDS = {"hermes-dashboard"}
+
 
 def runner_project_dir(artifact_dir: Path, tab_id: str) -> Path:
     return Path(artifact_dir) / "runners" / "projects" / str(tab_id)
@@ -70,11 +72,14 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def read_runner_manifest(artifact_dir: Path, tab_id: str) -> dict[str, Any] | None:
-    if not is_valid_artifact_id(str(tab_id or "")):
+    tab_id_s = str(tab_id or "")
+    if tab_id_s in _RESERVED_RUNNER_IDS:
+        return None
+    if not is_valid_artifact_id(tab_id_s):
         return None
 
     projects_root = Path(artifact_dir) / "runners" / "projects"
-    project_dir = _find_named_child_dir(projects_root, str(tab_id))
+    project_dir = _find_named_child_dir(projects_root, tab_id_s)
     if project_dir is None:
         return None
 
@@ -124,11 +129,14 @@ def upstream_from_manifest(manifest: dict[str, Any]) -> tuple[str, str, int] | N
 
 
 def _read_artifact_by_id(artifact_dir: Path, artifact_id: str) -> dict[str, Any] | None:
-    if not is_valid_artifact_id(str(artifact_id or "")):
+    artifact_id_s = str(artifact_id or "")
+    if artifact_id_s in _RESERVED_RUNNER_IDS:
         return None
-
+    if not is_valid_artifact_id(artifact_id_s):
+        return None
     root = Path(artifact_dir)
-    filename = f"{artifact_id}.json"
+    filename = f"{artifact_id_s}.json"
+
     for base_dir in (root / "session", root / "persistent", root):
         path = _find_named_child_file(base_dir, filename)
         if path is None:
@@ -169,12 +177,17 @@ def discover_runner_upstream(artifact_dir: Path, tab_id: str) -> tuple[str, str,
     2) parse localhost URL from the iframe artifact's data.src
 
     Only localhost upstreams are allowed to prevent SSRF.
+    Reserved service IDs are intentionally excluded; their upstreams are
+    resolved by dedicated server-side managers instead of user artifacts.
     """
 
-    if not is_valid_artifact_id(str(tab_id or "")):
+    tab_id_s = str(tab_id or "")
+    if tab_id_s in _RESERVED_RUNNER_IDS:
+        return None
+    if not is_valid_artifact_id(tab_id_s):
         return None
 
-    manifest = read_runner_manifest(artifact_dir, tab_id)
+    manifest = read_runner_manifest(artifact_dir, tab_id_s)
     upstream = upstream_from_manifest(manifest) if manifest else None
     if upstream:
         return upstream

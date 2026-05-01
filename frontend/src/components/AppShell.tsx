@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { AMBER, SLATE } from '../theme/index'
 
 // ─── Stores ────────────────────────────────────────────────────────
@@ -34,6 +34,111 @@ import VideoFxOverlay from './VideoFxOverlay'
 import type { Session, SessionMenu } from '../types'
 
 // ===================================================================
+// Artifact shell islands
+//
+// Keep artifact list/payload subscriptions outside AppShell so live/heavy
+// artifact updates do not re-render the whole composition root or terminal
+// subtree on every poll/websocket control frame.
+// ===================================================================
+
+interface ArtifactEdgeTabProps {
+  authenticated: boolean
+}
+
+const ArtifactEdgeTab = memo(function ArtifactEdgeTab({ authenticated }: ArtifactEdgeTabProps) {
+  const artifactPanelOpen = useArtifactStore((s) => s.panelOpen)
+  const artifactCount = useArtifactStore((s) => s.tabs.length)
+
+  const handleOpenArtifactPanel = useCallback(() => {
+    useArtifactStore.getState().openPanel()
+  }, [])
+
+  if (artifactPanelOpen || !authenticated) return null
+
+  return (
+    <div
+      onClick={handleOpenArtifactPanel}
+      title="Open panel"
+      style={{
+        position: 'absolute',
+        right: 0,
+        top: '50%',
+        transform: 'translateY(-50%)',
+        background: SLATE.surface,
+        border: `1px solid ${SLATE.border}`,
+        borderRight: 'none',
+        borderRadius: '8px 0 0 8px',
+        padding: '12px 7px',
+        cursor: 'pointer',
+        color: SLATE.muted,
+        zIndex: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 6,
+        userSelect: 'none',
+        boxShadow: '0 10px 28px rgba(0,0,0,0.55)',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = AMBER[400]
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = SLATE.muted
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <polyline points="15 18 9 12 15 6" />
+      </svg>
+      <span
+        style={{
+          fontSize: 9,
+          writingMode: 'vertical-rl',
+          textOrientation: 'mixed',
+          letterSpacing: '0.04em',
+          userSelect: 'none',
+        }}
+      >
+        {`${artifactCount} artifact${artifactCount === 1 ? '' : 's'}`}
+      </span>
+    </div>
+  )
+})
+
+const ArtifactPanelHost = memo(function ArtifactPanelHost() {
+  const artifactPanelOpen = useArtifactStore((s) => s.panelOpen)
+  const artifactPanelWidth = useArtifactStore((s) => s.panelWidth)
+  const artifactTabs = useArtifactStore((s) => s.tabs)
+  const activeArtifactId = useArtifactStore((s) => s.activeId)
+
+  const handleResizeWidth = useCallback((w: number) => {
+    useArtifactStore.getState().setPanelWidth(w)
+  }, [])
+  const handleSelectArtifact = useCallback((id: string) => {
+    useArtifactStore.getState().setActiveId(id)
+  }, [])
+  const handleClose = useCallback(() => {
+    useArtifactStore.getState().closePanel()
+  }, [])
+  const handleDeleteArtifact = useCallback((id: string) => {
+    useArtifactStore.getState().deleteTab(id)
+  }, [])
+
+  if (!artifactPanelOpen) return null
+
+  return (
+    <ArtifactPanel
+      width={artifactPanelWidth}
+      onResizeWidth={handleResizeWidth}
+      artifacts={artifactTabs}
+      activeArtifactId={activeArtifactId}
+      onSelectArtifact={handleSelectArtifact}
+      onClose={handleClose}
+      onDeleteArtifact={handleDeleteArtifact}
+    />
+  )
+})
+
+// ===================================================================
 // AppShell — composition root
 //
 // Replaces the monolithic App() function from App.jsx. Reads all
@@ -52,11 +157,6 @@ export function AppShell() {
   const runtimeInfo = useSessionStore((s) => s.runtimeInfo)
 
   const connected = useTerminalStore(selectConnected)
-
-  const artifactPanelOpen = useArtifactStore((s) => s.panelOpen)
-  const artifactPanelWidth = useArtifactStore((s) => s.panelWidth)
-  const artifactTabs = useArtifactStore((s) => s.tabs)
-  const activeArtifactId = useArtifactStore((s) => s.activeId)
 
   const videoFxFilter = useVideoFxStore((s) => s.filter)
   const videoFxTransform = useVideoFxStore((s) => s.transform)
@@ -234,10 +334,6 @@ export function AppShell() {
   const handleResumeSession = useCallback((session: Session) => {
     useSessionStore.getState().resumeSession(session.id)
     useSearchStore.getState().closePeek()
-  }, [])
-
-  const handleOpenArtifactPanel = useCallback(() => {
-    useArtifactStore.getState().openPanel()
   }, [])
 
   // ─── Render ───────────────────────────────────────────────────────
@@ -459,67 +555,10 @@ export function AppShell() {
                 </div>
               )}
 
-              {/* Artifact panel edge tab (collapsed) */}
-              {!artifactPanelOpen && authenticated && (
-                <div
-                  onClick={handleOpenArtifactPanel}
-                  title="Open panel"
-                  style={{
-                    position: 'absolute',
-                    right: 0,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: SLATE.surface,
-                    border: `1px solid ${SLATE.border}`,
-                    borderRight: 'none',
-                    borderRadius: '8px 0 0 8px',
-                    padding: '12px 7px',
-                    cursor: 'pointer',
-                    color: SLATE.muted,
-                    zIndex: 12,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: 6,
-                    userSelect: 'none',
-                    boxShadow: '0 10px 28px rgba(0,0,0,0.55)',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = AMBER[400]
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = SLATE.muted
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <polyline points="15 18 9 12 15 6" />
-                  </svg>
-                  <span
-                    style={{
-                      fontSize: 9,
-                      writingMode: 'vertical-rl',
-                      textOrientation: 'mixed',
-                      letterSpacing: '0.04em',
-                      userSelect: 'none',
-                    }}
-                  >
-                    {`${artifactTabs.length} artifact${artifactTabs.length === 1 ? '' : 's'}`}
-                  </span>
-                </div>
-              )}
+              <ArtifactEdgeTab authenticated={authenticated} />
             </div>
 
-            {artifactPanelOpen && (
-              <ArtifactPanel
-                width={artifactPanelWidth}
-                onResizeWidth={(w: number) => useArtifactStore.getState().setPanelWidth(w)}
-                artifacts={artifactTabs}
-                activeArtifactId={activeArtifactId}
-                onSelectArtifact={(id: string) => useArtifactStore.getState().setActiveId(id)}
-                onClose={() => useArtifactStore.getState().closePanel()}
-                onDeleteArtifact={(id: string) => useArtifactStore.getState().deleteTab(id)}
-              />
-            )}
+            <ArtifactPanelHost />
           </div>
 
           {/* Login overlay */}

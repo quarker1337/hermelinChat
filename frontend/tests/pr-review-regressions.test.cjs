@@ -19,7 +19,7 @@ function installAssetStubs() {
 
   const originalResolveFilename = Module._resolveFilename
   const originalLoad = Module._load
-  const assetPattern = /\.(svg(\?raw)?|png)$/
+  const assetPattern = /\.(css|svg(\?raw)?|png)$/
 
   Module._resolveFilename = function patchedResolveFilename(request, parent, isMain, options) {
     if (assetPattern.test(request)) return request
@@ -65,6 +65,10 @@ function makeWindow({ innerWidth = 1400, storageSeed = {} } = {}) {
 
   return {
     innerWidth,
+    location: {
+      origin: 'https://hermelin.test',
+      href: 'https://hermelin.test/',
+    },
     localStorage: makeStorage(storageSeed),
     addEventListener(type, handler) {
       const next = listeners.get(type) || []
@@ -256,6 +260,453 @@ test('artifact store preserves tab references for unchanged poll payloads', () =
   assert.equal(secondTabs[0], firstArtifact)
 })
 
+test('artifact store keeps render data stable for timestamp-only live updates', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  const payload = [
+    {
+      id: 'live-log',
+      type: 'logs',
+      title: 'Live Log',
+      timestamp: 1713379200000,
+      data: { lines: [{ level: 'info', message: 'still selectable' }] },
+    },
+  ]
+
+  useArtifactStore.getState().applyArtifacts(payload)
+  const firstArtifact = useArtifactStore.getState().tabs[0]
+  const firstData = firstArtifact.data
+
+  const nextPayload = JSON.parse(JSON.stringify(payload))
+  nextPayload[0].timestamp = 1713379205000
+  useArtifactStore.getState().applyArtifacts(nextPayload)
+
+  const secondArtifact = useArtifactStore.getState().tabs[0]
+  assert.notEqual(secondArtifact, firstArtifact)
+  assert.equal(secondArtifact.timestamp, 1713379205000)
+  assert.equal(secondArtifact.data, firstData)
+})
+
+test('artifact runtime state distinguishes persisted live expectation from active runner', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { getArtifactRuntimeState } = loadCompiled('components/ArtifactPanel.js')
+
+  assert.deepEqual(
+    getArtifactRuntimeState({ id: 'legacy-live', type: 'iframe', live: true, refresh_seconds: 2 }),
+    {
+      expectedLive: true,
+      hasRuntimeStatus: false,
+      isLive: true,
+      isStopped: false,
+      runnerStatus: '',
+    },
+  )
+
+  assert.deepEqual(
+    getArtifactRuntimeState({ id: 'saved-live', type: 'iframe', live: true, refresh_seconds: 2, runner_active: false, runner_status: 'stopped' }),
+    {
+      expectedLive: true,
+      hasRuntimeStatus: true,
+      isLive: false,
+      isStopped: true,
+      runnerStatus: 'stopped',
+    },
+  )
+
+  assert.deepEqual(
+    getArtifactRuntimeState({ id: 'active-live', type: 'iframe', live: true, runner_active: true, runner_status: 'running' }),
+    {
+      expectedLive: true,
+      hasRuntimeStatus: true,
+      isLive: true,
+      isStopped: false,
+      runnerStatus: 'running',
+    },
+  )
+})
+
+test('artifact store treats runner status-only changes as semantic updates', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  useArtifactStore.getState().applyArtifacts([
+    {
+      id: 'saved-live',
+      type: 'iframe',
+      title: 'Saved live artifact',
+      live: true,
+      refresh_seconds: 2,
+      runner_active: true,
+      runner_status: 'running',
+      timestamp: 1713379200000,
+      updated_at: 1713379200000,
+      data: { src: 'http://127.0.0.1:43123/' },
+    },
+  ])
+  const firstTabs = useArtifactStore.getState().tabs
+  const firstArtifact = firstTabs[0]
+  const firstData = firstArtifact.data
+
+  useArtifactStore.getState().applyArtifacts([
+    {
+      id: 'saved-live',
+      type: 'iframe',
+      title: 'Saved live artifact',
+      live: true,
+      refresh_seconds: 2,
+      runner_active: false,
+      runner_status: 'stopped',
+      timestamp: 1713379200000,
+      updated_at: 1713379200000,
+      data: { src: 'http://127.0.0.1:43123/' },
+    },
+  ])
+
+  const secondTabs = useArtifactStore.getState().tabs
+  assert.notEqual(secondTabs, firstTabs)
+  assert.notEqual(secondTabs[0], firstArtifact)
+  assert.equal(secondTabs[0].runner_active, false)
+  assert.equal(secondTabs[0].runner_status, 'stopped')
+  assert.equal(secondTabs[0].data, firstData)
+})
+
+test('artifact bridge commands do not steal active iframe focus', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  const { handleControlMessage } = loadCompiled('components/artifacts/bridge.js')
+  useArtifactStore.getState().reset()
+
+  useArtifactStore.getState().applyArtifacts([
+    {
+      id: 'focused-frame',
+      type: 'iframe',
+      title: 'Focused frame',
+      timestamp: 1,
+      data: { srcdoc: '<button>typing here</button>' },
+    },
+    {
+      id: 'background-frame',
+      type: 'iframe',
+      title: 'Background frame',
+      timestamp: 2,
+      data: { srcdoc: '<button>background</button>' },
+    },
+  ])
+  useArtifactStore.getState().setActiveId('focused-frame')
+
+  assert.equal(handleControlMessage({
+    type: 'artifact_bridge_command',
+    payload: { artifact_id: 'background-frame', command: 'ping' },
+  }), true)
+
+  assert.equal(useArtifactStore.getState().activeId, 'focused-frame')
+  assert.equal(useArtifactStore.getState().panelOpen, true)
+})
+
+test('artifact iframe data bridge is bounded and omits iframe transport fields', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createArtifactDataBridgeMessage, resolveArtifactFrameTargetOrigin, sanitizeArtifactSrcDoc } = loadCompiled('components/artifacts/ArtifactRenderer.js')
+
+  const sanitizedSrcDoc = sanitizeArtifactSrcDoc(`
+<script>
+console.log('artifact ready')
+//# sourceMappingURL=2
+</script>
+<style>
+body { color: red }
+/*# sourceMappingURL=theme.css.map */
+</style>
+`)
+  assert.match(sanitizedSrcDoc, /console\.log\('artifact ready'\)/)
+  assert.match(sanitizedSrcDoc, /body \{ color: red \}/)
+  assert.doesNotMatch(sanitizedSrcDoc, /sourceMappingURL/)
+
+  assert.deepEqual(
+    createArtifactDataBridgeMessage('dashboard', {
+      src: '/api/default-artifacts/dashboard/index.html',
+      srcdoc: '<script>expensive html</script>',
+      html: '<div>inline html</div>',
+      rows: [{ label: 'ok', value: 1 }],
+      title: 'Runtime data',
+    }),
+    {
+      type: 'hermes:artifact-data',
+      artifactId: 'dashboard',
+      data: {
+        rows: [{ label: 'ok', value: 1 }],
+        title: 'Runtime data',
+      },
+      artifactData: {
+        rows: [{ label: 'ok', value: 1 }],
+        title: 'Runtime data',
+      },
+    },
+  )
+
+  assert.equal(createArtifactDataBridgeMessage('empty', { src: '/only/transport.html' }), null)
+  assert.equal(createArtifactDataBridgeMessage('huge', { rows: 'x'.repeat(300 * 1024) }), null)
+  assert.equal(resolveArtifactFrameTargetOrigin(undefined), '*')
+  assert.equal(resolveArtifactFrameTargetOrigin('/api/default-artifacts/strudel/index.html'), 'https://hermelin.test')
+  assert.equal(resolveArtifactFrameTargetOrigin('https://example.com/artifact.html'), null)
+})
+
+test('artifact panel width no-ops when clamped width is unchanged', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow({ innerWidth: 1400 }))
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+  useArtifactStore.getState().setPanelWidth(640)
+
+  let updates = 0
+  const unsubscribe = useArtifactStore.subscribe(() => {
+    updates += 1
+  })
+
+  try {
+    useArtifactStore.getState().setPanelWidth(640)
+    assert.equal(updates, 0)
+  } finally {
+    unsubscribe()
+  }
+})
+
+test('terminal write queue waits for xterm write callbacks before draining more output', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalWriteQueue } = loadCompiled('components/terminal/TerminalPane.js')
+  const callbacks = []
+  const writes = []
+  const term = {
+    write(data, callback) {
+      writes.push(data)
+      callbacks.push(callback)
+    },
+  }
+
+  const queue = createTerminalWriteQueue(term)
+  queue.enqueue('first')
+  queue.enqueue('second')
+
+  assert.deepEqual(writes, ['first'])
+  assert.equal(callbacks.length, 1)
+
+  callbacks.shift()()
+  assert.deepEqual(writes, ['first', 'second'])
+  queue.dispose()
+})
+
+test('terminal write queue closes itself when pending output exceeds the byte cap', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalWriteQueue } = loadCompiled('components/terminal/TerminalPane.js')
+  const callbacks = []
+  const reasons = []
+  const term = {
+    write(_data, callback) {
+      callbacks.push(callback)
+    },
+  }
+
+  const queue = createTerminalWriteQueue(term, {
+    maxPendingBytes: 8,
+    writeTimeoutMs: 1000,
+    onBackpressureLimit(reason) {
+      reasons.push(reason)
+    },
+  })
+
+  assert.equal(queue.enqueue('1234'), true)
+  assert.equal(queue.enqueue('56789'), false)
+  assert.deepEqual(reasons, ['overflow'])
+  assert.equal(queue.size(), 0)
+  assert.equal(queue.bytes(), 0)
+  assert.equal(callbacks.length, 1)
+})
+
+test('terminal write queue falls back to safe defaults for invalid option values', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalWriteQueue } = loadCompiled('components/terminal/TerminalPane.js')
+  const callbacks = []
+  const reasons = []
+  const term = {
+    write(_data, callback) {
+      callbacks.push(callback)
+    },
+  }
+
+  const queue = createTerminalWriteQueue(term, {
+    maxPendingBytes: Number.NaN,
+    maxPendingItems: Number.NaN,
+    writeTimeoutMs: Number.NaN,
+    onBackpressureLimit(reason) {
+      reasons.push(reason)
+    },
+  })
+
+  assert.equal(queue.enqueue('1234'), true)
+  assert.equal(queue.enqueue('5678'), true)
+  assert.deepEqual(reasons, [])
+  assert.equal(callbacks.length, 1)
+  queue.dispose()
+})
+
+test('TerminalPane guards websocket lifecycle callbacks against stale sockets', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'terminal', 'TerminalPane.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /const isCurrentSocket = \(\) => !cancelled && !!ws && ws === wsRef\.current/)
+  assert.match(source, /ws\.onopen = \(\) => \{\s*if \(!isCurrentSocket\(\)\) return/)
+  assert.match(source, /ws\.onmessage = \(ev: MessageEvent\) => \{\s*if \(!isCurrentSocket\(\)\) return/)
+})
+
+test('artifact store does not stringify huge payloads to preserve render data', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  const payload = [
+    {
+      id: 'huge-live-log',
+      type: 'logs',
+      title: 'Huge Live Log',
+      timestamp: 1713379200000,
+      data: { markdown: 'x'.repeat(300 * 1024) },
+    },
+  ]
+
+  useArtifactStore.getState().applyArtifacts(payload)
+  const firstArtifact = useArtifactStore.getState().tabs[0]
+  const nextPayload = JSON.parse(JSON.stringify(payload))
+  nextPayload[0].timestamp = 1713379205000
+
+  useArtifactStore.getState().applyArtifacts(nextPayload)
+
+  const secondArtifact = useArtifactStore.getState().tabs[0]
+  assert.notEqual(secondArtifact.data, firstArtifact.data)
+})
+
+test('terminal session detector handles Session marker split across frames', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createSessionIdDetector } = loadCompiled('components/terminal/TerminalPane.js')
+  const detected = []
+  const detect = createSessionIdDetector((sid) => detected.push(sid))
+
+  assert.equal(detect('Hermes Ses'), null)
+  assert.equal(detect('sion: 20260429_091600_abcdef ready'), '20260429_091600_abcdef')
+  assert.deepEqual(detected, ['20260429_091600_abcdef'])
+
+  // Only detect once; later prompt redraws should not re-trigger session changes.
+  assert.equal(detect('Session: 20260429_091601_123456'), null)
+  assert.deepEqual(detected, ['20260429_091600_abcdef'])
+})
+
+test('terminal output filter strips TUI mouse tracking while preserving other modes', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { stripTerminalMouseModeSequences } = loadCompiled('components/terminal/TerminalPane.js')
+  const esc = '\u001b'
+
+  assert.equal(stripTerminalMouseModeSequences(`a${esc}[?1000h${esc}[?1006hb`), 'ab')
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?1000;1006l`), '')
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?1049;1000;1006h`), `${esc}[?1049h`)
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?25lcursor${esc}[?2004h`), `${esc}[?25lcursor${esc}[?2004h`)
+})
+
+test('terminal mouse mode filter handles private mode sequences split across frames', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalMouseModeFilter } = loadCompiled('components/terminal/TerminalPane.js')
+  const esc = '\u001b'
+  const filter = createTerminalMouseModeFilter()
+
+  assert.equal(filter.filter(`before${esc}[?10`), 'before')
+  assert.equal(filter.filter('00;1006hafter'), 'after')
+  assert.equal(filter.filter(`x${esc}[?2`), 'x')
+  assert.equal(filter.filter('5ly'), `${esc}[?25ly`)
+})
+
+test('artifact realtime token ignores stale websocket disconnects', async () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const originalFetch = global.fetch
+  let calls = 0
+  global.fetch = async () => {
+    calls += 1
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return []
+      },
+    }
+  }
+
+  try {
+    const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+    useArtifactStore.getState().reset()
+    useArtifactStore.getState().startPolling()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const initialCalls = calls
+    assert.equal(initialCalls, 1)
+
+    useArtifactStore.getState().setRealtimeUpdatesActive(true, 'new-socket')
+    useArtifactStore.getState().setRealtimeUpdatesActive(false, 'old-socket')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(calls, initialCalls)
+
+    useArtifactStore.getState().setRealtimeUpdatesActive(false, 'new-socket')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(calls, initialCalls + 1)
+  } finally {
+    try {
+      const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+      useArtifactStore.getState().stopPolling()
+    } catch {}
+    if (originalFetch === undefined) delete global.fetch
+    else global.fetch = originalFetch
+  }
+})
+
 test('index.css restores the Google Fonts JetBrains Mono import for terminal parity', () => {
   const indexCssPath = path.join(SOURCE_ROOT, 'index.css')
   const source = fs.readFileSync(indexCssPath, 'utf8')
@@ -393,4 +844,56 @@ test('samaritan theme uses warm palette and sprite artwork', () => {
   assert.equal(THEMES.samaritan.icons.alignmentImageHref || '', '')
   assert.equal(THEMES.samaritan.icons.alignmentAlwaysVisible, true)
   assert.equal(THEMES.samaritan.icons.alignmentBob, true)
+})
+
+test('Hermes dashboard settings panel uses same-origin authenticated proxy URL', () => {
+  const dashboardPath = path.join(SOURCE_ROOT, 'components', 'settings', 'HermesDashboardSettings.tsx')
+  const settingsPanelPath = path.join(SOURCE_ROOT, 'components', 'settings', 'SettingsPanel.tsx')
+  const dashboardSource = fs.readFileSync(dashboardPath, 'utf8')
+  const settingsSource = fs.readFileSync(settingsPanelPath, 'utf8')
+
+  assert.match(dashboardSource, /\/api\/runners\/hermes-dashboard\//)
+  assert.match(dashboardSource, /\/api\/hermes-dashboard\/status/)
+  assert.match(dashboardSource, /\/api\/hermes-dashboard\/start/)
+  assert.ok(!dashboardSource.includes('127.0.0.1'))
+  assert.match(settingsSource, /HermesDashboardSettings/)
+})
+
+test('Hermes dashboard proxy path validator rejects non-same-origin values', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { normalizeDashboardProxyUrl } = loadCompiled('components/settings/HermesDashboardSettings.js')
+  const fallback = '/api/runners/hermes-dashboard/'
+
+  assert.equal(normalizeDashboardProxyUrl('/api/custom-dashboard'), '/api/custom-dashboard/')
+  assert.equal(normalizeDashboardProxyUrl('/api/custom-dashboard/'), '/api/custom-dashboard/')
+
+  for (const unsafe of [
+    'https://evil.example/dashboard',
+    'http://127.0.0.1:9119/',
+    '//evil.example/dashboard',
+    'ws://evil.example/api/ws',
+    'wss://evil.example/api/ws',
+    'javascript:alert(1)',
+    'data:text/html,pwned',
+    'vbscript:msgbox(1)',
+    '/r/hermes-dashboard/',
+    'api/missing-leading-slash',
+    '',
+  ]) {
+    assert.equal(normalizeDashboardProxyUrl(unsafe), fallback, unsafe)
+  }
+})
+
+test('Hermes dashboard settings hides locked proxy details and process metadata', () => {
+  const dashboardPath = path.join(SOURCE_ROOT, 'components', 'settings', 'HermesDashboardSettings.tsx')
+  const dashboardSource = fs.readFileSync(dashboardPath, 'utf8')
+
+  assert.match(dashboardSource, /login required/i)
+  assert.ok(!dashboardSource.includes('iframe source:'), 'dashboard proxy path should not be rendered as plain text')
+  assert.ok(!dashboardSource.includes('status?.pid'), 'dashboard pid should not be rendered')
+  assert.ok(!dashboardSource.includes('status?.host'), 'dashboard host should not be rendered')
+  assert.ok(!dashboardSource.includes('status?.port'), 'dashboard port should not be rendered')
 })

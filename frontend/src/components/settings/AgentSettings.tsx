@@ -27,6 +27,11 @@ interface AgentConfig {
     cwd: string
     timeout: number
   }
+  hermelin: {
+    hermes_launch_mode: 'chat' | 'tui'
+    hermes_cmd_override: boolean
+    effective_hermes_cmd: string
+  }
 }
 
 export interface AgentSettingsHandle {
@@ -50,6 +55,9 @@ function normalizeAgentSettings(raw: unknown): AgentConfig {
   const compression =
     r.compression && typeof r.compression === 'object' ? (r.compression as Record<string, unknown>) : {}
   const terminal = r.terminal && typeof r.terminal === 'object' ? (r.terminal as Record<string, unknown>) : {}
+  const hermelin = r.hermelin && typeof r.hermelin === 'object' ? (r.hermelin as Record<string, unknown>) : {}
+  const launchModeRaw = (hermelin.hermes_launch_mode || 'chat').toString().trim().toLowerCase()
+  const launchMode = launchModeRaw === 'tui' ? 'tui' : 'chat'
 
   return {
     agent: {
@@ -76,6 +84,11 @@ function normalizeAgentSettings(raw: unknown): AgentConfig {
       backend: (terminal.backend || 'local').toString().trim() || 'local',
       cwd: (terminal.cwd || '.').toString().trim() || '.',
       timeout: Math.max(1, Math.min(3600, Number(terminal.timeout ?? 60) || 60)),
+    },
+    hermelin: {
+      hermes_launch_mode: launchMode,
+      hermes_cmd_override: !!hermelin.hermes_cmd_override,
+      effective_hermes_cmd: (hermelin.effective_hermes_cmd || '').toString().trim(),
     },
   }
 }
@@ -287,6 +300,63 @@ export const AgentSettings = ({ locked = false, saving = false, handleRef }: Age
               style={checkboxStyle}
             />
           </div>
+
+          <div style={dividerStyle} />
+
+          {/* Hermes interface */}
+          <div style={sectionHeaderStyle}>Hermes interface</div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Launch mode</div>
+            <div style={{ flex: 1 }} />
+            <select
+              value={draft.hermelin.hermes_launch_mode}
+              disabled={disabled}
+              onChange={(e) => {
+                if (locked) return
+                const v = e.target.value === 'tui' ? 'tui' : 'chat'
+                updateDraft((prev) => ({ ...prev, hermelin: { ...prev.hermelin, hermes_launch_mode: v } }))
+              }}
+              style={selectStyle}
+              title="Choose the Hermes interface used for new terminal sessions"
+            >
+              <option value="chat">Classic Hermes chat</option>
+              <option value="tui">Hermes TUI</option>
+            </select>
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
+            Applies to new terminal sessions. TUI runs <span style={{ color: AMBER[500] }}>hermes chat --tui</span> inside the terminal pane.
+          </div>
+
+          {draft.hermelin.hermes_launch_mode === 'tui' && (
+            <div style={{ marginTop: 6, fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
+              TUI mouse reporting is muted in the browser terminal so normal drag selection and Ctrl/Cmd+C copying work like classic chat.
+            </div>
+          )}
+
+          {draft.hermelin.hermes_cmd_override && (
+            <div
+              style={{
+                marginTop: 8,
+                border: `1px solid ${AMBER[700]}55`,
+                background: `${AMBER[900]}22`,
+                color: AMBER[400],
+                borderRadius: 8,
+                padding: '8px 10px',
+                fontSize: 10,
+                lineHeight: 1.45,
+              }}
+            >
+              Custom HERMELIN_HERMES_CMD override is active; this toggle is saved but the override controls the launched command.
+            </div>
+          )}
+
+          {draft.hermelin.effective_hermes_cmd && (
+            <div style={{ marginTop: 8, fontSize: 10, color: SLATE.muted }} title={draft.hermelin.effective_hermes_cmd}>
+              effective command: <span style={{ color: AMBER[500] }}>{draft.hermelin.effective_hermes_cmd}</span>
+            </div>
+          )}
 
           <div style={dividerStyle} />
 

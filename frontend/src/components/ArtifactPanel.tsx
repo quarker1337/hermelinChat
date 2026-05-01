@@ -231,6 +231,43 @@ function ArtifactTabIcon({ type }: ArtifactTabIconProps) {
   )
 }
 
+export interface ArtifactRuntimeState {
+  expectedLive: boolean
+  hasRuntimeStatus: boolean
+  isLive: boolean
+  isStopped: boolean
+  runnerStatus: string
+}
+
+export function getArtifactRuntimeState(artifact?: ArtifactTab | null): ArtifactRuntimeState {
+  if (!artifact) {
+    return {
+      expectedLive: false,
+      hasRuntimeStatus: false,
+      isLive: false,
+      isStopped: false,
+      runnerStatus: '',
+    }
+  }
+
+  const refreshSeconds = Number(artifact.refresh_seconds || 0)
+  const expectedLive = Boolean(artifact.live) || refreshSeconds > 0
+  const runnerStatus = String(artifact.runner_status || '')
+  const hasRuntimeStatus =
+    Object.prototype.hasOwnProperty.call(artifact, 'runner_active') ||
+    Object.prototype.hasOwnProperty.call(artifact, 'runner_status')
+  const runnerActive = artifact.runner_active === true || runnerStatus === 'running' || runnerStatus === 'running_unverified'
+  const isLive = expectedLive && (hasRuntimeStatus ? runnerActive : true)
+
+  return {
+    expectedLive,
+    hasRuntimeStatus,
+    isLive,
+    isStopped: expectedLive && hasRuntimeStatus && !runnerActive,
+    runnerStatus,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -245,6 +282,7 @@ export default function ArtifactPanel({
   onDeleteArtifact,
 }: ArtifactPanelProps) {
   const activeArtifact = artifacts.find((artifact) => artifact?.id === activeArtifactId) || artifacts[0] || null
+  const activeRuntime = getArtifactRuntimeState(activeArtifact)
 
   const [tabMenuOpen, setTabMenuOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -535,7 +573,7 @@ export default function ArtifactPanel({
 
             <div style={{ flex: 1 }} />
 
-            {(activeArtifact?.live as boolean | undefined) ? (
+            {activeRuntime.isLive ? (
               <span
                 style={{
                   display: 'inline-flex',
@@ -557,6 +595,23 @@ export default function ArtifactPanel({
                   }}
                 />
                 <span style={{ fontSize: 10 }}>live</span>
+              </span>
+            ) : activeRuntime.isStopped ? (
+              <span
+                title={activeRuntime.runnerStatus === 'stale_pid' ? 'runner stopped or stale PID' : 'runner stopped'}
+                style={{
+                  flexShrink: 0,
+                  fontSize: 9,
+                  color: AMBER[300],
+                  border: `1px solid ${AMBER[500]}66`,
+                  background: `${AMBER[900]}22`,
+                  padding: '1px 7px',
+                  borderRadius: 999,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                }}
+              >
+                stopped
               </span>
             ) : null}
 
@@ -663,6 +718,7 @@ export default function ArtifactPanel({
               const active = activeArtifact?.id === artifact?.id
               const title = artifact?.title || artifact?.id || 'untitled'
               const type = String(artifact?.type || 'unknown')
+              const runtime = getArtifactRuntimeState(artifact)
 
               return (
                 <button
@@ -707,7 +763,7 @@ export default function ArtifactPanel({
                     {title}
                   </span>
 
-                  {(artifact?.live as boolean | undefined) ? (
+                  {runtime.isLive ? (
                     <span
                       title="live"
                       style={{
@@ -716,6 +772,18 @@ export default function ArtifactPanel({
                         borderRadius: '50%',
                         background: SLATE.success,
                         animation: 'artifactLivePulse 2s ease infinite',
+                        flexShrink: 0,
+                      }}
+                    />
+                  ) : runtime.isStopped ? (
+                    <span
+                      title={runtime.runnerStatus === 'stale_pid' ? 'runner stopped or stale PID' : 'runner stopped'}
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        background: AMBER[400],
+                        opacity: 0.7,
                         flexShrink: 0,
                       }}
                     />
@@ -830,7 +898,11 @@ export default function ArtifactPanel({
             updated {formatTimeAgo(activeArtifact?.timestamp)}
           </span>
           <span>
-            {(activeArtifact?.live as boolean | undefined) ? `auto-refresh: ${Math.max(0, Number(activeArtifact?.refresh_seconds || 0))}s` : 'manual refresh'}
+            {activeRuntime.isLive
+              ? `auto-refresh: ${Math.max(0, Number(activeArtifact?.refresh_seconds || 0))}s`
+              : activeRuntime.isStopped
+                ? 'runner stopped'
+                : 'manual refresh'}
           </span>
         </div>
       ) : null}

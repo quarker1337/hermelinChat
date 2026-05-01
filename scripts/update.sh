@@ -143,28 +143,37 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
   # shellcheck disable=SC1091
   source "$VENV_ACTIVATE"
 
-  # Some environments (notably uv-created venvs) may not include pip.
-  if ! python -m pip --version >/dev/null 2>&1; then
-    echo "==> pip missing in .venv; bootstrapping with ensurepip"
-    python -m ensurepip --upgrade >/dev/null 2>&1 || true
+  USE_PIP=0
+  if command -v uv >/dev/null 2>&1; then
+    echo "==> using uv pip for backend deps"
+    if ! uv pip install -e .; then
+      echo "WARNING: uv pip install failed; falling back to python -m pip" >&2
+      USE_PIP=1
+    fi
+  else
+    USE_PIP=1
   fi
 
-  if python -m pip --version >/dev/null 2>&1; then
-    python -m pip install -U pip
-    python -m pip install -e .
-  elif command -v uv >/dev/null 2>&1; then
-    echo "==> pip still unavailable; using uv pip"
-    uv pip install -e .
-  else
-    echo "ERROR: pip is missing in .venv and could not be bootstrapped." >&2
-    echo "Fix options:" >&2
-    echo "  - Recreate the venv: rm -rf .venv && python3 -m venv .venv" >&2
-    echo "  - Install the required system package(s), then rerun ./scripts/update.sh (or rerun ./scripts/install.sh)." >&2
-    if install_cmd="$(hermelin_python_venv_install_command)"; then
-      echo "    Suggested command: ${install_cmd}" >&2
+  if [[ "$USE_PIP" -eq 1 ]]; then
+    # Some environments (notably uv-created venvs) may not include pip.
+    if ! python -m pip --version >/dev/null 2>&1; then
+      echo "==> pip missing in .venv; bootstrapping with ensurepip"
+      python -m ensurepip --upgrade >/dev/null 2>&1 || true
     fi
-    echo "  - Or install uv (https://docs.astral.sh/uv/) and rerun" >&2
-    exit 1
+
+    if python -m pip --version >/dev/null 2>&1; then
+      python -m pip install -e .
+    else
+      echo "ERROR: pip is missing in .venv and could not be bootstrapped." >&2
+      echo "Fix options:" >&2
+      echo "  - Recreate the venv: rm -rf $VENV_DIR && python3 -m venv $VENV_DIR" >&2
+      echo "  - Install the required system package(s), then rerun ./scripts/update.sh (or rerun ./scripts/install.sh)." >&2
+      if install_cmd="$(hermelin_python_venv_install_command)"; then
+        echo "    Suggested command: ${install_cmd}" >&2
+      fi
+      echo "  - Or install uv (https://docs.astral.sh/uv/) and rerun" >&2
+      exit 1
+    fi
   fi
 fi
 
