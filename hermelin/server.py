@@ -494,6 +494,66 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return False
         return verify_session_token(token=token, secret=cookie_secret, revoked_jtis=_revoked_jtis)
 
+    def _default_origin_port(scheme: str) -> int | None:
+        if scheme == "https":
+            return 443
+        if scheme == "http":
+            return 80
+        return None
+
+    def _host_port_for_origin(host_header: str, scheme: str) -> tuple[str, int | None] | None:
+        raw = str(host_header or "").split(",", 1)[0].strip()
+        if not raw:
+            return None
+        try:
+            parsed = urlparse(f"//{raw}")
+            hostname = (parsed.hostname or "").strip().lower()
+            port = parsed.port if parsed.port is not None else _default_origin_port(scheme)
+        except Exception:
+            return None
+        if not hostname:
+            return None
+        return hostname, port
+
+    def _request_scheme_for_origin(scheme: str) -> str:
+        raw = str(scheme or "").strip().lower()
+        if raw == "wss":
+            return "https"
+        if raw == "ws":
+            return "http"
+        return raw
+
+    def _same_origin_request(origin: str | None, *, host: str, scheme: str) -> bool:
+        raw_origin = str(origin or "").strip()
+        if not raw_origin:
+            return True
+        try:
+            parsed = urlparse(raw_origin)
+            origin_scheme = parsed.scheme.lower()
+            origin_host = (parsed.hostname or "").strip().lower()
+            origin_port = parsed.port if parsed.port is not None else _default_origin_port(origin_scheme)
+        except Exception:
+            return False
+        request_scheme = _request_scheme_for_origin(scheme)
+        if origin_scheme not in {"http", "https"} or origin_scheme != request_scheme:
+            return False
+        expected = _host_port_for_origin(host, request_scheme)
+        if expected is None or not origin_host:
+            return False
+        return (origin_host, origin_port) == expected
+
+    def _dashboard_origin_forbidden_response(request: Request) -> JSONResponse | None:
+        if _same_origin_request(request.headers.get("origin"), host=request.headers.get("host", ""), scheme=request.url.scheme):
+            return None
+        return JSONResponse({"detail": "forbidden"}, status_code=403)
+
+    def _dashboard_websocket_origin_allowed(websocket: WebSocket) -> bool:
+        return _same_origin_request(
+            websocket.headers.get("origin"),
+            host=websocket.headers.get("host", ""),
+            scheme=websocket.url.scheme,
+        )
+
     def _is_public_path(path: str) -> bool:
         # SPA + static: public. Guard /api (except /api/auth/* and default artifact assets).
         if not path.startswith("/api"):
@@ -685,6 +745,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         # Keep hermelinChat auth material scoped to hermelinChat.
         "cookie",
         "authorization",
+        # Treat hermelinChat as the only CORS authority for the embedded
+        # dashboard. The loopback dashboard's localhost CORS policy must not
+        # bleed through the authenticated proxy boundary.
+        "origin",
         # Do not let a browser/client spoof proxy context into the loopback
         # dashboard. hermelinChat sets canonical forwarded headers below.
         "forwarded",
@@ -698,6 +762,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             if lk in _RUNNER_HOP_BY_HOP_HEADERS:
                 continue
             if lk in _DASHBOARD_STRIP_REQUEST_HEADERS or lk.startswith("x-forwarded-"):
+                continue
+            if lk.startswith("access-control-request-"):
                 continue
             if lk == "host":
                 continue
@@ -715,6 +781,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 continue
             if lk in _RUNNER_STRIP_RESPONSE_HEADERS:
                 continue
+            if lk.startswith("access-control-") or lk == "timing-allow-origin":
+                continue
             if lk == "content-length":
                 continue
             if lk == "location":
@@ -724,13 +792,6 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     _DASHBOARD_PUBLIC_ERROR = "Hermes dashboard unavailable. Check hermelinChat server logs for details."
     _DASHBOARD_THEME_SYNC_ERROR = "failed to sync dashboard theme"
-
-    def _dashboard_public_int(value: object) -> int | None:
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, int) and value > 0:
-            return value
-        return None
 
     def _dashboard_public_float(value: object) -> float | None:
         if isinstance(value, bool):
@@ -753,9 +814,6 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "ok": bool(raw.get("ok", True)),
             "enabled": bool(raw.get("enabled", False)),
             "running": bool(raw.get("running", False)),
-            "host": "127.0.0.1",
-            "port": _dashboard_public_int(raw.get("port")),
-            "pid": _dashboard_public_int(raw.get("pid")),
             "base_path": dashboard_base_path,
             "proxy_path": f"{dashboard_base_path}/",
             "tui": bool(raw.get("tui", False)),
@@ -794,15 +852,24 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return JSONResponse({"detail": _DASHBOARD_THEME_SYNC_ERROR}, status_code=500)
 
     @app.get("/api/hermes-dashboard/status")
-    async def api_hermes_dashboard_status():
+    async def api_hermes_dashboard_status(request: Request):
+        blocked = _dashboard_origin_forbidden_response(request)
+        if blocked is not None:
+            return blocked
         return _dashboard_public_status(dashboard_manager.status())
 
     @app.post("/api/hermes-dashboard/theme")
-    async def api_hermes_dashboard_theme(payload: dict | None = Body(None)):
+    async def api_hermes_dashboard_theme(request: Request, payload: dict | None = Body(None)):
+        blocked = _dashboard_origin_forbidden_response(request)
+        if blocked is not None:
+            return blocked
         return await _sync_dashboard_theme_response(payload)
 
     @app.post("/api/hermes-dashboard/start")
-    async def api_hermes_dashboard_start(payload: dict | None = Body(None)):
+    async def api_hermes_dashboard_start(request: Request, payload: dict | None = Body(None)):
+        blocked = _dashboard_origin_forbidden_response(request)
+        if blocked is not None:
+            return blocked
         theme_sync = await _sync_dashboard_theme_response(payload)
         if isinstance(theme_sync, JSONResponse):
             return theme_sync
@@ -810,7 +877,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         return {**status, "dashboard_theme": theme_sync.get("dashboard_theme"), "theme_sync": theme_sync}
 
     @app.post("/api/hermes-dashboard/restart")
-    async def api_hermes_dashboard_restart(payload: dict | None = Body(None)):
+    async def api_hermes_dashboard_restart(request: Request, payload: dict | None = Body(None)):
+        blocked = _dashboard_origin_forbidden_response(request)
+        if blocked is not None:
+            return blocked
         theme_sync = await _sync_dashboard_theme_response(payload)
         if isinstance(theme_sync, JSONResponse):
             return theme_sync
@@ -818,12 +888,18 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         return {**status, "dashboard_theme": theme_sync.get("dashboard_theme"), "theme_sync": theme_sync}
 
     @app.post("/api/hermes-dashboard/stop")
-    async def api_hermes_dashboard_stop():
+    async def api_hermes_dashboard_stop(request: Request):
+        blocked = _dashboard_origin_forbidden_response(request)
+        if blocked is not None:
+            return blocked
         return _dashboard_public_status(await dashboard_manager.stop())
 
     @app.api_route(dashboard_base_path, methods=_DASHBOARD_PROXY_METHODS)
     @app.api_route(f"{dashboard_base_path}/{{path:path}}", methods=_DASHBOARD_PROXY_METHODS)
     async def hermes_dashboard_proxy(request: Request, path: str = ""):
+        blocked = _dashboard_origin_forbidden_response(request)
+        if blocked is not None:
+            return blocked
         if request.method == "OPTIONS":
             return Response(status_code=204)
 
@@ -936,6 +1012,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             if not _is_authenticated(token):
                 await websocket.close(code=1008)
                 return
+
+        if not _dashboard_websocket_origin_allowed(websocket):
+            await websocket.close(code=1008)
+            return
 
         status = await dashboard_manager.ensure_started()
         upstream = dashboard_manager.upstream()

@@ -858,3 +858,41 @@ test('Hermes dashboard settings panel uses same-origin authenticated proxy URL',
   assert.ok(!dashboardSource.includes('127.0.0.1'))
   assert.match(settingsSource, /HermesDashboardSettings/)
 })
+
+test('Hermes dashboard proxy path validator rejects non-same-origin values', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { normalizeDashboardProxyUrl } = loadCompiled('components/settings/HermesDashboardSettings.js')
+  const fallback = '/api/runners/hermes-dashboard/'
+
+  assert.equal(normalizeDashboardProxyUrl('/api/custom-dashboard'), '/api/custom-dashboard/')
+  assert.equal(normalizeDashboardProxyUrl('/api/custom-dashboard/'), '/api/custom-dashboard/')
+
+  for (const unsafe of [
+    'https://evil.example/dashboard',
+    'http://127.0.0.1:9119/',
+    '//evil.example/dashboard',
+    'ws://evil.example/api/ws',
+    'wss://evil.example/api/ws',
+    'javascript:alert(1)',
+    'data:text/html,pwned',
+    '/r/hermes-dashboard/',
+    'api/missing-leading-slash',
+    '',
+  ]) {
+    assert.equal(normalizeDashboardProxyUrl(unsafe), fallback, unsafe)
+  }
+})
+
+test('Hermes dashboard settings hides locked proxy details and process metadata', () => {
+  const dashboardPath = path.join(SOURCE_ROOT, 'components', 'settings', 'HermesDashboardSettings.tsx')
+  const dashboardSource = fs.readFileSync(dashboardPath, 'utf8')
+
+  assert.match(dashboardSource, /login required/i)
+  assert.ok(!dashboardSource.includes('iframe source:'), 'dashboard proxy path should not be rendered as plain text')
+  assert.ok(!dashboardSource.includes('status?.pid'), 'dashboard pid should not be rendered')
+  assert.ok(!dashboardSource.includes('status?.host'), 'dashboard host should not be rendered')
+  assert.ok(!dashboardSource.includes('status?.port'), 'dashboard port should not be rendered')
+})

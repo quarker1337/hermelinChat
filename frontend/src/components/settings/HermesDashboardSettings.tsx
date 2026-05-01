@@ -13,9 +13,6 @@ interface DashboardStatus {
   ok?: boolean
   enabled?: boolean
   running?: boolean
-  host?: string
-  port?: number | null
-  pid?: number | null
   base_path?: string
   proxy_path?: string
   tui?: boolean
@@ -69,8 +66,25 @@ async function postDashboardAction(url: string, uiTheme: string): Promise<Dashbo
   return data as DashboardStatus
 }
 
-function normalizeDashboardProxyUrl(value?: string): string {
-  const raw = (value || DEFAULT_HERMES_DASHBOARD_PROXY_URL).trim() || DEFAULT_HERMES_DASHBOARD_PROXY_URL
+export function normalizeDashboardProxyUrl(value?: string): string {
+  const raw = (value || '').trim()
+  if (!raw) return DEFAULT_HERMES_DASHBOARD_PROXY_URL
+
+  const lower = raw.toLowerCase()
+  if (
+    lower.startsWith('http://') ||
+    lower.startsWith('https://') ||
+    lower.startsWith('//') ||
+    lower.startsWith('ws://') ||
+    lower.startsWith('wss://') ||
+    lower.startsWith('javascript:') ||
+    lower.startsWith('data:')
+  ) {
+    return DEFAULT_HERMES_DASHBOARD_PROXY_URL
+  }
+
+  if (!raw.startsWith('/api/')) return DEFAULT_HERMES_DASHBOARD_PROXY_URL
+  if (raw.includes('\\') || raw.includes('?') || raw.includes('#')) return DEFAULT_HERMES_DASHBOARD_PROXY_URL
   return raw.endsWith('/') ? raw : `${raw}/`
 }
 
@@ -171,6 +185,26 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
     opacity: active && !locked ? 1 : 0.55,
   })
 
+  if (locked) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div
+          style={{
+            border: `1px solid ${SLATE.border}`,
+            background: SLATE.elevated,
+            borderRadius: 10,
+            padding: '8px 10px',
+            color: SLATE.muted,
+            fontSize: 11,
+            lineHeight: 1.45,
+          }}
+        >
+          login required to manage the native Hermes Agent dashboard.
+        </div>
+      </div>
+    )
+  }
+
   const running = !!status?.running
   const enabled = status?.enabled !== false
   const lastError = error || status?.last_error || ''
@@ -196,11 +230,9 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
         }}
       >
         <div style={{ color: running ? SLATE.success : SLATE.muted, fontSize: 11, fontWeight: 700 }}>
-          {locked ? 'locked' : loading ? 'checking...' : running ? 'running' : enabled ? 'stopped' : 'disabled'}
+          {loading ? 'checking...' : running ? 'running' : enabled ? 'stopped' : 'disabled'}
         </div>
         <div style={{ flex: 1 }} />
-        {status?.pid && <div style={{ color: SLATE.muted, fontSize: 10 }}>pid {status.pid}</div>}
-        {status?.host && status?.port && <div style={{ color: SLATE.muted, fontSize: 10 }}>{status.host}:{status.port}</div>}
       </div>
 
       {lastError && (
@@ -262,14 +294,11 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
         </button>
       </div>
 
-      <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-        iframe source: <span style={{ color: AMBER[500] }}>{dashboardProxyUrl}</span>
-        {matchedDashboardTheme && (
-          <>
-            {' · '}dashboard theme: <span style={{ color: AMBER[500] }}>{matchedDashboardTheme}</span>
-          </>
-        )}
-      </div>
+      {matchedDashboardTheme && (
+        <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
+          dashboard theme: <span style={{ color: AMBER[500] }}>{matchedDashboardTheme}</span>
+        </div>
+      )}
 
       {running && showFrame && (
         // Same-origin on purpose: this is the first-party Hermes config UI behind hermelinChat auth, not an untrusted artifact sandbox.

@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from hermelin.config import HermelinConfig
 from hermelin.runners import discover_runner_upstream
@@ -248,8 +250,9 @@ class _LeakyDashboardManager(_FakeDashboardManager):
 
 
 class _CaptureDashboardHttpClient:
-    def __init__(self):
+    def __init__(self, response=None):
         self.requests = []
+        self.response = response or _FakeDashboardUpstreamResponse()
 
     def build_request(self, *, method, url, headers, content):
         captured = {
@@ -262,19 +265,21 @@ class _CaptureDashboardHttpClient:
         return httpx.Request(method, url, headers=headers, content=content)
 
     async def send(self, request, stream=False):
-        return _FakeDashboardUpstreamResponse()
+        return self.response
 
 
 class _FakeDashboardUpstreamResponse:
-    status_code = 204
-    headers = httpx.Headers({"content-type": "application/octet-stream"})
+    def __init__(self, status_code=204, headers=None, body=b""):
+        self.status_code = status_code
+        self.headers = httpx.Headers(headers or {"content-type": "application/octet-stream"})
+        self.body = body
 
     async def aiter_raw(self):
-        if False:
-            yield b""
+        if self.body:
+            yield self.body
 
     async def aread(self):
-        return b""
+        return self.body
 
     async def aclose(self):
         return None
@@ -306,10 +311,10 @@ class HermesDashboardEndpointTests(unittest.TestCase):
             stop_route = _route_for_path(app, "/api/hermes-dashboard/stop")
             proxy_route = _route_for_path(app, f"{DASHBOARD_BASE_PATH}" + "/{path:path}")
 
-            status = asyncio.run(status_route.endpoint())
-            started = asyncio.run(start_route.endpoint())
-            restarted = asyncio.run(restart_route.endpoint())
-            stopped = asyncio.run(stop_route.endpoint())
+            status = asyncio.run(_asgi_request(app, "GET", "/api/hermes-dashboard/status")).json()
+            started = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/start")).json()
+            restarted = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/restart")).json()
+            stopped = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/stop")).json()
 
         self.assertEqual(_FakeDashboardManager.instances[0].kwargs["base_path"], DASHBOARD_BASE_PATH)
         self.assertEqual(proxy_route.path, f"{DASHBOARD_BASE_PATH}" + "/{path:path}")
@@ -354,6 +359,27 @@ class HermesDashboardEndpointTests(unittest.TestCase):
             proxied.json()["detail"],
             "Hermes dashboard unavailable. Check hermelinChat server logs for details.",
         )
+
+    def test_dashboard_public_status_does_not_expose_process_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
+                app = create_app(config)
+
+            response = asyncio.run(_asgi_request(app, "GET", "/api/hermes-dashboard/status"))
+
+        body = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("host", body)
+        self.assertNotIn("port", body)
+        self.assertNotIn("pid", body)
 
     def test_dashboard_theme_sync_errors_do_not_expose_exception_details(self):
         secret = "secret stack detail from /tmp/private/dashboard-theme"
@@ -480,6 +506,122 @@ class HermesDashboardEndpointTests(unittest.TestCase):
         self.assertNotIn("x-real-ip", headers)
         self.assertNotIn("cookie", headers)
         self.assertNotIn("authorization", headers)
+
+    def test_dashboard_proxy_strips_cors_request_and_response_headers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
+                app = create_app(config)
+            capture_client = _CaptureDashboardHttpClient(
+                response=_FakeDashboardUpstreamResponse(
+                    headers={
+                        "content-type": "application/octet-stream",
+                        "access-control-allow-origin": "https://evil.example",
+                        "access-control-allow-credentials": "true",
+                        "access-control-expose-headers": "X-Secret-Dashboard-Header",
+                        "timing-allow-origin": "*",
+                    }
+                )
+            )
+            app.state.httpx_client = capture_client
+
+            response = asyncio.run(
+                _asgi_request(
+                    app,
+                    "GET",
+                    f"{DASHBOARD_BASE_PATH}/api/status",
+                    headers={
+                        "Origin": "https://chat.example",
+                        "Access-Control-Request-Method": "POST",
+                        "Access-Control-Request-Headers": "X-Hermes-Session-Token",
+                    },
+                )
+            )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(len(capture_client.requests), 1)
+        upstream_headers = {k.lower(): v for k, v in capture_client.requests[0]["headers"].items()}
+        response_headers = {k.lower(): v for k, v in response.headers.items()}
+        self.assertNotIn("origin", upstream_headers)
+        self.assertNotIn("access-control-request-method", upstream_headers)
+        self.assertNotIn("access-control-request-headers", upstream_headers)
+        self.assertNotIn("access-control-allow-origin", response_headers)
+        self.assertNotIn("access-control-allow-credentials", response_headers)
+        self.assertNotIn("access-control-expose-headers", response_headers)
+        self.assertNotIn("timing-allow-origin", response_headers)
+
+    def test_dashboard_http_endpoints_reject_cross_site_origin_before_starting_dashboard(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
+                app = create_app(config)
+            capture_client = _CaptureDashboardHttpClient()
+            app.state.httpx_client = capture_client
+
+            cross_site_start = asyncio.run(
+                _asgi_request(app, "POST", "/api/hermes-dashboard/start", headers={"Origin": "https://evil.example"})
+            )
+            cross_site_proxy = asyncio.run(
+                _asgi_request(
+                    app,
+                    "GET",
+                    f"{DASHBOARD_BASE_PATH}/api/status",
+                    headers={"Origin": "https://evil.example"},
+                )
+            )
+            same_origin_status = asyncio.run(
+                _asgi_request(app, "GET", "/api/hermes-dashboard/status", headers={"Origin": "https://chat.example"})
+            )
+            missing_origin_status = asyncio.run(_asgi_request(app, "GET", "/api/hermes-dashboard/status"))
+            manager = _FakeDashboardManager.instances[0]
+
+        self.assertEqual(cross_site_start.status_code, 403)
+        self.assertEqual(cross_site_proxy.status_code, 403)
+        self.assertEqual(same_origin_status.status_code, 200)
+        self.assertEqual(missing_origin_status.status_code, 200)
+        self.assertFalse(manager.started)
+        self.assertEqual(manager.start_count, 0)
+        self.assertEqual(capture_client.requests, [])
+
+    def test_dashboard_websocket_rejects_cross_site_origin_before_starting_dashboard(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+                allowed_ips="*",
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
+                app = create_app(config)
+
+            with TestClient(app, base_url="https://chat.example") as client:
+                with self.assertRaises(WebSocketDisconnect) as cm:
+                    with client.websocket_connect(
+                        f"{DASHBOARD_BASE_PATH}/api/ws", headers={"Origin": "https://evil.example"}
+                    ) as ws:
+                        ws.receive_text()
+            manager = _FakeDashboardManager.instances[0]
+
+        self.assertEqual(cm.exception.code, 1008)
+        self.assertFalse(manager.started)
+        self.assertEqual(manager.start_count, 0)
 
     def test_dashboard_proxy_does_not_auto_restart_after_stop(self):
         with tempfile.TemporaryDirectory() as tmpdir:
