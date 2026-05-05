@@ -644,7 +644,22 @@ test('terminal output filter strips TUI mouse tracking while preserving other mo
   assert.equal(stripTerminalMouseModeSequences(`a${esc}[?1000h${esc}[?1006hb`), 'ab')
   assert.equal(stripTerminalMouseModeSequences(`${esc}[?1000;1006l`), '')
   assert.equal(stripTerminalMouseModeSequences(`${esc}[?1049;1000;1006h`), `${esc}[?1049h`)
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?1007h`), `${esc}[?1007h`)
   assert.equal(stripTerminalMouseModeSequences(`${esc}[?25lcursor${esc}[?2004h`), `${esc}[?25lcursor${esc}[?2004h`)
+})
+
+test('terminal TUI wheel helper maps alternate-screen scroll intent to page keys', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { normalizeTerminalWheelDeltaRows, terminalWheelRowsToPageSequence } = loadCompiled('components/terminal/TerminalPane.js')
+  const esc = '\u001b'
+
+  assert.equal(terminalWheelRowsToPageSequence(normalizeTerminalWheelDeltaRows(48, 0, 30)), `${esc}[6~`)
+  assert.equal(terminalWheelRowsToPageSequence(normalizeTerminalWheelDeltaRows(-3, 1, 30)), `${esc}[5~`)
+  assert.equal(terminalWheelRowsToPageSequence(normalizeTerminalWheelDeltaRows(2, 1, 30)), null)
+  assert.equal(terminalWheelRowsToPageSequence(normalizeTerminalWheelDeltaRows(1, 2, 30)), `${esc}[6~`)
 })
 
 test('terminal mouse mode filter handles private mode sequences split across frames', () => {
@@ -846,7 +861,7 @@ test('samaritan theme uses warm palette and sprite artwork', () => {
   assert.equal(THEMES.samaritan.icons.alignmentBob, true)
 })
 
-test('Hermes dashboard settings panel uses same-origin authenticated proxy URL', () => {
+test('Hermes dashboard settings panel exposes same-origin dashboard as an external link', () => {
   const dashboardPath = path.join(SOURCE_ROOT, 'components', 'settings', 'HermesDashboardSettings.tsx')
   const settingsPanelPath = path.join(SOURCE_ROOT, 'components', 'settings', 'SettingsPanel.tsx')
   const dashboardSource = fs.readFileSync(dashboardPath, 'utf8')
@@ -855,8 +870,27 @@ test('Hermes dashboard settings panel uses same-origin authenticated proxy URL',
   assert.match(dashboardSource, /\/api\/runners\/hermes-dashboard\//)
   assert.match(dashboardSource, /\/api\/hermes-dashboard\/status/)
   assert.match(dashboardSource, /\/api\/hermes-dashboard\/start/)
+  assert.match(dashboardSource, /window\.open\(dashboardProxyUrl, '_blank', 'noopener,noreferrer'\)/)
+  assert.ok(!dashboardSource.includes('<iframe'), 'settings panel should not embed the native dashboard')
+  assert.ok(!dashboardSource.includes('frameNonce'), 'dashboard card should not keep iframe reload state')
   assert.ok(!dashboardSource.includes('127.0.0.1'))
   assert.match(settingsSource, /HermesDashboardSettings/)
+})
+
+test('integrated settings no longer exposes stale Hermes model or API-key editors', () => {
+  const settingsPanelPath = path.join(SOURCE_ROOT, 'components', 'settings', 'SettingsPanel.tsx')
+  const agentSettingsPath = path.join(SOURCE_ROOT, 'components', 'settings', 'AgentSettings.tsx')
+  const settingsSource = fs.readFileSync(settingsPanelPath, 'utf8')
+  const agentSource = fs.readFileSync(agentSettingsPath, 'utf8')
+
+  assert.ok(!fs.existsSync(path.join(SOURCE_ROOT, 'components', 'settings', 'ModelSettings.tsx')))
+  assert.ok(!fs.existsSync(path.join(SOURCE_ROOT, 'components', 'settings', 'KeySettings.tsx')))
+  assert.ok(!settingsSource.includes('ModelSettings'))
+  assert.ok(!settingsSource.includes('KeySettings'))
+  assert.ok(!settingsSource.includes('API-Keys'))
+  assert.ok(!agentSource.includes('Reasoning effort'))
+  assert.ok(!agentSource.includes('Summary model'))
+  assert.match(agentSource, /native Hermes Dashboard link/i)
 })
 
 test('Hermes dashboard proxy path validator rejects non-same-origin values', () => {

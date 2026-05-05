@@ -598,16 +598,6 @@ export function AppShell() {
         <SettingsPanel
           onClose={closeSettings}
           locked={locked}
-          defaultModel={formatModelLabel(runtimeInfo.defaultModel) || ''}
-          onModelSaved={(m: string) => {
-            useSessionStore.setState((s) => ({
-              runtimeInfo: {
-                ...s.runtimeInfo,
-                loading: false,
-                defaultModel: m || null,
-              },
-            }))
-          }}
           uiPrefs={prefs}
           onUiPrefsChange={useUiPrefsStore.getState().update}
           onSaved={() => {

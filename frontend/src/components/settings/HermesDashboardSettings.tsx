@@ -80,8 +80,6 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [frameNonce, setFrameNonce] = useState(0)
-  const [showFrame, setShowFrame] = useState(true)
 
   const refresh = useCallback(async () => {
     if (locked) {
@@ -129,7 +127,6 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
         if (cancelled) return
         setThemeSync(next)
         setStatus((prev) => (prev ? { ...prev, dashboard_theme: next.dashboard_theme, theme_sync: next } : prev))
-        if (next.changed) setFrameNonce((n) => n + 1)
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'dashboard theme sync failed')
@@ -141,14 +138,13 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
   }, [locked, uiTheme])
 
   const runAction = useCallback(
-    async (url: string, reloadFrame = false) => {
+    async (url: string) => {
       if (locked || busy) return
       setBusy(true)
       setError('')
       try {
         const next = await postDashboardAction(url, uiTheme)
         setStatus(next)
-        if (reloadFrame) setFrameNonce((n) => n + 1)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'dashboard action failed')
       } finally {
@@ -200,7 +196,7 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-        Native Hermes Agent dashboard, started on loopback and exposed through hermelinChat auth. hermelinChat also installs matching native dashboard themes and keeps <span style={{ color: AMBER[500] }}>dashboard.theme</span> synced to the selected UI theme.
+        Native Hermes Agent dashboard controls. hermelinChat starts it on loopback and exposes it through same-origin auth; open it in a separate tab for the full maintained Hermes settings UI.
       </div>
 
       <div
@@ -240,7 +236,7 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
         <button
           type="button"
           disabled={locked || busy || !enabled}
-          onClick={() => runAction(HERMES_DASHBOARD_START_URL, true)}
+          onClick={() => runAction(HERMES_DASHBOARD_START_URL)}
           style={buttonStyle(!running && !busy && enabled)}
         >
           {busy ? 'working...' : running ? 'started' : 'start'}
@@ -248,7 +244,7 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
         <button
           type="button"
           disabled={locked || busy || !enabled}
-          onClick={() => runAction(HERMES_DASHBOARD_RESTART_URL, true)}
+          onClick={() => runAction(HERMES_DASHBOARD_RESTART_URL)}
           style={buttonStyle(!busy && enabled)}
         >
           restart
@@ -256,7 +252,7 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
         <button
           type="button"
           disabled={locked || busy || !enabled}
-          onClick={() => runAction(HERMES_DASHBOARD_STOP_URL, true)}
+          onClick={() => runAction(HERMES_DASHBOARD_STOP_URL)}
           style={buttonStyle(running && !busy && enabled)}
         >
           stop
@@ -267,39 +263,20 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
           onClick={() => window.open(dashboardProxyUrl, '_blank', 'noopener,noreferrer')}
           style={buttonStyle(running)}
         >
-          open tab
-        </button>
-        <button
-          type="button"
-          disabled={locked || !running}
-          onClick={() => setShowFrame((v) => !v)}
-          style={buttonStyle(running)}
-        >
-          {showFrame ? 'hide frame' : 'show frame'}
+          open dashboard
         </button>
       </div>
+
+      {!running && enabled && (
+        <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
+          Start the dashboard first, then use the link to open the maintained Hermes settings and model/provider UI in a new tab.
+        </div>
+      )}
 
       {matchedDashboardTheme && (
         <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
           dashboard theme: <span style={{ color: AMBER[500] }}>{matchedDashboardTheme}</span>
         </div>
-      )}
-
-      {running && showFrame && (
-        // Same-origin on purpose: this is the first-party Hermes config UI behind hermelinChat auth, not an untrusted artifact sandbox.
-        <iframe
-          key={frameNonce}
-          title="Hermes Agent Dashboard"
-          src={dashboardProxyUrl}
-          style={{
-            width: '100%',
-            height: 'min(68vh, 720px)',
-            minHeight: 520,
-            border: `1px solid ${SLATE.border}`,
-            borderRadius: 12,
-            background: '#05070b',
-          }}
-        />
       )}
     </div>
   )

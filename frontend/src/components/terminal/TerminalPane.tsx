@@ -50,10 +50,10 @@ const TERMINAL_MOUSE_MODE_IDS = new Set([
   '1001',
   '1002',
   '1003',
-  // Mouse encoding / wheel variants commonly paired with the modes above.
+  // Mouse tracking encodings commonly paired with the modes above. Do not
+  // strip 1007: that is xterm's alternate-scroll mode, not pointer tracking.
   '1005',
   '1006',
-  '1007',
   '1015',
   '1016',
 ])
@@ -83,6 +83,22 @@ function splitTrailingIncompletePrivateModeSequence(text: string): readonly [str
   }
 
   return [text, '']
+}
+
+const TERMINAL_PAGE_UP_SEQUENCE = '\u001b[5~'
+const TERMINAL_PAGE_DOWN_SEQUENCE = '\u001b[6~'
+const TUI_WHEEL_PAGE_THRESHOLD_ROWS = 3
+
+export function normalizeTerminalWheelDeltaRows(deltaY: number, deltaMode: number, terminalRows: number): number {
+  if (!Number.isFinite(deltaY) || deltaY === 0) return 0
+  if (deltaMode === 1) return deltaY
+  if (deltaMode === 2) return deltaY * Math.max(1, terminalRows || 1)
+  return deltaY / 16
+}
+
+export function terminalWheelRowsToPageSequence(deltaRows: number): string | null {
+  if (!Number.isFinite(deltaRows) || Math.abs(deltaRows) < TUI_WHEEL_PAGE_THRESHOLD_ROWS) return null
+  return deltaRows < 0 ? TERMINAL_PAGE_UP_SEQUENCE : TERMINAL_PAGE_DOWN_SEQUENCE
 }
 
 export function createTerminalMouseModeFilter() {
@@ -313,6 +329,7 @@ function TerminalPane() {
 
     let disposed = false
     let removeCopyListener: (() => void) | null = null
+    let removeWheelListener: (() => void) | null = null
 
     const start = async () => {
       // Wait for webfonts before opening xterm, otherwise it can measure the grid
@@ -452,6 +469,32 @@ function TerminalPane() {
       container.addEventListener('copy', handleTerminalCopy)
       removeCopyListener = () => container.removeEventListener('copy', handleTerminalCopy)
 
+      // Hermes TUI draws history inside an alternate-screen app. In that mode
+      // the browser/xterm scrollback has nothing to move, while PageUp/PageDown
+      // already scroll the TUI history. Translate wheel intent to those keys so
+      // mouse wheels/trackpads work without re-enabling TUI pointer capture.
+      let tuiWheelRows = 0
+      const handleTerminalWheel = (ev: WheelEvent) => {
+        if (ev.ctrlKey || ev.metaKey) return
+        if (term.buffer.active.type !== 'alternate') return
+
+        const nextRows = normalizeTerminalWheelDeltaRows(ev.deltaY, ev.deltaMode, term.rows)
+        if (!nextRows) return
+        if (tuiWheelRows && Math.sign(tuiWheelRows) !== Math.sign(nextRows)) tuiWheelRows = 0
+        tuiWheelRows += nextRows
+
+        const sequence = terminalWheelRowsToPageSequence(tuiWheelRows)
+        if (!sequence) return
+
+        tuiWheelRows = 0
+        ev.preventDefault()
+        ev.stopPropagation()
+        term.input(sequence, true)
+        refocusTerminalSoon()
+      }
+      container.addEventListener('wheel', handleTerminalWheel, { passive: false, capture: true })
+      removeWheelListener = () => container.removeEventListener('wheel', handleTerminalWheel, { capture: true })
+
       term.attachCustomKeyEventHandler((ev) => {
         if (ev.type !== 'keydown') return true
 
@@ -527,6 +570,8 @@ function TerminalPane() {
       try {
         removeCopyListener?.()
         removeCopyListener = null
+        removeWheelListener?.()
+        removeWheelListener = null
       } catch {
         // ignore
       }

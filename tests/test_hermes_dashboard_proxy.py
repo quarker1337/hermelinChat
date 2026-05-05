@@ -285,9 +285,39 @@ class _FakeDashboardUpstreamResponse:
         return None
 
 
-async def _asgi_request(app, method: str, path: str, **kwargs):
+class _FakeDashboardWebSocketUpstream:
+    def __init__(self):
+        self.closed = False
+        self.sent_messages = []
+        self._messages = ["upstream-ok"]
+        self._closed = asyncio.Event()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._messages:
+            return self._messages.pop(0)
+        await self._closed.wait()
+        raise StopAsyncIteration
+
+    async def send(self, message):
+        self.sent_messages.append(message)
+
+    async def close(self):
+        self.closed = True
+        self._closed.set()
+
+
+async def _asgi_request(app, method: str, path: str, *, base_url: str = "https://chat.example", **kwargs):
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="https://chat.example") as client:
+    async with httpx.AsyncClient(transport=transport, base_url=base_url) as client:
         return await client.request(method, path, **kwargs)
 
 
@@ -596,6 +626,110 @@ class HermesDashboardEndpointTests(unittest.TestCase):
         self.assertFalse(manager.started)
         self.assertEqual(manager.start_count, 0)
         self.assertEqual(capture_client.requests, [])
+
+    def test_dashboard_http_origin_accepts_trusted_forwarded_https_proto(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+                allowed_ips="*",
+                trust_x_forwarded_for=True,
+                trusted_proxy_ips="127.0.0.1",
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
+                app = create_app(config)
+            capture_client = _CaptureDashboardHttpClient()
+            app.state.httpx_client = capture_client
+
+            response = asyncio.run(
+                _asgi_request(
+                    app,
+                    "GET",
+                    f"{DASHBOARD_BASE_PATH}/api/status",
+                    base_url="http://chat.example",
+                    headers={"Origin": "https://chat.example", "X-Forwarded-Proto": "https"},
+                )
+            )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(len(capture_client.requests), 1)
+        headers = {k.lower(): v for k, v in capture_client.requests[0]["headers"].items()}
+        self.assertEqual(headers.get("x-forwarded-proto"), "https")
+
+    def test_dashboard_http_origin_ignores_untrusted_forwarded_https_proto(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+                allowed_ips="*",
+                trust_x_forwarded_for=True,
+                trusted_proxy_ips="10.0.0.1",
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
+                app = create_app(config)
+            capture_client = _CaptureDashboardHttpClient()
+            app.state.httpx_client = capture_client
+
+            response = asyncio.run(
+                _asgi_request(
+                    app,
+                    "GET",
+                    f"{DASHBOARD_BASE_PATH}/api/status",
+                    base_url="http://chat.example",
+                    headers={"Origin": "https://chat.example", "X-Forwarded-Proto": "https"},
+                )
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(capture_client.requests, [])
+
+    def test_dashboard_websocket_origin_accepts_trusted_forwarded_https_proto(self):
+        captured_connects = []
+
+        def fake_connect(*args, **kwargs):
+            captured_connects.append({"args": args, "kwargs": kwargs})
+            return _FakeDashboardWebSocketUpstream()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+                allowed_ips="*",
+                trust_x_forwarded_for=True,
+            )
+
+            with (
+                patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager),
+                patch("hermelin.server.websockets.connect", fake_connect),
+            ):
+                app = create_app(config)
+                with TestClient(app, base_url="http://chat.example") as client:
+                    with client.websocket_connect(
+                        f"{DASHBOARD_BASE_PATH}/api/ws",
+                        headers={"Host": "chat.example", "Origin": "https://chat.example", "X-Forwarded-Proto": "https"},
+                    ) as ws:
+                        self.assertEqual(ws.receive_text(), "upstream-ok")
+                manager = _FakeDashboardManager.instances[0]
+
+        self.assertEqual(manager.start_count, 1)
+        self.assertEqual(len(captured_connects), 1)
+        forwarded_headers = next(
+            value
+            for key, value in captured_connects[0]["kwargs"].items()
+            if key in {"additional_headers", "extra_headers"}
+        )
+        self.assertEqual(forwarded_headers["X-Forwarded-Proto"], "https")
 
     def test_dashboard_websocket_rejects_cross_site_origin_before_starting_dashboard(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -523,6 +523,25 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return "http"
         return raw
 
+    def _trusted_proxy_headers_allowed(client_host: str) -> bool:
+        if not trust_xff:
+            return False
+        trusted_proxy_spec = (config.trusted_proxy_ips or "").strip()
+        if trusted_proxy_spec and not ip_allowed((client_host or "").strip(), trusted_proxy_spec):
+            return False
+        return True
+
+    def _external_request_scheme(headers, *, fallback_scheme: str, client_host: str) -> str:
+        request_scheme = _request_scheme_for_origin(fallback_scheme)
+        if not _trusted_proxy_headers_allowed(client_host):
+            return request_scheme
+
+        forwarded_proto = str(headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
+        forwarded_scheme = _request_scheme_for_origin(forwarded_proto)
+        if forwarded_scheme in {"http", "https"}:
+            return forwarded_scheme
+        return request_scheme
+
     def _same_origin_request(origin: str | None, *, host: str, scheme: str) -> bool:
         raw_origin = str(origin or "").strip()
         if not raw_origin:
@@ -542,16 +561,34 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return False
         return (origin_host, origin_port) == expected
 
+    def _dashboard_request_external_scheme(request: Request) -> str:
+        return _external_request_scheme(
+            request.headers,
+            fallback_scheme=request.url.scheme,
+            client_host=request.client.host if request.client else "",
+        )
+
     def _dashboard_origin_forbidden_response(request: Request) -> JSONResponse | None:
-        if _same_origin_request(request.headers.get("origin"), host=request.headers.get("host", ""), scheme=request.url.scheme):
+        if _same_origin_request(
+            request.headers.get("origin"),
+            host=request.headers.get("host", ""),
+            scheme=_dashboard_request_external_scheme(request),
+        ):
             return None
         return JSONResponse({"detail": "forbidden"}, status_code=403)
+
+    def _dashboard_websocket_external_scheme(websocket: WebSocket) -> str:
+        return _external_request_scheme(
+            websocket.headers,
+            fallback_scheme=websocket.url.scheme,
+            client_host=websocket.client.host if websocket.client else "",
+        )
 
     def _dashboard_websocket_origin_allowed(websocket: WebSocket) -> bool:
         return _same_origin_request(
             websocket.headers.get("origin"),
             host=websocket.headers.get("host", ""),
-            scheme=websocket.url.scheme,
+            scheme=_dashboard_websocket_external_scheme(websocket),
         )
 
     def _is_public_path(path: str) -> bool:
@@ -769,7 +806,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 continue
             out[k] = v
         out["X-Forwarded-Host"] = request.headers.get("host", "")
-        out["X-Forwarded-Proto"] = request.url.scheme
+        out["X-Forwarded-Proto"] = _dashboard_request_external_scheme(request)
         out["X-Forwarded-Prefix"] = dashboard_base_path
         return out
 
@@ -1040,7 +1077,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         subprotocols = [p.strip() for p in subp_header.split(",") if p.strip()] if subp_header else None
         extra_headers = {
             "X-Forwarded-Host": websocket.headers.get("host", ""),
-            "X-Forwarded-Proto": "https" if websocket.url.scheme == "wss" else "http",
+            "X-Forwarded-Proto": _dashboard_websocket_external_scheme(websocket),
             "X-Forwarded-Prefix": dashboard_base_path,
         }
 
@@ -2269,6 +2306,22 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         changed_any = changed_any or changed
         return updated, changed_any
 
+    def _set_hermelin_launch_mode(mode: str) -> tuple[bool, str]:
+        normalized = _normalize_hermes_launch_mode(mode)
+        cfg_path = config.hermes_home / "config.yaml"
+        try:
+            existing = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
+        except Exception:
+            existing = ""
+
+        updated, changed_any = _update_hermelin_launch_mode_config_text(existing, normalized)
+        if normalized == "tui":
+            updated, changed = _sync_tui_platform_toolsets_config_text(updated)
+            changed_any = changed_any or changed
+        if not changed_any:
+            return True, ""
+        return _write_config_text(updated)
+
     def _set_default_artifact_flags(flags: dict[str, bool]) -> tuple[bool, str]:
         supported_ids = {str(item.get("id") or "").strip() for item in list_default_artifact_settings(hermes_home=config.hermes_home)}
         unsupported = sorted(key for key in flags.keys() if key not in supported_ids)
@@ -2358,6 +2411,19 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         terminal_in = payload.get("terminal") if isinstance(payload.get("terminal"), dict) else {}
         hermelin_in = payload.get("hermelin") if isinstance(payload.get("hermelin"), dict) else {}
 
+        legacy_sections = ("agent", "display", "memory", "compression", "terminal")
+        if not any(isinstance(payload.get(section), dict) for section in legacy_sections):
+            launch_mode = _normalize_hermes_launch_mode(
+                hermelin_in.get("hermes_launch_mode", cur["hermelin"]["hermes_launch_mode"])
+            )
+            ok, err = await asyncio.to_thread(_set_hermelin_launch_mode, launch_mode)
+            if not ok:
+                return JSONResponse(
+                    {"detail": "failed to save", "error": f"hermelin.hermes_launch_mode: {err}"},
+                    status_code=500,
+                )
+            return {"ok": True, **_get_cfg()}
+
         # Build normalized draft
         draft = {
             "agent": {
@@ -2440,19 +2506,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         if not ok:
             return JSONResponse({"detail": "failed to save", "error": err}, status_code=500)
 
-        cfg_path = config.hermes_home / "config.yaml"
-        try:
-            existing = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
-        except Exception:
-            existing = ""
-        updated, changed_any = _update_hermelin_launch_mode_config_text(existing, draft["hermelin"]["hermes_launch_mode"])
-        if draft["hermelin"]["hermes_launch_mode"] == "tui":
-            updated, changed = _sync_tui_platform_toolsets_config_text(updated)
-            changed_any = changed_any or changed
-        if changed_any:
-            ok, err = await asyncio.to_thread(_write_config_text, updated)
-            if not ok:
-                return JSONResponse({"detail": "failed to save", "error": f"hermelin.hermes_launch_mode: {err}"}, status_code=500)
+        ok, err = await asyncio.to_thread(_set_hermelin_launch_mode, draft["hermelin"]["hermes_launch_mode"])
+        if not ok:
+            return JSONResponse({"detail": "failed to save", "error": f"hermelin.hermes_launch_mode: {err}"}, status_code=500)
 
         # Return fresh values
         return {"ok": True, **_get_cfg()}

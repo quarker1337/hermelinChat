@@ -188,7 +188,11 @@ class HermesTuiModeTests(unittest.TestCase):
             hermes_home = tmp / "hermes-home"
             hermes_home.mkdir(parents=True, exist_ok=True)
             fake_hermes = tmp / "fake-hermes"
-            fake_hermes.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_hermes_invocations = tmp / "fake-hermes-invocations.log"
+            fake_hermes.write_text(
+                f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> {str(fake_hermes_invocations)!r}\nexit 42\n",
+                encoding="utf-8",
+            )
             fake_hermes.chmod(0o755)
             (hermes_home / "config.yaml").write_text(
                 "hermelin:\n"
@@ -214,6 +218,7 @@ class HermesTuiModeTests(unittest.TestCase):
             data = yaml.safe_load((hermes_home / "config.yaml").read_text(encoding="utf-8"))
 
             self.assertTrue(result["ok"])
+            self.assertFalse(fake_hermes_invocations.exists())
             self.assertEqual(data["hermelin"]["hermes_launch_mode"], "tui")
             self.assertEqual(data["platform_toolsets"]["cli"], ["web", "artifacts", "strudel"])
 
