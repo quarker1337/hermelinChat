@@ -722,7 +722,7 @@ test('artifact realtime token ignores stale websocket disconnects', async () => 
   }
 })
 
-test('font setup keeps Google JetBrains globally and self-hosted B1 available for TUI', () => {
+test('font setup keeps Google JetBrains globally and self-hosted B1 available for terminal panes', () => {
   const indexCssPath = path.join(SOURCE_ROOT, 'index.css')
   const fontsCssPath = path.join(SOURCE_ROOT, 'fonts.css')
   const mainPath = path.join(SOURCE_ROOT, 'main.tsx')
@@ -736,7 +736,7 @@ test('font setup keeps Google JetBrains globally and self-hosted B1 available fo
   assert.doesNotMatch(fontsSource, /font-family:\s*'JetBrains Mono';/)
 })
 
-test('TerminalPane selects the self-hosted B1 font only for TUI launches', () => {
+test('TerminalPane uses the self-hosted B1 font for both classic CLI and TUI launches', () => {
   installAssetStubs()
   clearCompiledModules()
   setWindow(makeWindow())
@@ -747,7 +747,7 @@ test('TerminalPane selects the self-hosted B1 font only for TUI launches', () =>
     TERMINAL_FONT_FAMILY_TUI,
   } = loadCompiled('components/terminal/TerminalPane.js')
 
-  assert.equal(TERMINAL_FONT_FAMILY_CHAT, "'JetBrains Mono', monospace")
+  assert.equal(TERMINAL_FONT_FAMILY_CHAT, "'JetBrains Mono B1', 'JetBrains Mono', monospace")
   assert.equal(TERMINAL_FONT_FAMILY_TUI, "'JetBrains Mono B1', 'JetBrains Mono', monospace")
   assert.equal(inferTerminalFontMode({ hermelin: { hermes_launch_mode: 'chat' } }), 'chat')
   assert.equal(inferTerminalFontMode({ hermelin: { hermes_launch_mode: 'tui' } }), 'tui')

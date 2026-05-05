@@ -45,11 +45,11 @@ function positiveQueueNumber(value: unknown, fallback: number): number {
 
 export type TerminalFontMode = 'chat' | 'tui'
 
-export const TERMINAL_FONT_FAMILY_CHAT = "'JetBrains Mono', monospace"
+export const TERMINAL_FONT_FAMILY_CHAT = "'JetBrains Mono B1', 'JetBrains Mono', monospace"
 export const TERMINAL_FONT_FAMILY_TUI = "'JetBrains Mono B1', 'JetBrains Mono', monospace"
 
 const TERMINAL_FONT_LOAD_DESCRIPTORS: Record<TerminalFontMode, string> = {
-  chat: '13px "JetBrains Mono"',
+  chat: '13px "JetBrains Mono B1"',
   tui: '13px "JetBrains Mono B1"',
 }
 
@@ -379,10 +379,10 @@ function TerminalPane() {
     let removeWheelListener: (() => void) | null = null
 
     const start = async () => {
-      // Wait for the default webfont before opening xterm, otherwise it can
+      // Wait for the terminal webfont before opening xterm, otherwise it can
       // measure the grid using fallback font metrics and keep subtly-wrong
-      // geometry. The per-session spawn path below swaps to the self-hosted B1
-      // face when the effective Hermes launch mode is TUI.
+      // geometry. Both classic CLI chat and TUI terminal modes use the
+      // self-hosted B1 face; the rest of the app still keeps the Google face.
       await loadTerminalFontFamily('chat')
 
       if (disposed) return
@@ -752,9 +752,9 @@ function TerminalPane() {
     const start = async () => {
       if (cancelled) return
 
-      // TUI mode gets the self-hosted B1 face only in the terminal emulator.
-      // Classic chat keeps the Google Fonts JetBrains Mono path used by the
-      // rest of the UI, preserving the visuals we already tuned there.
+      // Both classic CLI chat and TUI launches use the self-hosted B1 face in
+      // the xterm emulator now. Keep the mode lookup so custom commands/resume
+      // paths still reload the selected terminal font before fit/spawn.
       const fontMode = await readTerminalFontMode()
       if (cancelled) return
       await loadTerminalFontFamily(fontMode)
