@@ -722,11 +722,36 @@ test('artifact realtime token ignores stale websocket disconnects', async () => 
   }
 })
 
-test('index.css restores the Google Fonts JetBrains Mono import for terminal parity', () => {
+test('font setup keeps Google JetBrains globally and self-hosted B1 available for TUI', () => {
   const indexCssPath = path.join(SOURCE_ROOT, 'index.css')
-  const source = fs.readFileSync(indexCssPath, 'utf8')
+  const fontsCssPath = path.join(SOURCE_ROOT, 'fonts.css')
+  const mainPath = path.join(SOURCE_ROOT, 'main.tsx')
+  const indexSource = fs.readFileSync(indexCssPath, 'utf8')
+  const fontsSource = fs.readFileSync(fontsCssPath, 'utf8')
+  const mainSource = fs.readFileSync(mainPath, 'utf8')
 
-  assert.match(source, /fonts\.googleapis\.com\/css2\?family=JetBrains\+Mono/)
+  assert.match(indexSource, /fonts\.googleapis\.com\/css2\?family=JetBrains\+Mono/)
+  assert.match(mainSource, /import '\.\/fonts\.css'/)
+  assert.match(fontsSource, /font-family:\s*'JetBrains Mono B1'/)
+  assert.doesNotMatch(fontsSource, /font-family:\s*'JetBrains Mono';/)
+})
+
+test('TerminalPane selects the self-hosted B1 font only for TUI launches', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const {
+    inferTerminalFontMode,
+    TERMINAL_FONT_FAMILY_CHAT,
+    TERMINAL_FONT_FAMILY_TUI,
+  } = loadCompiled('components/terminal/TerminalPane.js')
+
+  assert.equal(TERMINAL_FONT_FAMILY_CHAT, "'JetBrains Mono', monospace")
+  assert.equal(TERMINAL_FONT_FAMILY_TUI, "'JetBrains Mono B1', 'JetBrains Mono', monospace")
+  assert.equal(inferTerminalFontMode({ hermelin: { hermes_launch_mode: 'chat' } }), 'chat')
+  assert.equal(inferTerminalFontMode({ hermelin: { hermes_launch_mode: 'tui' } }), 'tui')
+  assert.equal(inferTerminalFontMode({ hermelin: { effective_hermes_cmd: 'hermes chat --tui' } }), 'tui')
 })
 
 test('appearance settings uses the active theme accent for timestamps', () => {

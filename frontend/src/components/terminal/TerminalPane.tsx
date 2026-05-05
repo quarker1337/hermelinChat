@@ -43,6 +43,53 @@ function positiveQueueNumber(value: unknown, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
 }
 
+export type TerminalFontMode = 'chat' | 'tui'
+
+export const TERMINAL_FONT_FAMILY_CHAT = "'JetBrains Mono', monospace"
+export const TERMINAL_FONT_FAMILY_TUI = "'JetBrains Mono B1', 'JetBrains Mono', monospace"
+
+const TERMINAL_FONT_LOAD_DESCRIPTORS: Record<TerminalFontMode, string> = {
+  chat: '13px "JetBrains Mono"',
+  tui: '13px "JetBrains Mono B1"',
+}
+
+export function inferTerminalFontMode(raw: unknown): TerminalFontMode {
+  const root = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const hermelin = root.hermelin && typeof root.hermelin === 'object' ? (root.hermelin as Record<string, unknown>) : {}
+  const launchMode = (hermelin.hermes_launch_mode || '').toString().trim().toLowerCase()
+  const effectiveCommand = (hermelin.effective_hermes_cmd || '').toString()
+
+  if (launchMode === 'tui' || /(?:^|\s)--tui(?:\s|$)/.test(effectiveCommand)) return 'tui'
+  return 'chat'
+}
+
+async function readTerminalFontMode(): Promise<TerminalFontMode> {
+  try {
+    const response = await fetch('/api/settings/agent', { cache: 'no-store' })
+    if (!response.ok) return 'chat'
+    return inferTerminalFontMode(await response.json())
+  } catch {
+    return 'chat'
+  }
+}
+
+async function loadTerminalFontFamily(mode: TerminalFontMode): Promise<void> {
+  try {
+    if (document?.fonts?.load) {
+      await document.fonts.load(TERMINAL_FONT_LOAD_DESCRIPTORS[mode])
+    }
+    if (document?.fonts?.ready) {
+      await document.fonts.ready
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function terminalFontFamilyForMode(mode: TerminalFontMode): string {
+  return mode === 'tui' ? TERMINAL_FONT_FAMILY_TUI : TERMINAL_FONT_FAMILY_CHAT
+}
+
 const TERMINAL_MOUSE_MODE_IDS = new Set([
   // X10 / VT200 / button-event / any-event mouse reporting.
   '9',
@@ -332,23 +379,16 @@ function TerminalPane() {
     let removeWheelListener: (() => void) | null = null
 
     const start = async () => {
-      // Wait for webfonts before opening xterm, otherwise it can measure the grid
-      // using fallback font metrics and keep subtly-wrong geometry.
-      try {
-        if (document?.fonts?.load) {
-          await document.fonts.load('13px "JetBrains Mono"')
-        }
-        if (document?.fonts?.ready) {
-          await document.fonts.ready
-        }
-      } catch {
-        // ignore
-      }
+      // Wait for the default webfont before opening xterm, otherwise it can
+      // measure the grid using fallback font metrics and keep subtly-wrong
+      // geometry. The per-session spawn path below swaps to the self-hosted B1
+      // face when the effective Hermes launch mode is TUI.
+      await loadTerminalFontFamily('chat')
 
       if (disposed) return
 
       const term = new Terminal({
-        fontFamily: "'JetBrains Mono', monospace",
+        fontFamily: TERMINAL_FONT_FAMILY_CHAT,
         fontSize: 13,
         lineHeight: 1,
         letterSpacing: 0,
@@ -709,8 +749,26 @@ function TerminalPane() {
       }, 50)
     }
 
-    const start = () => {
+    const start = async () => {
       if (cancelled) return
+
+      // TUI mode gets the self-hosted B1 face only in the terminal emulator.
+      // Classic chat keeps the Google Fonts JetBrains Mono path used by the
+      // rest of the UI, preserving the visuals we already tuned there.
+      const fontMode = await readTerminalFontMode()
+      if (cancelled) return
+      await loadTerminalFontFamily(fontMode)
+      if (cancelled) return
+      const nextFontFamily = terminalFontFamilyForMode(fontMode)
+      if (term.options.fontFamily !== nextFontFamily) {
+        term.options = { fontFamily: nextFontFamily }
+        try {
+          fit.fit()
+          term.refresh(0, Math.max(0, term.rows - 1))
+        } catch {
+          // ignore
+        }
+      }
 
       // IMPORTANT: spawn the backend PTY with the *real* cols/rows from xterm.
       // Otherwise Rich will read the default PTY width (e.g. 120 cols) and render
