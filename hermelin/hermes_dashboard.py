@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import re
 import shlex
@@ -18,6 +19,7 @@ import httpx
 DASHBOARD_RUNNER_ID = "hermes-dashboard"
 DEFAULT_DASHBOARD_BASE_PATH = f"/api/runners/{DASHBOARD_RUNNER_ID}"
 LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0", "::1"}
+DASHBOARD_PORT_CONFLICT_CODES = {"port_in_use", "port_still_in_use"}
 
 
 def normalize_base_path(value: str | None) -> str:
@@ -162,6 +164,21 @@ def _find_free_loopback_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _loopback_port_is_bound(port: int) -> bool:
+    try:
+        actual_port = int(port)
+    except Exception:
+        return False
+    if actual_port < 1 or actual_port > 65535:
+        return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", actual_port))
+            return False
+        except OSError as exc:
+            return exc.errno == errno.EADDRINUSE
+
+
 class HermesDashboardManager:
     """Owns a localhost-only `hermes dashboard` process for hermelinChat.
 
@@ -198,6 +215,7 @@ class HermesDashboardManager:
         self._proc: subprocess.Popen | None = None
         self._port: int | None = None
         self._last_error = ""
+        self._last_error_code = ""
         self._started_at: float | None = None
         self._stopped_by_user = False
         self._lock = asyncio.Lock()
@@ -251,7 +269,7 @@ class HermesDashboardManager:
             text = f"{result.stdout or ''}\n{result.stderr or ''}"
             self._base_path_supported = "--base-path" in text
         except Exception as exc:
-            self._last_error = f"could not inspect hermes dashboard help: {exc}"
+            self._set_error("help_failed", f"could not inspect hermes dashboard help: {exc}")
             self._base_path_supported = False
         return bool(self._base_path_supported)
 
@@ -265,6 +283,29 @@ class HermesDashboardManager:
         env["HERMES_DASHBOARD_BASE_PATH"] = self.base_path
         return env
 
+    def _set_error(self, code: str, message: str) -> None:
+        self._last_error_code = str(code or "").strip()
+        self._last_error = str(message or "").strip()
+
+    def _clear_error(self) -> None:
+        self._last_error_code = ""
+        self._last_error = ""
+
+    def _configured_port_busy(self) -> bool:
+        return self.configured_port > 0 and _loopback_port_is_bound(self.configured_port)
+
+    def _refresh_port_conflict_status(self) -> None:
+        if self.configured_port <= 0 or self._running():
+            return
+        if self._configured_port_busy():
+            if not self._last_error:
+                self._set_error(
+                    "port_in_use",
+                    "configured Hermes dashboard port is already in use by another process",
+                )
+        elif self._last_error_code in DASHBOARD_PORT_CONFLICT_CODES:
+            self._clear_error()
+
     def _running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
@@ -277,9 +318,11 @@ class HermesDashboardManager:
         if self._proc is not None and self._proc.poll() is not None:
             code = self._proc.returncode
             if not self._last_error:
-                self._last_error = f"dashboard exited with code {code}"
+                self._set_error("process_exited", f"dashboard exited with code {code}")
             self._proc = None
             self._close_log_handle()
+
+        self._refresh_port_conflict_status()
 
         return {
             "ok": True,
@@ -294,6 +337,7 @@ class HermesDashboardManager:
             "base_path_supported": self._base_path_supported,
             "stopped_by_user": self._stopped_by_user,
             "last_error": self._last_error,
+            "last_error_code": self._last_error_code,
             "started_at": self._started_at,
         }
 
@@ -309,23 +353,31 @@ class HermesDashboardManager:
             if self._running():
                 return self.status()
             self._stopped_by_user = False
-            self._last_error = ""
+            self._clear_error()
 
             if not self.enabled:
-                self._last_error = "Hermes dashboard integration is disabled"
+                self._set_error("disabled", "Hermes dashboard integration is disabled")
                 return self.status()
 
             base_path_supported = await self.base_path_supported()
             if self.require_base_path and not base_path_supported:
                 if not self._last_error:
-                    self._last_error = (
+                    self._set_error(
+                        "base_path_unsupported",
                         "installed Hermes dashboard does not support --base-path; "
-                        "update Hermes Agent or disable the strict base-path requirement"
+                        "update Hermes Agent or disable the strict base-path requirement",
                     )
                 return self.status()
 
             port = self.configured_port or _find_free_loopback_port()
             self._port = port
+            if self.configured_port and self._configured_port_busy():
+                self._set_error(
+                    "port_in_use",
+                    "configured Hermes dashboard port is already in use by another process",
+                )
+                self._started_at = None
+                return self.status()
             cmd = self.build_command(port)
 
             try:
@@ -345,12 +397,12 @@ class HermesDashboardManager:
                 )
                 self._started_at = time.time()
             except FileNotFoundError:
-                self._last_error = f"executable not found: {cmd[0]}"
+                self._set_error("executable_not_found", f"executable not found: {cmd[0]}")
                 self._proc = None
                 self._close_log_handle()
                 return self.status()
             except Exception as exc:
-                self._last_error = str(exc)
+                self._set_error("startup_failed", str(exc))
                 self._proc = None
                 self._close_log_handle()
                 return self.status()
@@ -365,7 +417,7 @@ class HermesDashboardManager:
     async def stop(self) -> dict[str, Any]:
         async with self._lock:
             self._stopped_by_user = True
-            self._last_error = ""
+            self._clear_error()
             proc = self._proc
             self._proc = None
             if proc is not None and proc.poll() is None:
@@ -382,6 +434,11 @@ class HermesDashboardManager:
                     pass
             self._close_log_handle()
             self._started_at = None
+            if self._configured_port_busy():
+                self._set_error(
+                    "port_still_in_use",
+                    "configured Hermes dashboard port is still in use by another process",
+                )
             return self.status()
 
     async def aclose(self) -> None:
@@ -404,7 +461,7 @@ class HermesDashboardManager:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=1.0, read=1.0, write=1.0, pool=1.0)) as client:
             while time.monotonic() < deadline:
                 if self._proc.poll() is not None:
-                    self._last_error = f"dashboard exited with code {self._proc.returncode}"
+                    self._set_error("process_exited", f"dashboard exited with code {self._proc.returncode}")
                     return
                 try:
                     response = await client.get(url)
@@ -413,4 +470,4 @@ class HermesDashboardManager:
                 except Exception:
                     pass
                 await asyncio.sleep(0.2)
-        self._last_error = "dashboard did not become ready before timeout"
+        self._set_error("startup_timeout", "dashboard did not become ready before timeout")

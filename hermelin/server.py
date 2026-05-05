@@ -828,6 +828,15 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         return out
 
     _DASHBOARD_PUBLIC_ERROR = "Hermes dashboard unavailable. Check hermelinChat server logs for details."
+    _DASHBOARD_PUBLIC_ERROR_MESSAGES = {
+        "base_path_unsupported": "Installed Hermes dashboard does not support secure proxy base paths. Update Hermes Agent or disable strict dashboard base-path mode.",
+        "disabled": "Hermes dashboard integration is disabled.",
+        "executable_not_found": "Hermes dashboard executable was not found. Check HERMELIN_HERMES_DASHBOARD_CMD.",
+        "port_in_use": "The configured Hermes dashboard port is already in use by another process. Stop the stale dashboard process or choose a different dashboard port.",
+        "port_still_in_use": "Hermes dashboard is stopped, but the configured dashboard port is still in use by another process.",
+        "process_exited": "Hermes dashboard exited during startup. Check hermelinChat server logs for details.",
+        "startup_timeout": "Hermes dashboard did not become ready before timeout. Check hermelinChat server logs for details.",
+    }
     _DASHBOARD_THEME_SYNC_ERROR = "failed to sync dashboard theme"
 
     def _dashboard_public_float(value: object) -> float | None:
@@ -847,6 +856,12 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         """
 
         raw = status if isinstance(status, dict) else {}
+        raw_error_code = str(raw.get("last_error_code") or "").strip()
+        public_error_code = raw_error_code if raw_error_code in _DASHBOARD_PUBLIC_ERROR_MESSAGES else ""
+        public_error = ""
+        if raw.get("last_error"):
+            public_error = _DASHBOARD_PUBLIC_ERROR_MESSAGES.get(raw_error_code, _DASHBOARD_PUBLIC_ERROR)
+            public_error_code = public_error_code or "unavailable"
         public: dict[str, object] = {
             "ok": bool(raw.get("ok", True)),
             "enabled": bool(raw.get("enabled", False)),
@@ -856,7 +871,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "tui": bool(raw.get("tui", False)),
             "base_path_supported": raw.get("base_path_supported") if isinstance(raw.get("base_path_supported"), bool) else None,
             "stopped_by_user": bool(raw.get("stopped_by_user", False)),
-            "last_error": _DASHBOARD_PUBLIC_ERROR if raw.get("last_error") else "",
+            "last_error": public_error,
+            "last_error_code": public_error_code,
             "started_at": _dashboard_public_float(raw.get("started_at")),
         }
         return public

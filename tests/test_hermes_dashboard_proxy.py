@@ -1,5 +1,6 @@
 import asyncio
 import json
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -136,6 +137,85 @@ class HermesDashboardManagerTests(unittest.TestCase):
         self.assertTrue(auto_started["stopped_by_user"])
         self.assertEqual(auto_started["last_error"], "")
 
+    def test_dashboard_start_reports_configured_port_already_in_use_without_spawning(self):
+        from hermelin.hermes_dashboard import HermesDashboardManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
+                blocker.bind(("127.0.0.1", 0))
+                blocker.listen(1)
+                blocked_port = int(blocker.getsockname()[1])
+
+                manager = HermesDashboardManager(
+                    hermes_command=str(root / "missing-hermes"),
+                    hermes_home=root / "home",
+                    cwd=root / "cwd",
+                    port=blocked_port,
+                    base_path=DASHBOARD_BASE_PATH,
+                )
+                manager._base_path_supported = True
+
+                with patch("hermelin.hermes_dashboard.subprocess.Popen") as popen:
+                    status = asyncio.run(manager.start())
+
+        popen.assert_not_called()
+        self.assertFalse(status["running"])
+        self.assertEqual(status["last_error_code"], "port_in_use")
+        self.assertIn("already in use", status["last_error"])
+
+    def test_dashboard_restart_reports_configured_port_already_in_use_without_spawning(self):
+        from hermelin.hermes_dashboard import HermesDashboardManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
+                blocker.bind(("127.0.0.1", 0))
+                blocker.listen(1)
+                blocked_port = int(blocker.getsockname()[1])
+
+                manager = HermesDashboardManager(
+                    hermes_command=str(root / "missing-hermes"),
+                    hermes_home=root / "home",
+                    cwd=root / "cwd",
+                    port=blocked_port,
+                    base_path=DASHBOARD_BASE_PATH,
+                )
+                manager._base_path_supported = True
+
+                with patch("hermelin.hermes_dashboard.subprocess.Popen") as popen:
+                    status = asyncio.run(manager.restart())
+
+        popen.assert_not_called()
+        self.assertFalse(status["running"])
+        self.assertEqual(status["last_error_code"], "port_in_use")
+        self.assertIn("already in use", status["last_error"])
+
+    def test_dashboard_stop_reports_foreign_process_still_blocking_configured_port(self):
+        from hermelin.hermes_dashboard import HermesDashboardManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
+                blocker.bind(("127.0.0.1", 0))
+                blocker.listen(1)
+                blocked_port = int(blocker.getsockname()[1])
+
+                manager = HermesDashboardManager(
+                    hermes_command=str(root / "missing-hermes"),
+                    hermes_home=root / "home",
+                    cwd=root / "cwd",
+                    port=blocked_port,
+                    base_path=DASHBOARD_BASE_PATH,
+                )
+
+                status = asyncio.run(manager.stop())
+
+        self.assertFalse(status["running"])
+        self.assertTrue(status["stopped_by_user"])
+        self.assertEqual(status["last_error_code"], "port_still_in_use")
+        self.assertIn("still in use", status["last_error"])
+
     def test_dashboard_rewrites_upstream_locations_to_proxy_prefix(self):
         from hermelin.hermes_dashboard import rewrite_prefixed_location
 
@@ -247,6 +327,13 @@ class _LeakyDashboardManager(_FakeDashboardManager):
 
     def upstream(self):
         return None
+
+
+class _PortBusyDashboardManager(_LeakyDashboardManager):
+    def status(self):
+        data = super().status()
+        data["last_error_code"] = "port_in_use"
+        return data
 
 
 class _CaptureDashboardHttpClient:
@@ -389,6 +476,29 @@ class HermesDashboardEndpointTests(unittest.TestCase):
             proxied.json()["detail"],
             "Hermes dashboard unavailable. Check hermelinChat server logs for details.",
         )
+
+    def test_dashboard_public_status_reports_port_conflict_without_raw_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _FakeDashboardManager.instances = []
+            config = HermelinConfig(
+                hermes_home=Path(tmpdir) / "hermes-home",
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            )
+
+            with patch("hermelin.server.HermesDashboardManager", _PortBusyDashboardManager):
+                app = create_app(config)
+
+            response = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/start"))
+
+        body = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(body["running"])
+        self.assertEqual(body["last_error_code"], "port_in_use")
+        self.assertIn("port is already in use", body["last_error"])
+        self.assertNotIn(_LeakyDashboardManager.secret, response.text)
+        self.assertNotIn("/tmp/private", response.text)
 
     def test_dashboard_public_status_does_not_expose_process_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:

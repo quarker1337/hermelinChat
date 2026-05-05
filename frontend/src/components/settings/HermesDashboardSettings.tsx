@@ -21,6 +21,7 @@ interface DashboardStatus {
   dashboard_theme?: string
   theme_sync?: DashboardThemeSyncStatus
   last_error?: string
+  last_error_code?: string
   started_at?: number | null
 }
 
