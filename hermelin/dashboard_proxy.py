@@ -252,6 +252,24 @@ def _dashboard_proxy_error(status_code: int = 503) -> JSONResponse:
     return JSONResponse({"detail": _DASHBOARD_PUBLIC_ERROR}, status_code=status_code)
 
 
+def _dashboard_upstream_path(path: str, *, dashboard_base_path: str) -> str:
+    """Return the upstream dashboard path after stripping the proxy mount.
+
+    ASGI routing has already removed the first dashboard proxy prefix. Older
+    dashboard builds still run through hermelinChat's compatibility rewriter,
+    where plugin bundles can pass a prefix-scoped URL to the dashboard SDK and
+    the SDK then prepends the same prefix again. Collapse that repeated prefix
+    here so the upstream dashboard receives `/api/plugins/...` JSON endpoints
+    instead of its SPA fallback HTML.
+    """
+
+    upstream_path = f"/{path}" if path else "/"
+    prefix = normalize_base_path(dashboard_base_path)
+    while upstream_path == prefix or upstream_path.startswith(f"{prefix}/"):
+        upstream_path = upstream_path[len(prefix) :] or "/"
+    return upstream_path
+
+
 async def _sync_dashboard_theme_from_payload(config: HermelinConfig, payload: dict | None) -> dict:
     ui_theme = ""
     if isinstance(payload, dict):
@@ -341,7 +359,7 @@ def register_hermes_dashboard_routes(
             return _dashboard_proxy_error(status_code=503)
 
         scheme, host, port = upstream
-        upstream_path = f"/{path}" if path else "/"
+        upstream_path = _dashboard_upstream_path(path, dashboard_base_path=dashboard_base_path)
         upstream_url = f"{scheme}://{host}:{port}{upstream_path}"
         if request.url.query:
             upstream_url += f"?{request.url.query}"
@@ -466,7 +484,7 @@ def register_hermes_dashboard_routes(
 
         scheme, host, port = upstream
         ws_scheme = "wss" if scheme == "https" else "ws"
-        upstream_path = f"/{path}" if path else "/"
+        upstream_path = _dashboard_upstream_path(path, dashboard_base_path=dashboard_base_path)
         qs = websocket.scope.get("query_string", b"")
         try:
             qs_s = qs.decode("utf-8") if isinstance(qs, (bytes, bytearray)) else str(qs)

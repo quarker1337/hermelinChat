@@ -651,6 +651,27 @@ class HermesDashboardEndpointTests(unittest.TestCase):
         self.assertNotIn("cookie", headers)
         self.assertNotIn("authorization", headers)
 
+    def test_dashboard_proxy_collapses_double_prefixed_plugin_api_requests(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = _create_dashboard_app(tmpdir)
+            capture_client = _CaptureDashboardHttpClient()
+            app.state.httpx_client = capture_client
+
+            response = asyncio.run(
+                _asgi_request(
+                    app,
+                    "GET",
+                    f"{DASHBOARD_BASE_PATH}{DASHBOARD_BASE_PATH}/api/plugins/kanban/board?tenant=default",
+                )
+            )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(len(capture_client.requests), 1)
+        self.assertEqual(
+            capture_client.requests[0]["url"],
+            "http://127.0.0.1:45678/api/plugins/kanban/board?tenant=default",
+        )
+
     def test_dashboard_proxy_strips_cors_request_and_response_headers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             app = _create_dashboard_app(tmpdir)
