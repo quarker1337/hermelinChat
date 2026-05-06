@@ -329,7 +329,7 @@ class HermesDashboardManager:
         if DASHBOARD_FRONTEND_NOT_BUILT_MARKER in recent_log:
             self._set_error(
                 "frontend_not_built",
-                "Hermes dashboard frontend is not built and npm was not available to build it",
+                "Hermes dashboard frontend is missing or stale, and npm was not available to build it",
             )
             return
         self._set_error("process_exited", f"dashboard exited with code {returncode}")

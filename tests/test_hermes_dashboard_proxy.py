@@ -255,7 +255,7 @@ class HermesDashboardManagerTests(unittest.TestCase):
 
         self.assertFalse(status["running"])
         self.assertEqual(status["last_error_code"], "frontend_not_built")
-        self.assertIn("frontend is not built", status["last_error"])
+        self.assertIn("missing or stale", status["last_error"])
 
 
 class HermesDashboardReservedRunnerTests(unittest.TestCase):
@@ -530,8 +530,11 @@ class HermesDashboardEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(body["running"])
         self.assertEqual(body["last_error_code"], "frontend_not_built")
-        self.assertIn("dashboard frontend is not built", body["last_error"])
-        self.assertIn("hermes update", body["last_error"])
+        self.assertIn("dashboard frontend is missing or stale", body["last_error"])
+        self.assertIn("Hermes Agent did not prebuild", body["last_error"])
+        self.assertIn("Node.js/npm", body["last_error"])
+        self.assertIn("service user", body["last_error"])
+        self.assertIn("restart hermelinChat", body["last_error"])
         self.assertNotIn(_LeakyDashboardManager.secret, response.text)
         self.assertNotIn("/tmp/private", response.text)
 

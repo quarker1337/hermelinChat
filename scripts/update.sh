@@ -201,11 +201,13 @@ if [[ "$SKIP_FRONTEND" -eq 0 ]]; then
     echo "WARNING: hermes not found; skipping native dashboard frontend check." >&2
   elif ! command -v python3 >/dev/null 2>&1; then
     echo "WARNING: python3 not found; skipping native dashboard frontend check." >&2
-  elif ! command -v npm >/dev/null 2>&1; then
-    echo "WARNING: npm not found; cannot build the native Hermes dashboard frontend if it is missing/stale." >&2
-    echo "         Install Node.js/npm and rerun ./scripts/update.sh if the dashboard startup reports an unbuilt frontend." >&2
   else
-    HERMELIN_ACTIVE_HERMES_EXE="$(command -v hermes)" python3 - <<'PY'
+    if command -v npm >/dev/null 2>&1; then
+      HERMELIN_NPM_AVAILABLE=1
+    else
+      HERMELIN_NPM_AVAILABLE=0
+    fi
+    HERMELIN_ACTIVE_HERMES_EXE="$(command -v hermes)" HERMELIN_NPM_AVAILABLE="$HERMELIN_NPM_AVAILABLE" python3 - <<'PY'
 import os
 import shlex
 import shutil
@@ -214,6 +216,7 @@ import sys
 from pathlib import Path
 
 hermes_exe = Path(os.environ["HERMELIN_ACTIVE_HERMES_EXE"])
+npm_available = os.environ.get("HERMELIN_NPM_AVAILABLE") == "1"
 try:
     first_line = hermes_exe.read_text(encoding="utf-8").splitlines()[0].strip()
     if not first_line.startswith("#!"):
@@ -237,20 +240,68 @@ except Exception as exc:
     sys.exit(0)
 
 code = r'''
+import os
+import shutil
+import subprocess
 import sys
+from pathlib import Path
+
 try:
     import hermes_cli.main as main
 except Exception as exc:
     print(f"WARNING: could not import hermes_cli.main for dashboard build: {exc}", file=sys.stderr)
     sys.exit(0)
+
+project_root = Path(main.PROJECT_ROOT)
+web_dir = project_root / "web"
+dist_index = project_root / "hermes_cli" / "web_dist" / "index.html"
+npm_available = os.environ.get("HERMELIN_NPM_AVAILABLE") == "1"
+
+if not (web_dir / "package.json").exists():
+    print(f"WARNING: active Hermes install has no dashboard web/package.json at {web_dir}; skipping native dashboard build check.", file=sys.stderr)
+    sys.exit(0)
+
 try:
-    ok = main._build_web_ui(main.PROJECT_ROOT / "web", fatal=True)
+    build_needed_fn = getattr(main, "_web_ui_build_needed", None)
+    build_needed = bool(build_needed_fn(web_dir)) if callable(build_needed_fn) else not dist_index.exists()
+except Exception as exc:
+    print(f"WARNING: could not determine whether native Hermes dashboard frontend is stale: {exc}", file=sys.stderr)
+    build_needed = not dist_index.exists()
+
+if not build_needed:
+    print("  ✓ Native Hermes dashboard frontend already built")
+    sys.exit(0)
+
+if not npm_available:
+    print("WARNING: Native Hermes dashboard frontend is missing/stale, and npm is not available to build it.", file=sys.stderr)
+    print(f"         Hermes install: {project_root}", file=sys.stderr)
+    print("         This can happen when the Hermes Agent installer did not prebuild the dashboard web UI.", file=sys.stderr)
+    print("         Fix options:", file=sys.stderr)
+    print("           - Run `hermes update` from a shell where Node.js/npm is available", file=sys.stderr)
+    print(f"           - Or run: cd {web_dir} && npm install && npm run build", file=sys.stderr)
+    print("         If hermelinChat runs as a systemd service, run the build as that service user, then restart hermelinChat.", file=sys.stderr)
+    sys.exit(0)
+
+try:
+    build_fn = getattr(main, "_build_web_ui", None)
+    if callable(build_fn):
+        ok = build_fn(web_dir, fatal=True)
+    else:
+        npm = shutil.which("npm")
+        if not npm:
+            print("ERROR: npm disappeared while preparing to build the native Hermes dashboard frontend.", file=sys.stderr)
+            sys.exit(1)
+        install = subprocess.run([npm, "install", "--silent"], cwd=web_dir, check=False)
+        build = subprocess.run([npm, "run", "build"], cwd=web_dir, check=False) if install.returncode == 0 else install
+        ok = build.returncode == 0
 except Exception as exc:
     print(f"ERROR: failed to build native Hermes dashboard frontend: {exc}", file=sys.stderr)
     sys.exit(1)
 sys.exit(0 if ok else 1)
 '''
-result = subprocess.run([str(hermes_python), "-c", code], check=False)
+env = os.environ.copy()
+env["HERMELIN_NPM_AVAILABLE"] = "1" if npm_available else "0"
+result = subprocess.run([str(hermes_python), "-c", code], check=False, env=env)
 sys.exit(result.returncode)
 PY
   fi
