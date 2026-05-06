@@ -24,6 +24,21 @@ export interface ArtifactPanelProps {
 // Icon sub-components
 // ---------------------------------------------------------------------------
 
+export function isClearableSessionArtifact(artifact: ArtifactTab | null | undefined): boolean {
+  if (!artifact) return false
+  if (Boolean(artifact.persistent)) return false
+  if (artifact.default === true) return false
+  if (artifact.deletable === false) return false
+  return true
+}
+
+export function canShowArtifactActions(artifact: ArtifactTab | null | undefined): boolean {
+  if (!artifact?.id) return false
+  if (artifact.default === true) return false
+  if (artifact.deletable === false) return false
+  return true
+}
+
 interface IconButtonProps {
   title: string
   onClick: () => void
@@ -287,7 +302,7 @@ export default function ArtifactPanel({
 }: ArtifactPanelProps) {
   const activeArtifact = artifacts.find((artifact) => artifact?.id === activeArtifactId) || artifacts[0] || null
   const activeRuntime = getArtifactRuntimeState(activeArtifact)
-  const sessionArtifactCount = artifacts.filter((artifact) => !(artifact?.persistent as boolean | undefined)).length
+  const sessionArtifactCount = artifacts.filter(isClearableSessionArtifact).length
 
   const [tabMenuOpen, setTabMenuOpen] = useState(false)
   const [artifactMenuId, setArtifactMenuId] = useState<string | null>(null)
@@ -797,7 +812,10 @@ export default function ArtifactPanel({
               const type = String(artifact?.type || 'unknown')
               const runtime = getArtifactRuntimeState(artifact)
               const actionMenuOpen = !!artifactId && artifactMenuId === artifactId
-              const actionsAvailable = !!artifactId && (!!onRenameArtifact || !!onDeleteArtifact)
+              const artifactActionsAllowed = canShowArtifactActions(artifact)
+              const renameHandler = artifactActionsAllowed ? onRenameArtifact : undefined
+              const deleteHandler = artifactActionsAllowed ? onDeleteArtifact : undefined
+              const actionsAvailable = !!renameHandler || !!deleteHandler
 
               return (
                 <div
@@ -968,7 +986,7 @@ export default function ArtifactPanel({
                         minWidth: 150,
                       }}
                     >
-                      {onRenameArtifact ? (
+                      {renameHandler ? (
                         <button
                           type="button"
                           className="artifactPanelDropdown__action"
@@ -983,7 +1001,7 @@ export default function ArtifactPanel({
                             if (!cleanTitle || cleanTitle === title) return
                             setArtifactMenuId(null)
                             setTabMenuOpen(false)
-                            onRenameArtifact(artifactId, cleanTitle)
+                            renameHandler(artifactId, cleanTitle)
                           }}
                           style={{
                             border: 0,
@@ -1002,7 +1020,7 @@ export default function ArtifactPanel({
                         </button>
                       ) : null}
 
-                      {onDeleteArtifact ? (
+                      {deleteHandler ? (
                         <button
                           type="button"
                           className="artifactPanelDropdown__action artifactPanelDropdown__action--danger"
@@ -1015,7 +1033,7 @@ export default function ArtifactPanel({
                             if (!confirmed) return
                             setArtifactMenuId(null)
                             setTabMenuOpen(false)
-                            onDeleteArtifact(artifactId)
+                            deleteHandler(artifactId)
                           }}
                           style={{
                             border: 0,

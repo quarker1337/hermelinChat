@@ -630,6 +630,29 @@ test('artifact panel exposes discoverable per-artifact and bulk delete actions',
   assert.match(source, /onClearSessionArtifacts/)
 })
 
+test('artifact panel excludes built-in artifacts from transient clear count and row actions', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { isClearableSessionArtifact, canShowArtifactActions } = loadCompiled('components/ArtifactPanel.js')
+
+  const strudel = {
+    id: 'strudel',
+    type: 'iframe',
+    title: 'Strudel',
+    persistent: false,
+    default: true,
+    deletable: false,
+  }
+
+  assert.equal(isClearableSessionArtifact(strudel), false)
+  assert.equal(canShowArtifactActions(strudel), false)
+  assert.equal(isClearableSessionArtifact({ id: 'tmp', type: 'markdown', persistent: false }), true)
+  assert.equal(canShowArtifactActions({ id: 'tmp', type: 'markdown', persistent: false }), true)
+  assert.equal(isClearableSessionArtifact({ id: 'saved', type: 'markdown', persistent: true }), false)
+})
+
 test('terminal write queue waits for xterm write callbacks before draining more output', () => {
   installAssetStubs()
   clearCompiledModules()
