@@ -58,6 +58,36 @@ class HermesDashboardManagerTests(unittest.TestCase):
                     self.assertNotIn("--base-path", command)
                     self.assertNotIn(DASHBOARD_BASE_PATH, command)
 
+    def test_dashboard_command_normalizes_full_hermes_command_overrides(self):
+        from hermelin.hermes_dashboard import HermesDashboardManager
+
+        cases = (
+            ('hermes chat --toolsets "hermes-cli, artifacts"', ["hermes", "dashboard"]),
+            ("hermes dashboard --tui", ["hermes", "dashboard"]),
+            ("uv run hermes chat --toolsets hermes-cli,artifacts", ["uv", "run", "hermes", "dashboard"]),
+            ("uv run hermes dashboard --tui", ["uv", "run", "hermes", "dashboard"]),
+        )
+        for hermes_command, expected_prefix in cases:
+            with self.subTest(hermes_command=hermes_command), tempfile.TemporaryDirectory() as tmpdir:
+                manager = HermesDashboardManager(
+                    hermes_command=hermes_command,
+                    hermes_home=Path(tmpdir) / "home",
+                    cwd=Path(tmpdir),
+                    port=45678,
+                    base_path=DASHBOARD_BASE_PATH,
+                )
+
+                command = manager.build_command(45678)
+
+                self.assertEqual(command[: len(expected_prefix)], expected_prefix)
+                self.assertEqual(command.count("dashboard"), 1)
+                self.assertNotIn("chat", command)
+                self.assertNotIn("--toolsets", command)
+                self.assertEqual(command[command.index("--host") + 1], "127.0.0.1")
+                self.assertEqual(command[command.index("--port") + 1], "45678")
+                self.assertIn("--no-open", command)
+                self.assertNotIn("--insecure", command)
+
     def test_dashboard_body_rewriter_scopes_spa_assets_api_and_router(self):
         from hermelin.hermes_dashboard import rewrite_dashboard_body
 

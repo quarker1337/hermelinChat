@@ -229,7 +229,21 @@ class HermesDashboardManager:
             argv = [self.hermes_command]
         argv = [part for part in argv if part]
         if not argv:
-            argv = ["hermes"]
+            return ["hermes", "dashboard"]
+
+        # HERMELIN_HERMES_DASHBOARD_CMD is easiest to misconfigure by copying
+        # the normal chat launch command or by including dashboard flags. Build a
+        # clean dashboard invocation from the subcommand boundary so we do not
+        # launch invalid commands such as `hermes chat ... dashboard ...` or
+        # `hermes dashboard --tui dashboard ...`.
+        for idx, part in enumerate(argv):
+            if part == "dashboard" and idx > 0:
+                return argv[: idx + 1]
+
+        for idx, part in enumerate(argv):
+            if part == "chat" and any(Path(prev).name == "hermes" for prev in argv[:idx]):
+                return [*argv[:idx], "dashboard"]
+
         if len(argv) < 2 or argv[-1] != "dashboard":
             argv = [*argv, "dashboard"]
         return argv
