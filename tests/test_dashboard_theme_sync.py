@@ -206,6 +206,14 @@ class DashboardThemeSyncTests(unittest.TestCase):
                 self.assertNotIn("gradient", theme["customCSS"])
                 self.assertNotIn("repeating-", theme["customCSS"])
 
+    def test_theme_definitions_preserve_native_dashboard_font_stacks(self):
+        for ui_theme in available_ui_themes():
+            with self.subTest(ui_theme=ui_theme):
+                typography = dashboard_theme_definition_for_ui_theme(ui_theme)["typography"]
+
+                self.assertIn('"Collapse"', typography["fontSans"])
+                self.assertIn('"JetBrains Mono"', typography["fontMono"])
+
     def test_theme_text_colors_match_hermelinchat_palettes(self):
         expected = {
             "hermelin": {

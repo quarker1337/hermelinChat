@@ -20,6 +20,12 @@ DEFAULT_UI_THEME = "hermelin"
 # charge, while hermelinChat remains the upstream source of visual truth.
 _CARD_CLIP = "polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)"
 _TAB_CLIP = "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%, 0 8px)"
+_DASHBOARD_FONT_SANS = (
+    '"Collapse", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+)
+_DASHBOARD_FONT_MONO = (
+    '"JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace'
+)
 
 
 def _dashboard_skin(
@@ -81,8 +87,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "noiseOpacity": 0.0,
         },
         "typography": {
-            "fontSans": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
-            "fontMono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace",
+            "fontSans": _DASHBOARD_FONT_SANS,
+            "fontMono": _DASHBOARD_FONT_MONO,
             "baseSize": "14px",
             "lineHeight": "1.55",
             "letterSpacing": "0",
@@ -130,8 +136,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "noiseOpacity": 0.0,
         },
         "typography": {
-            "fontSans": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace",
-            "fontMono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace",
+            "fontSans": _DASHBOARD_FONT_SANS,
+            "fontMono": _DASHBOARD_FONT_MONO,
             "baseSize": "14px",
             "lineHeight": "1.5",
             "letterSpacing": "0.015em",
@@ -180,8 +186,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "noiseOpacity": 0.0,
         },
         "typography": {
-            "fontSans": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
-            "fontMono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace",
+            "fontSans": _DASHBOARD_FONT_SANS,
+            "fontMono": _DASHBOARD_FONT_MONO,
             "baseSize": "14px",
             "lineHeight": "1.58",
             "letterSpacing": "0",
@@ -229,8 +235,8 @@ _DASHBOARD_THEME_DEFINITIONS: dict[str, dict[str, Any]] = {
             "noiseOpacity": 0.0,
         },
         "typography": {
-            "fontSans": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
-            "fontMono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace",
+            "fontSans": _DASHBOARD_FONT_SANS,
+            "fontMono": _DASHBOARD_FONT_MONO,
             "baseSize": "14px",
             "lineHeight": "1.55",
             "letterSpacing": "0",
