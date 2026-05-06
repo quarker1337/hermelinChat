@@ -69,9 +69,6 @@ def _dashboard_skin(
 :root {{
   --font-sans: var(--theme-font-sans);
   --font-mono: var(--theme-font-mono);
-  --font-mondwest: var(--theme-font-sans);
-  --font-rules-compressed: var(--theme-font-sans);
-  --font-rules-expanded: var(--theme-font-sans);
 }}
 
 html,

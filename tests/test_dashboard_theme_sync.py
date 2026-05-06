@@ -215,10 +215,11 @@ class DashboardThemeSyncTests(unittest.TestCase):
 
                 self.assertIn('"Collapse"', typography["fontSans"])
                 self.assertIn('"JetBrains Mono"', typography["fontMono"])
-                self.assertIn("--font-mondwest: var(--theme-font-sans);", custom_css)
-                self.assertIn("--font-rules-expanded: var(--theme-font-sans);", custom_css)
-                self.assertIn("--font-rules-compressed: var(--theme-font-sans);", custom_css)
+                self.assertIn("--font-sans: var(--theme-font-sans);", custom_css)
                 self.assertIn("--font-mono: var(--theme-font-mono);", custom_css)
+                self.assertNotIn("--font-mondwest: var(--theme-font-sans);", custom_css)
+                self.assertNotIn("--font-rules-expanded: var(--theme-font-sans);", custom_css)
+                self.assertNotIn("--font-rules-compressed: var(--theme-font-sans);", custom_css)
 
     def test_theme_text_colors_match_hermelinchat_palettes(self):
         expected = {
