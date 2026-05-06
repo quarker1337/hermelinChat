@@ -69,6 +69,9 @@ _JS_MIME_MARKERS = (
     "ecmascript",
     "text/js",
 )
+_CSS_MIME_MARKERS = (
+    "text/css",
+)
 
 
 def should_rewrite_dashboard_body(path: str, content_type: str) -> bool:
@@ -77,6 +80,8 @@ def should_rewrite_dashboard_body(path: str, content_type: str) -> bool:
     path_l = str(path or "").lower().split("?", 1)[0]
     ctype = str(content_type or "").lower()
     if "text/html" in ctype:
+        return True
+    if path_l.endswith(".css") or any(marker in ctype for marker in _CSS_MIME_MARKERS):
         return True
     if path_l.endswith(".js") or any(marker in ctype for marker in _JS_MIME_MARKERS):
         return True
@@ -104,7 +109,24 @@ def _rewrite_dashboard_html(text: str, base_path: str) -> str:
     return text
 
 
+def _rewrite_dashboard_css(text: str, base_path: str) -> str:
+    prefix = normalize_base_path(base_path)
+
+    def _url_repl(match: re.Match[str]) -> str:
+        quote = match.group("quote") or ""
+        target = match.group("target")
+        return f"url({quote}{prefix}{target}{quote})"
+
+    return re.sub(
+        r"url\(\s*(?P<quote>['\"]?)(?P<target>/(?:fonts|fonts-terminal)/[^)'\"\s]+)(?P=quote)\s*\)",
+        _url_repl,
+        text,
+    )
+
+
 def _rewrite_dashboard_js(text: str, base_path: str) -> str:
+    prefix = normalize_base_path(base_path)
+
     # Current dashboard bundles compile api.ts's `const BASE = ""` into a tiny
     # minified const (for example `const bk=""`). Restrict the regex to the
     # nearby session-token/header symbols so we do not rewrite unrelated empty
@@ -138,6 +160,13 @@ def _rewrite_dashboard_js(text: str, base_path: str) -> str:
         text = text.replace(f"{host_expr}/api/ws?", f"{host_expr}{ws_prefix}/api/ws?")
         text = text.replace(f"{host_expr}/api/events?", f"{host_expr}{ws_prefix}/api/events?")
         text = text.replace(f"{host_expr}/api/pty?", f"{host_expr}{ws_prefix}/api/pty?")
+
+    # Plugin bundles are injected by the dashboard JS via root-relative
+    # `/dashboard-plugins/...` URLs. Scope those to the authenticated dashboard
+    # proxy prefix, otherwise hermelinChat's SPA fallback returns index.html for
+    # module scripts and browsers reject them as text/html.
+    for quote in ('"', "'", "`"):
+        text = text.replace(f"{quote}/dashboard-plugins/", f"{quote}{prefix}/dashboard-plugins/")
     return text
 
 
@@ -154,6 +183,8 @@ def rewrite_dashboard_body(body: bytes, *, content_type: str, base_path: str) ->
     ctype = str(content_type or "").lower()
     if "text/html" in ctype:
         return _rewrite_dashboard_html(text, base_path).encode("utf-8")
+    if any(marker in ctype for marker in _CSS_MIME_MARKERS):
+        return _rewrite_dashboard_css(text, base_path).encode("utf-8")
     if any(marker in ctype for marker in _JS_MIME_MARKERS) or text.lstrip().startswith(("import", "const", "var", "let", "function", "(")):
         return _rewrite_dashboard_js(text, base_path).encode("utf-8")
     return body

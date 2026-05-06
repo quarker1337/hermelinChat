@@ -98,7 +98,7 @@ class HermesDashboardManagerTests(unittest.TestCase):
         self.assertIn('src="/api/runners/hermes-dashboard/assets/app.js"', rewritten_html)
         self.assertIn('href="/api/runners/hermes-dashboard/assets/app.css"', rewritten_html)
 
-        js = b'''const bk="";B5.createRoot(document.getElementById("root")).render(u.jsx(i3,{children:u.jsx(App,{})}));new WebSocket(`${n}//${location.host}/api/ws?token=x`);new WebSocket(`${H}//${window.location.host}/api/events?x`);return `${n}//${window.location.host}/api/pty?${q}`;'''
+        js = b'''const bk="";B5.createRoot(document.getElementById("root")).render(u.jsx(i3,{children:u.jsx(App,{})}));new WebSocket(`${n}//${location.host}/api/ws?token=x`);new WebSocket(`${H}//${window.location.host}/api/events?x`);return `${n}//${window.location.host}/api/pty?${q}`;const css=`/dashboard-plugins/${name}/${file}`;const script="/dashboard-plugins/kanban/dist/index.js";'''
         rewritten_js = rewrite_dashboard_body(js, content_type="application/javascript", base_path=DASHBOARD_BASE_PATH).decode()
 
         self.assertIn('const bk=window.__HERMES_BASE_PATH__||""', rewritten_js)
@@ -106,6 +106,14 @@ class HermesDashboardManagerTests(unittest.TestCase):
         self.assertIn('${location.host}${window.__HERMES_BASE_PATH__||""}/api/ws?', rewritten_js)
         self.assertIn('${window.location.host}${window.__HERMES_BASE_PATH__||""}/api/events?', rewritten_js)
         self.assertIn('${window.location.host}${window.__HERMES_BASE_PATH__||""}/api/pty?', rewritten_js)
+        self.assertIn(f'`{DASHBOARD_BASE_PATH}/dashboard-plugins/${{name}}/${{file}}`', rewritten_js)
+        self.assertIn(f'"{DASHBOARD_BASE_PATH}/dashboard-plugins/kanban/dist/index.js"', rewritten_js)
+
+        css = b'''@font-face{font-family:Collapse;src:url(/fonts/Collapse-Regular.woff2)format("woff2")}@font-face{font-family:JetBrains;src:url("/fonts-terminal/JetBrainsMono-Regular.woff2")format("woff2")}'''
+        rewritten_css = rewrite_dashboard_body(css, content_type="text/css", base_path=DASHBOARD_BASE_PATH).decode()
+
+        self.assertIn(f"url({DASHBOARD_BASE_PATH}/fonts/Collapse-Regular.woff2)", rewritten_css)
+        self.assertIn(f'url("{DASHBOARD_BASE_PATH}/fonts-terminal/JetBrainsMono-Regular.woff2")', rewritten_css)
 
     def test_dashboard_base_path_probe_creates_missing_cwd(self):
         from hermelin.hermes_dashboard import HermesDashboardManager
