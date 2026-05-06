@@ -160,13 +160,16 @@ def _rewrite_dashboard_js(text: str, base_path: str) -> str:
         text = text.replace(f"{host_expr}/api/ws?", f"{host_expr}{ws_prefix}/api/ws?")
         text = text.replace(f"{host_expr}/api/events?", f"{host_expr}{ws_prefix}/api/events?")
         text = text.replace(f"{host_expr}/api/pty?", f"{host_expr}{ws_prefix}/api/pty?")
+        text = text.replace(f"{host_expr}/api/plugins/", f"{host_expr}{ws_prefix}/api/plugins/")
 
     # Plugin bundles are injected by the dashboard JS via root-relative
-    # `/dashboard-plugins/...` URLs. Scope those to the authenticated dashboard
-    # proxy prefix, otherwise hermelinChat's SPA fallback returns index.html for
-    # module scripts and browsers reject them as text/html.
+    # `/dashboard-plugins/...` URLs, and plugin code commonly calls backend
+    # routes under `/api/plugins/...` directly (including WebSockets). Scope
+    # both to the authenticated dashboard proxy prefix, otherwise those root
+    # requests hit hermelinChat's own SPA/API namespace.
     for quote in ('"', "'", "`"):
         text = text.replace(f"{quote}/dashboard-plugins/", f"{quote}{prefix}/dashboard-plugins/")
+        text = text.replace(f"{quote}/api/plugins/", f"{quote}{prefix}/api/plugins/")
     return text
 
 
