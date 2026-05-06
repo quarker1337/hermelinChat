@@ -209,10 +209,16 @@ class DashboardThemeSyncTests(unittest.TestCase):
     def test_theme_definitions_preserve_native_dashboard_font_stacks(self):
         for ui_theme in available_ui_themes():
             with self.subTest(ui_theme=ui_theme):
-                typography = dashboard_theme_definition_for_ui_theme(ui_theme)["typography"]
+                theme = dashboard_theme_definition_for_ui_theme(ui_theme)
+                typography = theme["typography"]
+                custom_css = theme["customCSS"]
 
                 self.assertIn('"Collapse"', typography["fontSans"])
                 self.assertIn('"JetBrains Mono"', typography["fontMono"])
+                self.assertIn("--font-mondwest: var(--theme-font-sans);", custom_css)
+                self.assertIn("--font-rules-expanded: var(--theme-font-sans);", custom_css)
+                self.assertIn("--font-rules-compressed: var(--theme-font-sans);", custom_css)
+                self.assertIn("--font-mono: var(--theme-font-mono);", custom_css)
 
     def test_theme_text_colors_match_hermelinchat_palettes(self):
         expected = {

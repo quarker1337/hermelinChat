@@ -66,6 +66,14 @@ def _dashboard_skin(
             "tab": {"clipPath": _TAB_CLIP},
         },
         "customCSS": f"""/* hermelinchat-dashboard-skin: {marker} */
+:root {{
+  --font-sans: var(--theme-font-sans);
+  --font-mono: var(--theme-font-mono);
+  --font-mondwest: var(--theme-font-sans);
+  --font-rules-compressed: var(--theme-font-sans);
+  --font-rules-expanded: var(--theme-font-sans);
+}}
+
 html,
 body {{
   background: {bg};
