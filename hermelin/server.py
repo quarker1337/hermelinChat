@@ -2437,6 +2437,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         cont: bool = Query(False, alias="continue"),
         cols: int = 120,
         rows: int = 30,
+        clear_session_artifacts: bool = Query(False),
     ):
         client_ip = extract_client_ip(
             client_host=websocket.client.host if websocket.client else "",
@@ -2531,9 +2532,14 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             env.pop(k, None)
 
         # -------------------------------------------------------------
-        # New session: cleanup session-scoped artifacts
+        # Optional session-scoped artifact cleanup
         # -------------------------------------------------------------
-        if not resume and not cont:
+        # Opening hermelinChat in another browser or refreshing the app starts a
+        # fresh PTY websocket without a resume id. That should not silently wipe
+        # non-persistent artifacts from the shared backend instance. Keep cleanup
+        # as an explicit opt-in for callers that really want to clear transient
+        # artifact state.
+        if clear_session_artifacts and not resume and not cont:
             try:
                 info = cleanup_session_artifacts(config.artifact_dir)
                 did_remove = bool(
