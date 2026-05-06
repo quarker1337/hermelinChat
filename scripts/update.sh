@@ -196,6 +196,67 @@ if [[ "$SKIP_HERMES_SKINS" -eq 0 ]]; then
 fi
 
 if [[ "$SKIP_FRONTEND" -eq 0 ]]; then
+  echo "==> node: ensure native Hermes dashboard frontend"
+  if ! command -v hermes >/dev/null 2>&1; then
+    echo "WARNING: hermes not found; skipping native dashboard frontend check." >&2
+  elif ! command -v python3 >/dev/null 2>&1; then
+    echo "WARNING: python3 not found; skipping native dashboard frontend check." >&2
+  elif ! command -v npm >/dev/null 2>&1; then
+    echo "WARNING: npm not found; cannot build the native Hermes dashboard frontend if it is missing/stale." >&2
+    echo "         Install Node.js/npm and rerun ./scripts/update.sh if the dashboard startup reports an unbuilt frontend." >&2
+  else
+    HERMELIN_ACTIVE_HERMES_EXE="$(command -v hermes)" python3 - <<'PY'
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+hermes_exe = Path(os.environ["HERMELIN_ACTIVE_HERMES_EXE"])
+try:
+    first_line = hermes_exe.read_text(encoding="utf-8").splitlines()[0].strip()
+    if not first_line.startswith("#!"):
+        raise RuntimeError(f"unexpected Hermes launcher format: {hermes_exe}")
+    shebang = shlex.split(first_line[2:].strip())
+    if not shebang:
+        raise RuntimeError(f"empty Hermes launcher shebang: {hermes_exe}")
+    if Path(shebang[0]).name == "env" and len(shebang) > 1:
+        resolved = shutil.which(shebang[1])
+        if not resolved:
+            raise RuntimeError(f"could not resolve interpreter from shebang: {shebang[1]}")
+        hermes_python = Path(resolved)
+    else:
+        hermes_python = Path(shebang[0]).expanduser()
+        if not hermes_python.is_absolute():
+            hermes_python = (hermes_exe.parent / hermes_python).absolute()
+    if not hermes_python.is_file():
+        raise RuntimeError(f"Hermes Python not found: {hermes_python}")
+except Exception as exc:
+    print(f"WARNING: could not inspect Hermes launcher for dashboard build: {exc}", file=sys.stderr)
+    sys.exit(0)
+
+code = r'''
+import sys
+try:
+    import hermes_cli.main as main
+except Exception as exc:
+    print(f"WARNING: could not import hermes_cli.main for dashboard build: {exc}", file=sys.stderr)
+    sys.exit(0)
+try:
+    ok = main._build_web_ui(main.PROJECT_ROOT / "web", fatal=True)
+except Exception as exc:
+    print(f"ERROR: failed to build native Hermes dashboard frontend: {exc}", file=sys.stderr)
+    sys.exit(1)
+sys.exit(0 if ok else 1)
+'''
+result = subprocess.run([str(hermes_python), "-c", code], check=False)
+sys.exit(result.returncode)
+PY
+  fi
+fi
+
+if [[ "$SKIP_FRONTEND" -eq 0 ]]; then
   echo "==> node: build frontend -> hermelin/static/"
 
   if ! command -v npm >/dev/null 2>&1; then

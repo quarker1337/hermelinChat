@@ -20,6 +20,7 @@ DASHBOARD_RUNNER_ID = "hermes-dashboard"
 DEFAULT_DASHBOARD_BASE_PATH = f"/api/runners/{DASHBOARD_RUNNER_ID}"
 LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0", "::1"}
 DASHBOARD_PORT_CONFLICT_CODES = {"port_in_use", "port_still_in_use"}
+DASHBOARD_FRONTEND_NOT_BUILT_MARKER = "Web UI frontend not built and npm is not available"
 
 
 def normalize_base_path(value: str | None) -> str:
@@ -301,6 +302,38 @@ class HermesDashboardManager:
         self._last_error_code = str(code or "").strip()
         self._last_error = str(message or "").strip()
 
+    def _log_path(self) -> Path:
+        return self.hermes_home / "logs" / "hermelin-dashboard.log"
+
+    def _recent_log_text(self, max_bytes: int = 8192) -> str:
+        try:
+            if self._log_handle is not None:
+                self._log_handle.flush()
+        except Exception:
+            pass
+        try:
+            path = self._log_path()
+            with path.open("rb") as handle:
+                try:
+                    handle.seek(0, os.SEEK_END)
+                    size = handle.tell()
+                    handle.seek(max(0, size - int(max_bytes)))
+                except Exception:
+                    pass
+                return handle.read().decode("utf-8", errors="replace")
+        except Exception:
+            return ""
+
+    def _set_process_exit_error(self, returncode: int | None) -> None:
+        recent_log = self._recent_log_text()
+        if DASHBOARD_FRONTEND_NOT_BUILT_MARKER in recent_log:
+            self._set_error(
+                "frontend_not_built",
+                "Hermes dashboard frontend is not built and npm was not available to build it",
+            )
+            return
+        self._set_error("process_exited", f"dashboard exited with code {returncode}")
+
     def _clear_error(self) -> None:
         self._last_error_code = ""
         self._last_error = ""
@@ -332,7 +365,7 @@ class HermesDashboardManager:
         if self._proc is not None and self._proc.poll() is not None:
             code = self._proc.returncode
             if not self._last_error:
-                self._set_error("process_exited", f"dashboard exited with code {code}")
+                self._set_process_exit_error(code)
             self._proc = None
             self._close_log_handle()
 
@@ -399,7 +432,7 @@ class HermesDashboardManager:
                 logs_dir = self.hermes_home / "logs"
                 logs_dir.mkdir(parents=True, exist_ok=True)
                 self._close_log_handle()
-                self._log_handle = (logs_dir / "hermelin-dashboard.log").open("ab")
+                self._log_handle = self._log_path().open("ab")
                 self._proc = subprocess.Popen(
                     cmd,
                     cwd=str(self.cwd),
@@ -475,7 +508,7 @@ class HermesDashboardManager:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=1.0, read=1.0, write=1.0, pool=1.0)) as client:
             while time.monotonic() < deadline:
                 if self._proc.poll() is not None:
-                    self._set_error("process_exited", f"dashboard exited with code {self._proc.returncode}")
+                    self._set_process_exit_error(self._proc.returncode)
                     return
                 try:
                     response = await client.get(url)

@@ -65,6 +65,7 @@ _DASHBOARD_PUBLIC_ERROR_MESSAGES = {
     "base_path_unsupported": "Installed Hermes dashboard does not support secure proxy base paths. Update Hermes Agent or disable strict dashboard base-path mode.",
     "disabled": "Hermes dashboard integration is disabled.",
     "executable_not_found": "Hermes dashboard executable was not found. Check HERMELIN_HERMES_DASHBOARD_CMD.",
+    "frontend_not_built": "Native Hermes dashboard frontend is not built. Run `hermes update` or build the Hermes dashboard web UI with npm, then restart hermelinChat.",
     "port_in_use": "The configured Hermes dashboard port is already in use by another process. Stop the stale dashboard process or choose a different dashboard port.",
     "port_still_in_use": "Hermes dashboard is stopped, but the configured dashboard port is still in use by another process.",
     "process_exited": "Hermes dashboard exited during startup. Check hermelinChat server logs for details.",

@@ -227,6 +227,36 @@ class HermesDashboardManagerTests(unittest.TestCase):
             "https://example.com/oauth",
         )
 
+    def test_dashboard_start_reports_missing_native_dashboard_frontend_from_log(self):
+        from hermelin.hermes_dashboard import HermesDashboardManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            fake = root / "fake-hermes"
+            fake.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "print('Web UI frontend not built and npm is not available.')\n"
+                "print('Install Node.js, then run:  cd web && npm install && npm run build')\n"
+                "sys.exit(1)\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            manager = HermesDashboardManager(
+                hermes_command=str(fake),
+                hermes_home=root / "home",
+                cwd=root / "cwd",
+                port=45678,
+                base_path=DASHBOARD_BASE_PATH,
+                startup_timeout_seconds=1,
+            )
+
+            status = asyncio.run(manager.start())
+
+        self.assertFalse(status["running"])
+        self.assertEqual(status["last_error_code"], "frontend_not_built")
+        self.assertIn("frontend is not built", status["last_error"])
+
 
 class HermesDashboardReservedRunnerTests(unittest.TestCase):
     def test_reserved_dashboard_runner_id_does_not_resolve_artifact_manifest(self):
@@ -324,6 +354,13 @@ class _PortBusyDashboardManager(_LeakyDashboardManager):
     def status(self):
         data = super().status()
         data["last_error_code"] = "port_in_use"
+        return data
+
+
+class _FrontendMissingDashboardManager(_LeakyDashboardManager):
+    def status(self):
+        data = super().status()
+        data["last_error_code"] = "frontend_not_built"
         return data
 
 
@@ -480,6 +517,21 @@ class HermesDashboardEndpointTests(unittest.TestCase):
         self.assertFalse(body["running"])
         self.assertEqual(body["last_error_code"], "port_in_use")
         self.assertIn("port is already in use", body["last_error"])
+        self.assertNotIn(_LeakyDashboardManager.secret, response.text)
+        self.assertNotIn("/tmp/private", response.text)
+
+    def test_dashboard_public_status_reports_missing_native_frontend_without_raw_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = _create_dashboard_app(tmpdir, _FrontendMissingDashboardManager)
+
+            response = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/start"))
+
+        body = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(body["running"])
+        self.assertEqual(body["last_error_code"], "frontend_not_built")
+        self.assertIn("dashboard frontend is not built", body["last_error"])
+        self.assertIn("hermes update", body["last_error"])
         self.assertNotIn(_LeakyDashboardManager.secret, response.text)
         self.assertNotIn("/tmp/private", response.text)
 
