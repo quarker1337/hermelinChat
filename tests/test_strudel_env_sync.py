@@ -85,6 +85,7 @@ class StrudelEnvSyncTests(unittest.TestCase):
                 cfg_text = (hermes_home / 'config.yaml').read_text(encoding='utf-8')
                 self.assertIn('default_artifacts:\n    strudel: true', cfg_text)
                 self.assertIn('toolsets:\n    strudel: true', cfg_text)
+                self.assertIn('platform_toolsets:\n  cli:\n    - hermes-cli\n    - artifacts\n    - strudel', cfg_text)
                 env_text = env_file.read_text(encoding='utf-8')
                 self.assertIn('strudel', env_text)
 
@@ -95,6 +96,8 @@ class StrudelEnvSyncTests(unittest.TestCase):
                 cfg_text = (hermes_home / 'config.yaml').read_text(encoding='utf-8')
                 self.assertIn('default_artifacts:\n    strudel: false', cfg_text)
                 self.assertIn('toolsets:\n    strudel: false', cfg_text)
+                self.assertIn('platform_toolsets:\n  cli:\n    - hermes-cli\n    - artifacts\n', cfg_text)
+                self.assertNotIn('    - strudel', cfg_text)
                 env_text = env_file.read_text(encoding='utf-8')
                 self.assertNotIn('strudel', env_text)
         finally:

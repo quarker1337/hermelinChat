@@ -16,11 +16,28 @@ export interface ArtifactPanelProps {
   onSelectArtifact?: (id: string) => void
   onClose?: () => void
   onDeleteArtifact?: (id: string) => void
+  onRenameArtifact?: (id: string, title: string) => void
+  onClearSessionArtifacts?: () => void
 }
 
 // ---------------------------------------------------------------------------
 // Icon sub-components
 // ---------------------------------------------------------------------------
+
+export function isClearableSessionArtifact(artifact: ArtifactTab | null | undefined): boolean {
+  if (!artifact) return false
+  if (Boolean(artifact.persistent)) return false
+  if (artifact.default === true) return false
+  if (artifact.deletable === false) return false
+  return true
+}
+
+export function canShowArtifactActions(artifact: ArtifactTab | null | undefined): boolean {
+  if (!artifact?.id) return false
+  if (artifact.default === true) return false
+  if (artifact.deletable === false) return false
+  return true
+}
 
 interface IconButtonProps {
   title: string
@@ -231,6 +248,43 @@ function ArtifactTabIcon({ type }: ArtifactTabIconProps) {
   )
 }
 
+export interface ArtifactRuntimeState {
+  expectedLive: boolean
+  hasRuntimeStatus: boolean
+  isLive: boolean
+  isStopped: boolean
+  runnerStatus: string
+}
+
+export function getArtifactRuntimeState(artifact?: ArtifactTab | null): ArtifactRuntimeState {
+  if (!artifact) {
+    return {
+      expectedLive: false,
+      hasRuntimeStatus: false,
+      isLive: false,
+      isStopped: false,
+      runnerStatus: '',
+    }
+  }
+
+  const refreshSeconds = Number(artifact.refresh_seconds || 0)
+  const expectedLive = Boolean(artifact.live) || refreshSeconds > 0
+  const runnerStatus = String(artifact.runner_status || '')
+  const hasRuntimeStatus =
+    Object.prototype.hasOwnProperty.call(artifact, 'runner_active') ||
+    Object.prototype.hasOwnProperty.call(artifact, 'runner_status')
+  const runnerActive = artifact.runner_active === true || runnerStatus === 'running' || runnerStatus === 'running_unverified'
+  const isLive = expectedLive && (hasRuntimeStatus ? runnerActive : true)
+
+  return {
+    expectedLive,
+    hasRuntimeStatus,
+    isLive,
+    isStopped: expectedLive && hasRuntimeStatus && !runnerActive,
+    runnerStatus,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -243,10 +297,15 @@ export default function ArtifactPanel({
   onSelectArtifact,
   onClose,
   onDeleteArtifact,
+  onRenameArtifact,
+  onClearSessionArtifacts,
 }: ArtifactPanelProps) {
   const activeArtifact = artifacts.find((artifact) => artifact?.id === activeArtifactId) || artifacts[0] || null
+  const activeRuntime = getArtifactRuntimeState(activeArtifact)
+  const sessionArtifactCount = artifacts.filter(isClearableSessionArtifact).length
 
   const [tabMenuOpen, setTabMenuOpen] = useState(false)
+  const [artifactMenuId, setArtifactMenuId] = useState<string | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -257,11 +316,15 @@ export default function ArtifactPanel({
       const target = event.target as Node
       if (menuRef.current && menuRef.current.contains(target)) return
       if (triggerRef.current && triggerRef.current.contains(target)) return
+      setArtifactMenuId(null)
       setTabMenuOpen(false)
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setTabMenuOpen(false)
+      if (event.key === 'Escape') {
+        setArtifactMenuId(null)
+        setTabMenuOpen(false)
+      }
     }
 
     window.addEventListener('mousedown', handlePointerDown)
@@ -420,12 +483,23 @@ export default function ArtifactPanel({
           background: ${SLATE.border}55;
         }
 
-        .artifactPanelDropdown__row:hover .artifactPanelDropdown__trash {
+        .artifactPanelDropdown__row:hover .artifactPanelDropdown__kebab,
+        .artifactPanelDropdown__kebab[aria-expanded="true"] {
           opacity: 1;
-          pointer-events: auto;
         }
 
-        .artifactPanelDropdown__trash:hover {
+        .artifactPanelDropdown__kebab:hover {
+          color: ${AMBER[300]};
+          background: ${SLATE.border}66;
+        }
+
+        .artifactPanelDropdown__action:hover {
+          background: ${AMBER[900]}22;
+          color: ${AMBER[200]};
+        }
+
+        .artifactPanelDropdown__action--danger:hover {
+          background: ${SLATE.danger}22;
           color: ${SLATE.danger};
         }
 
@@ -495,7 +569,10 @@ export default function ArtifactPanel({
           <button
             ref={triggerRef}
             type="button"
-            onClick={() => setTabMenuOpen((open) => !open)}
+            onClick={() => {
+              setArtifactMenuId(null)
+              setTabMenuOpen((open) => !open)
+            }}
             className="artifactPanelHeader__trigger"
             style={{
               flex: 1,
@@ -535,7 +612,7 @@ export default function ArtifactPanel({
 
             <div style={{ flex: 1 }} />
 
-            {(activeArtifact?.live as boolean | undefined) ? (
+            {activeRuntime.isLive ? (
               <span
                 style={{
                   display: 'inline-flex',
@@ -557,6 +634,23 @@ export default function ArtifactPanel({
                   }}
                 />
                 <span style={{ fontSize: 10 }}>live</span>
+              </span>
+            ) : activeRuntime.isStopped ? (
+              <span
+                title={activeRuntime.runnerStatus === 'stale_pid' ? 'runner stopped or stale PID' : 'runner stopped'}
+                style={{
+                  flexShrink: 0,
+                  fontSize: 9,
+                  color: AMBER[300],
+                  border: `1px solid ${AMBER[500]}66`,
+                  background: `${AMBER[900]}22`,
+                  padding: '1px 7px',
+                  borderRadius: 999,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                }}
+              >
+                stopped
               </span>
             ) : null}
 
@@ -659,128 +753,307 @@ export default function ArtifactPanel({
               animation: 'artifactTabMenuDrop 0.12s ease both',
             }}
           >
+            {onClearSessionArtifacts && sessionArtifactCount > 0 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    const confirmed = typeof window === 'undefined'
+                      ? true
+                      : window.confirm(`Delete ${sessionArtifactCount} transient artifact${sessionArtifactCount === 1 ? '' : 's'}?`)
+                    if (!confirmed) return
+                    setArtifactMenuId(null)
+                    setTabMenuOpen(false)
+                    onClearSessionArtifacts()
+                  }}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    padding: '8px 10px',
+                    border: `1px solid ${SLATE.border}`,
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    background: `${SLATE.surface}cc`,
+                    color: SLATE.textBright,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 11,
+                    textAlign: 'left',
+                  }}
+                  title="Delete all transient, non-saved artifacts"
+                >
+                  <span>Clear transient artifacts</span>
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      fontSize: 9,
+                      color: AMBER[300],
+                      border: `1px solid ${AMBER[500]}66`,
+                      background: `${AMBER[900]}22`,
+                      padding: '1px 6px',
+                      borderRadius: 999,
+                    }}
+                  >
+                    {sessionArtifactCount}
+                  </span>
+                </button>
+                <div style={{ height: 1, background: SLATE.border, opacity: 0.6, margin: '6px 2px' }} />
+              </>
+            ) : null}
+
             {artifacts.map((artifact) => {
-              const active = activeArtifact?.id === artifact?.id
-              const title = artifact?.title || artifact?.id || 'untitled'
+              const artifactId = artifact?.id || ''
+              const active = activeArtifact?.id === artifactId
+              const title = artifact?.title || artifactId || 'untitled'
               const type = String(artifact?.type || 'unknown')
+              const runtime = getArtifactRuntimeState(artifact)
+              const actionMenuOpen = !!artifactId && artifactMenuId === artifactId
+              const artifactActionsAllowed = canShowArtifactActions(artifact)
+              const renameHandler = artifactActionsAllowed ? onRenameArtifact : undefined
+              const deleteHandler = artifactActionsAllowed ? onDeleteArtifact : undefined
+              const actionsAvailable = !!renameHandler || !!deleteHandler
 
               return (
-                <button
-                  key={artifact?.id || artifact?.title}
-                  type="button"
-                  onClick={() => {
-                    onSelectArtifact?.(artifact?.id)
-                    setTabMenuOpen(false)
-                  }}
+                <div
+                  key={artifactId || artifact?.title}
                   className="artifactPanelDropdown__row"
                   style={{
                     width: '100%',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 10px',
+                    gap: 4,
                     border: 0,
                     borderRadius: 8,
-                    cursor: 'pointer',
                     background: active ? `${AMBER[900]}2a` : 'transparent',
                     color: active ? AMBER[300] : SLATE.text,
                     fontFamily: "'JetBrains Mono', monospace",
                     textAlign: 'left',
                     borderLeft: active ? `2px solid ${AMBER[400]}` : `2px solid transparent`,
+                    position: 'relative',
                   }}
                   title={title}
                 >
-                  <span style={{ color: active ? AMBER[400] : SLATE.muted, display: 'flex', alignItems: 'center' }}>
-                    <ArtifactTabIcon type={type} />
-                  </span>
-
-                  <span
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!artifactId) return
+                      onSelectArtifact?.(artifactId)
+                      setArtifactMenuId(null)
+                      setTabMenuOpen(false)
+                    }}
                     style={{
                       flex: 1,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      fontSize: 11,
-                      color: active ? AMBER[200] : SLATE.textBright,
+                      minWidth: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 6px 8px 10px',
+                      border: 0,
+                      background: 'transparent',
+                      color: 'inherit',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      textAlign: 'left',
+                      cursor: 'pointer',
                     }}
+                    title={title}
                   >
-                    {title}
-                  </span>
+                    <span style={{ color: active ? AMBER[400] : SLATE.muted, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                      <ArtifactTabIcon type={type} />
+                    </span>
 
-                  {(artifact?.live as boolean | undefined) ? (
                     <span
-                      title="live"
                       style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: '50%',
-                        background: SLATE.success,
-                        animation: 'artifactLivePulse 2s ease infinite',
-                        flexShrink: 0,
+                        flex: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: 11,
+                        color: active ? AMBER[200] : SLATE.textBright,
                       }}
-                    />
-                  ) : null}
+                    >
+                      {title}
+                    </span>
 
-                  {(artifact?.persistent as boolean | undefined) ? (
+                    {runtime.isLive ? (
+                      <span
+                        title="live"
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: SLATE.success,
+                          animation: 'artifactLivePulse 2s ease infinite',
+                          flexShrink: 0,
+                        }}
+                      />
+                    ) : runtime.isStopped ? (
+                      <span
+                        title={runtime.runnerStatus === 'stale_pid' ? 'runner stopped or stale PID' : 'runner stopped'}
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: AMBER[400],
+                          opacity: 0.7,
+                          flexShrink: 0,
+                        }}
+                      />
+                    ) : null}
+
+                    {(artifact?.persistent as boolean | undefined) ? (
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          fontSize: 9,
+                          color: SLATE.purple,
+                          border: `1px solid ${SLATE.purple}66`,
+                          background: `${SLATE.purple}22`,
+                          padding: '1px 6px',
+                          borderRadius: 999,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                        }}
+                      >
+                        saved
+                      </span>
+                    ) : null}
+
                     <span
                       style={{
                         flexShrink: 0,
                         fontSize: 9,
-                        color: SLATE.purple,
-                        border: `1px solid ${SLATE.purple}66`,
-                        background: `${SLATE.purple}22`,
+                        color: SLATE.muted,
+                        border: `1px solid ${SLATE.border}`,
                         padding: '1px 6px',
                         borderRadius: 999,
                         textTransform: 'uppercase',
                         letterSpacing: '0.06em',
                       }}
                     >
-                      saved
+                      {type}
                     </span>
-                  ) : null}
+                  </button>
 
-                  <span
-                    style={{
-                      flexShrink: 0,
-                      fontSize: 9,
-                      color: SLATE.muted,
-                      border: `1px solid ${SLATE.border}`,
-                      padding: '1px 6px',
-                      borderRadius: 999,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                    }}
-                  >
-                    {type}
-                  </span>
-
-                  {onDeleteArtifact ? (
+                  {actionsAvailable ? (
                     <button
                       type="button"
-                      className="artifactPanelDropdown__trash"
+                      className="artifactPanelDropdown__kebab"
                       onClick={(event) => {
+                        event.preventDefault()
                         event.stopPropagation()
-                        onDeleteArtifact(artifact?.id)
+                        setArtifactMenuId((openId) => (openId === artifactId ? null : artifactId))
                       }}
                       style={{
                         border: 0,
                         background: 'transparent',
                         color: SLATE.muted,
-                        fontSize: 14,
+                        fontSize: 16,
                         lineHeight: 1,
-                        padding: '0 4px',
+                        padding: '4px 8px',
+                        marginRight: 4,
+                        borderRadius: 6,
                         cursor: 'pointer',
                         flexShrink: 0,
-                        opacity: 0,
-                        pointerEvents: 'none',
+                        opacity: actionMenuOpen ? 1 : 0.45,
                       }}
-                      title="Delete"
-                      aria-label="Delete"
+                      title="Artifact actions"
+                      aria-label={`Artifact actions for ${title}`}
+                      aria-expanded={actionMenuOpen}
                     >
-                      &times;
+                      ⋯
                     </button>
                   ) : null}
-                </button>
+
+                  {actionsAvailable && actionMenuOpen ? (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 'calc(100% - 2px)',
+                        right: 6,
+                        zIndex: 90,
+                        border: `1px solid ${SLATE.border}`,
+                        background: `${SLATE.elevated}ff`,
+                        borderRadius: 8,
+                        boxShadow: '0 10px 24px rgba(0,0,0,0.5)',
+                        padding: 4,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                        minWidth: 150,
+                      }}
+                    >
+                      {renameHandler ? (
+                        <button
+                          type="button"
+                          className="artifactPanelDropdown__action"
+                          onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            const nextTitle = typeof window === 'undefined'
+                              ? title
+                              : window.prompt('Rename artifact', title)
+                            if (nextTitle === null) return
+                            const cleanTitle = String(nextTitle || '').trim()
+                            if (!cleanTitle || cleanTitle === title) return
+                            setArtifactMenuId(null)
+                            setTabMenuOpen(false)
+                            renameHandler(artifactId, cleanTitle)
+                          }}
+                          style={{
+                            border: 0,
+                            background: 'transparent',
+                            color: SLATE.textBright,
+                            cursor: 'pointer',
+                            padding: '7px 10px',
+                            borderRadius: 6,
+                            whiteSpace: 'nowrap',
+                            fontSize: 11,
+                            fontFamily: "'JetBrains Mono', monospace",
+                            textAlign: 'left',
+                          }}
+                        >
+                          Rename artifact
+                        </button>
+                      ) : null}
+
+                      {deleteHandler ? (
+                        <button
+                          type="button"
+                          className="artifactPanelDropdown__action artifactPanelDropdown__action--danger"
+                          onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            const confirmed = typeof window === 'undefined'
+                              ? true
+                              : window.confirm(`Delete artifact "${title}"?`)
+                            if (!confirmed) return
+                            setArtifactMenuId(null)
+                            setTabMenuOpen(false)
+                            deleteHandler(artifactId)
+                          }}
+                          style={{
+                            border: 0,
+                            background: 'transparent',
+                            color: SLATE.textBright,
+                            cursor: 'pointer',
+                            padding: '7px 10px',
+                            borderRadius: 6,
+                            whiteSpace: 'nowrap',
+                            fontSize: 11,
+                            fontFamily: "'JetBrains Mono', monospace",
+                            textAlign: 'left',
+                          }}
+                        >
+                          Delete artifact
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               )
             })}
           </div>
@@ -830,7 +1103,11 @@ export default function ArtifactPanel({
             updated {formatTimeAgo(activeArtifact?.timestamp)}
           </span>
           <span>
-            {(activeArtifact?.live as boolean | undefined) ? `auto-refresh: ${Math.max(0, Number(activeArtifact?.refresh_seconds || 0))}s` : 'manual refresh'}
+            {activeRuntime.isLive
+              ? `auto-refresh: ${Math.max(0, Number(activeArtifact?.refresh_seconds || 0))}s`
+              : activeRuntime.isStopped
+                ? 'runner stopped'
+                : 'manual refresh'}
           </span>
         </div>
       ) : null}

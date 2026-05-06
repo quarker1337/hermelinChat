@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,8 @@ except Exception:  # pragma: no cover - safe fallback if PyYAML is unavailable
     yaml = None
 
 _PACKAGE_ASSET_DIR = Path(__file__).resolve().parent / "default_artifact_assets"
+_DEFAULT_FLAGS_CACHE_LOCK = threading.RLock()
+_DEFAULT_FLAGS_CACHE: dict[Path, tuple[int, int, dict[str, bool]]] = {}
 
 _DEFAULT_ARTIFACTS: tuple[dict[str, Any], ...] = (
     {
@@ -49,27 +52,41 @@ def _load_default_artifact_flags(*, artifact_root: Path | None = None, hermes_ho
         return {}
 
     try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        resolved = config_path.expanduser().resolve()
+        stat = resolved.stat()
+    except Exception:
+        return {}
+
+    with _DEFAULT_FLAGS_CACHE_LOCK:
+        cached = _DEFAULT_FLAGS_CACHE.get(resolved)
+        if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+            return dict(cached[2])
+
+    try:
+        data = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
     except Exception:
         return {}
 
     if not isinstance(data, dict):
-        return {}
+        flags: dict[str, bool] = {}
+    else:
+        node: Any = data
+        for key in ("hermelin", "default_artifacts"):
+            if not isinstance(node, dict):
+                node = {}
+                break
+            node = node.get(key, {})
 
-    node: Any = data
-    for key in ("hermelin", "default_artifacts"):
-        if not isinstance(node, dict):
-            return {}
-        node = node.get(key, {})
+        flags = {}
+        if isinstance(node, dict):
+            for key, value in node.items():
+                artifact_id = str(key or "").strip()
+                if artifact_id:
+                    flags[artifact_id] = bool(value)
 
-    if not isinstance(node, dict):
-        return {}
+    with _DEFAULT_FLAGS_CACHE_LOCK:
+        _DEFAULT_FLAGS_CACHE[resolved] = (stat.st_mtime_ns, stat.st_size, dict(flags))
 
-    flags: dict[str, bool] = {}
-    for key, value in node.items():
-        artifact_id = str(key or "").strip()
-        if artifact_id:
-            flags[artifact_id] = bool(value)
     return flags
 
 

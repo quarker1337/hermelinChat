@@ -722,6 +722,19 @@ function toggleRecord() {
   }
 }
 
+function downloadRecordingBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  // Firefox can cancel blob downloads if the object URL is revoked immediately.
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  setTimeout(() => a.remove(), 30000);
+}
+
 function startRecording() {
   try {
     const ctx = typeof getAudioContext === 'function' ? getAudioContext() : null;
@@ -782,13 +795,8 @@ function startRecording() {
 
         // Encode WAV
         const wavBlob = encodeWAV(interleaved, sampleRate, numChannels);
-        const url = URL.createObjectURL(wavBlob);
-        const a = document.createElement('a');
         const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        a.href = url;
-        a.download = `strudel-${dateStr}.wav`;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadRecordingBlob(wavBlob, `strudel-${dateStr}.wav`);
 
         const sizeMB = (wavBlob.size / (1024 * 1024)).toFixed(1);
         const durSec = (length / sampleRate).toFixed(1);
@@ -798,13 +806,8 @@ function startRecording() {
         addLog('WAV conversion failed, saving as webm instead…', 'warn');
         // Fallback: just save the webm
         const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
         const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        a.href = url;
-        a.download = `strudel-${dateStr}.webm`;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadRecordingBlob(blob, `strudel-${dateStr}.webm`);
         addLog(`Webm fallback saved (${(blob.size / 1024).toFixed(1)} KB)`);
       }
     };

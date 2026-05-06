@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling>=1.25.0"]
+requires = ["hatchling>=1.25.0", "editables>=0.3"]
 build-backend = "hatchling.build"
 
 [project]
 name = "hermelin-chat"
-version = "0.14"
+version = "0.15"
 description = "Web UI for Hermes Agent (PTY terminal + session sidebar)"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -19,7 +19,7 @@ function installAssetStubs() {
 
   const originalResolveFilename = Module._resolveFilename
   const originalLoad = Module._load
-  const assetPattern = /\.(svg(\?raw)?|png)$/
+  const assetPattern = /\.(css|svg(\?raw)?|png)$/
 
   Module._resolveFilename = function patchedResolveFilename(request, parent, isMain, options) {
     if (assetPattern.test(request)) return request
@@ -65,6 +65,10 @@ function makeWindow({ innerWidth = 1400, storageSeed = {} } = {}) {
 
   return {
     innerWidth,
+    location: {
+      origin: 'https://hermelin.test',
+      href: 'https://hermelin.test/',
+    },
     localStorage: makeStorage(storageSeed),
     addEventListener(type, handler) {
       const next = listeners.get(type) || []
@@ -256,11 +260,677 @@ test('artifact store preserves tab references for unchanged poll payloads', () =
   assert.equal(secondTabs[0], firstArtifact)
 })
 
-test('index.css restores the Google Fonts JetBrains Mono import for terminal parity', () => {
-  const indexCssPath = path.join(SOURCE_ROOT, 'index.css')
-  const source = fs.readFileSync(indexCssPath, 'utf8')
+test('artifact store keeps render data stable for timestamp-only live updates', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
 
-  assert.match(source, /fonts\.googleapis\.com\/css2\?family=JetBrains\+Mono/)
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  const payload = [
+    {
+      id: 'live-log',
+      type: 'logs',
+      title: 'Live Log',
+      timestamp: 1713379200000,
+      data: { lines: [{ level: 'info', message: 'still selectable' }] },
+    },
+  ]
+
+  useArtifactStore.getState().applyArtifacts(payload)
+  const firstArtifact = useArtifactStore.getState().tabs[0]
+  const firstData = firstArtifact.data
+
+  const nextPayload = JSON.parse(JSON.stringify(payload))
+  nextPayload[0].timestamp = 1713379205000
+  useArtifactStore.getState().applyArtifacts(nextPayload)
+
+  const secondArtifact = useArtifactStore.getState().tabs[0]
+  assert.notEqual(secondArtifact, firstArtifact)
+  assert.equal(secondArtifact.timestamp, 1713379205000)
+  assert.equal(secondArtifact.data, firstData)
+})
+
+test('artifact runtime state distinguishes persisted live expectation from active runner', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { getArtifactRuntimeState } = loadCompiled('components/ArtifactPanel.js')
+
+  assert.deepEqual(
+    getArtifactRuntimeState({ id: 'legacy-live', type: 'iframe', live: true, refresh_seconds: 2 }),
+    {
+      expectedLive: true,
+      hasRuntimeStatus: false,
+      isLive: true,
+      isStopped: false,
+      runnerStatus: '',
+    },
+  )
+
+  assert.deepEqual(
+    getArtifactRuntimeState({ id: 'saved-live', type: 'iframe', live: true, refresh_seconds: 2, runner_active: false, runner_status: 'stopped' }),
+    {
+      expectedLive: true,
+      hasRuntimeStatus: true,
+      isLive: false,
+      isStopped: true,
+      runnerStatus: 'stopped',
+    },
+  )
+
+  assert.deepEqual(
+    getArtifactRuntimeState({ id: 'active-live', type: 'iframe', live: true, runner_active: true, runner_status: 'running' }),
+    {
+      expectedLive: true,
+      hasRuntimeStatus: true,
+      isLive: true,
+      isStopped: false,
+      runnerStatus: 'running',
+    },
+  )
+})
+
+test('artifact store treats runner status-only changes as semantic updates', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  useArtifactStore.getState().applyArtifacts([
+    {
+      id: 'saved-live',
+      type: 'iframe',
+      title: 'Saved live artifact',
+      live: true,
+      refresh_seconds: 2,
+      runner_active: true,
+      runner_status: 'running',
+      timestamp: 1713379200000,
+      updated_at: 1713379200000,
+      data: { src: 'http://127.0.0.1:43123/' },
+    },
+  ])
+  const firstTabs = useArtifactStore.getState().tabs
+  const firstArtifact = firstTabs[0]
+  const firstData = firstArtifact.data
+
+  useArtifactStore.getState().applyArtifacts([
+    {
+      id: 'saved-live',
+      type: 'iframe',
+      title: 'Saved live artifact',
+      live: true,
+      refresh_seconds: 2,
+      runner_active: false,
+      runner_status: 'stopped',
+      timestamp: 1713379200000,
+      updated_at: 1713379200000,
+      data: { src: 'http://127.0.0.1:43123/' },
+    },
+  ])
+
+  const secondTabs = useArtifactStore.getState().tabs
+  assert.notEqual(secondTabs, firstTabs)
+  assert.notEqual(secondTabs[0], firstArtifact)
+  assert.equal(secondTabs[0].runner_active, false)
+  assert.equal(secondTabs[0].runner_status, 'stopped')
+  assert.equal(secondTabs[0].data, firstData)
+})
+
+test('artifact bridge commands do not steal active iframe focus', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  const { handleControlMessage } = loadCompiled('components/artifacts/bridge.js')
+  useArtifactStore.getState().reset()
+
+  useArtifactStore.getState().applyArtifacts([
+    {
+      id: 'focused-frame',
+      type: 'iframe',
+      title: 'Focused frame',
+      timestamp: 1,
+      data: { srcdoc: '<button>typing here</button>' },
+    },
+    {
+      id: 'background-frame',
+      type: 'iframe',
+      title: 'Background frame',
+      timestamp: 2,
+      data: { srcdoc: '<button>background</button>' },
+    },
+  ])
+  useArtifactStore.getState().setActiveId('focused-frame')
+
+  assert.equal(handleControlMessage({
+    type: 'artifact_bridge_command',
+    payload: { artifact_id: 'background-frame', command: 'ping' },
+  }), true)
+
+  assert.equal(useArtifactStore.getState().activeId, 'focused-frame')
+  assert.equal(useArtifactStore.getState().panelOpen, true)
+})
+
+test('artifact src iframes allow downloads for browser-side recorders', () => {
+  const rendererPath = path.join(SOURCE_ROOT, 'components', 'artifacts', 'ArtifactRenderer.tsx')
+  const rendererSource = fs.readFileSync(rendererPath, 'utf8')
+
+  assert.match(rendererSource, /sandbox=\{src \? 'allow-scripts allow-forms allow-same-origin allow-downloads'/)
+})
+
+test('Strudel recorder keeps blob URLs alive for Firefox downloads', () => {
+  const strudelPath = path.resolve(__dirname, '..', '..', 'hermelin', 'default_artifact_assets', 'strudel', 'index.html')
+  const strudelSource = fs.readFileSync(strudelPath, 'utf8')
+
+  assert.match(strudelSource, /function downloadRecordingBlob\(/)
+  assert.match(strudelSource, /document\.body\.appendChild\(a\)/)
+  assert.match(strudelSource, /setTimeout\(\(\) => URL\.revokeObjectURL\(url\),/)
+})
+
+test('artifact iframe data bridge is bounded and omits iframe transport fields', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createArtifactDataBridgeMessage, resolveArtifactFrameTargetOrigin, sanitizeArtifactSrcDoc } = loadCompiled('components/artifacts/ArtifactRenderer.js')
+
+  const sanitizedSrcDoc = sanitizeArtifactSrcDoc(`
+<script>
+console.log('artifact ready')
+//# sourceMappingURL=2
+</script>
+<style>
+body { color: red }
+/*# sourceMappingURL=theme.css.map */
+</style>
+`)
+  assert.match(sanitizedSrcDoc, /console\.log\('artifact ready'\)/)
+  assert.match(sanitizedSrcDoc, /body \{ color: red \}/)
+  assert.doesNotMatch(sanitizedSrcDoc, /sourceMappingURL/)
+
+  assert.deepEqual(
+    createArtifactDataBridgeMessage('dashboard', {
+      src: '/api/default-artifacts/dashboard/index.html',
+      srcdoc: '<script>expensive html</script>',
+      html: '<div>inline html</div>',
+      rows: [{ label: 'ok', value: 1 }],
+      title: 'Runtime data',
+    }),
+    {
+      type: 'hermes:artifact-data',
+      artifactId: 'dashboard',
+      data: {
+        rows: [{ label: 'ok', value: 1 }],
+        title: 'Runtime data',
+      },
+      artifactData: {
+        rows: [{ label: 'ok', value: 1 }],
+        title: 'Runtime data',
+      },
+    },
+  )
+
+  assert.equal(createArtifactDataBridgeMessage('empty', { src: '/only/transport.html' }), null)
+  assert.equal(createArtifactDataBridgeMessage('huge', { rows: 'x'.repeat(300 * 1024) }), null)
+  assert.equal(resolveArtifactFrameTargetOrigin(undefined), '*')
+  assert.equal(resolveArtifactFrameTargetOrigin('/api/default-artifacts/strudel/index.html'), 'https://hermelin.test')
+  assert.equal(resolveArtifactFrameTargetOrigin('https://example.com/artifact.html'), null)
+})
+
+test('artifact panel width no-ops when clamped width is unchanged', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow({ innerWidth: 1400 }))
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+  useArtifactStore.getState().setPanelWidth(640)
+
+  let updates = 0
+  const unsubscribe = useArtifactStore.subscribe(() => {
+    updates += 1
+  })
+
+  try {
+    useArtifactStore.getState().setPanelWidth(640)
+    assert.equal(updates, 0)
+  } finally {
+    unsubscribe()
+  }
+})
+
+test('artifact store can explicitly clear transient artifacts and refresh without auto-opening', async () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const originalFetch = global.fetch
+  const calls = []
+  global.fetch = async (path, opts = {}) => {
+    calls.push({ path: String(path), method: String(opts.method || 'GET') })
+    if (String(path) === '/api/artifacts/clear-session') {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, removed_artifacts: 1, removed_artifact_ids: ['transient'] }
+        },
+      }
+    }
+    if (String(path) === '/api/artifacts') {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return [
+            {
+              id: 'saved',
+              type: 'markdown',
+              title: 'Saved',
+              persistent: true,
+              timestamp: 2,
+              data: { markdown: 'still here' },
+            },
+          ]
+        },
+      }
+    }
+    throw new Error(`unexpected fetch ${String(path)}`)
+  }
+
+  try {
+    const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+    useArtifactStore.getState().reset()
+    useArtifactStore.getState().applyArtifacts([
+      { id: 'transient', type: 'markdown', title: 'Transient', timestamp: 1, data: { markdown: 'tmp' } },
+      { id: 'saved', type: 'markdown', title: 'Saved', persistent: true, timestamp: 2, data: { markdown: 'saved' } },
+    ])
+    useArtifactStore.setState({ panelOpen: false, panelDismissed: true })
+
+    assert.equal(typeof useArtifactStore.getState().clearSessionArtifacts, 'function')
+    await useArtifactStore.getState().clearSessionArtifacts()
+
+    assert.deepEqual(calls, [
+      { path: '/api/artifacts/clear-session', method: 'POST' },
+      { path: '/api/artifacts', method: 'GET' },
+    ])
+    assert.deepEqual(useArtifactStore.getState().tabs.map((item) => item.id), ['saved'])
+    assert.equal(useArtifactStore.getState().panelOpen, false)
+  } finally {
+    if (originalFetch === undefined) delete global.fetch
+    else global.fetch = originalFetch
+  }
+})
+
+test('artifact store can rename an artifact and refresh without auto-opening', async () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const originalFetch = global.fetch
+  const calls = []
+  global.fetch = async (path, opts = {}) => {
+    calls.push({
+      path: String(path),
+      method: String(opts.method || 'GET'),
+      body: opts.body ? JSON.parse(String(opts.body)) : null,
+    })
+    if (String(path) === '/api/artifacts/chart/rename') {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, artifact_id: 'chart', title: 'Quarterly Revenue' }
+        },
+      }
+    }
+    if (String(path) === '/api/artifacts') {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return [
+            {
+              id: 'chart',
+              type: 'markdown',
+              title: 'Quarterly Revenue',
+              timestamp: 1,
+              data: { markdown: 'same data' },
+            },
+          ]
+        },
+      }
+    }
+    throw new Error(`unexpected fetch ${String(path)}`)
+  }
+
+  try {
+    const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+    useArtifactStore.getState().reset()
+    useArtifactStore.getState().applyArtifacts([
+      { id: 'chart', type: 'markdown', title: 'Chart', timestamp: 1, data: { markdown: 'same data' } },
+    ])
+    useArtifactStore.setState({ panelOpen: false, panelDismissed: true })
+
+    assert.equal(typeof useArtifactStore.getState().renameTab, 'function')
+    await useArtifactStore.getState().renameTab('chart', 'Quarterly Revenue')
+
+    assert.deepEqual(calls, [
+      { path: '/api/artifacts/chart/rename', method: 'POST', body: { title: 'Quarterly Revenue' } },
+      { path: '/api/artifacts', method: 'GET', body: null },
+    ])
+    assert.equal(useArtifactStore.getState().tabs[0].title, 'Quarterly Revenue')
+    assert.equal(useArtifactStore.getState().panelOpen, false)
+  } finally {
+    if (originalFetch === undefined) delete global.fetch
+    else global.fetch = originalFetch
+  }
+})
+
+test('artifact panel exposes discoverable per-artifact and bulk delete actions', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'ArtifactPanel.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /artifactPanelDropdown__kebab/)
+  assert.match(source, /Rename artifact/)
+  assert.match(source, /Delete artifact/)
+  assert.match(source, /Clear transient artifacts/)
+  assert.match(source, /onRenameArtifact/)
+  assert.match(source, /onClearSessionArtifacts/)
+})
+
+test('artifact panel excludes built-in artifacts from transient clear count and row actions', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { isClearableSessionArtifact, canShowArtifactActions } = loadCompiled('components/ArtifactPanel.js')
+
+  const strudel = {
+    id: 'strudel',
+    type: 'iframe',
+    title: 'Strudel',
+    persistent: false,
+    default: true,
+    deletable: false,
+  }
+
+  assert.equal(isClearableSessionArtifact(strudel), false)
+  assert.equal(canShowArtifactActions(strudel), false)
+  assert.equal(isClearableSessionArtifact({ id: 'tmp', type: 'markdown', persistent: false }), true)
+  assert.equal(canShowArtifactActions({ id: 'tmp', type: 'markdown', persistent: false }), true)
+  assert.equal(isClearableSessionArtifact({ id: 'saved', type: 'markdown', persistent: true }), false)
+})
+
+test('terminal write queue waits for xterm write callbacks before draining more output', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalWriteQueue } = loadCompiled('components/terminal/TerminalPane.js')
+  const callbacks = []
+  const writes = []
+  const term = {
+    write(data, callback) {
+      writes.push(data)
+      callbacks.push(callback)
+    },
+  }
+
+  const queue = createTerminalWriteQueue(term)
+  queue.enqueue('first')
+  queue.enqueue('second')
+
+  assert.deepEqual(writes, ['first'])
+  assert.equal(callbacks.length, 1)
+
+  callbacks.shift()()
+  assert.deepEqual(writes, ['first', 'second'])
+  queue.dispose()
+})
+
+test('terminal write queue closes itself when pending output exceeds the byte cap', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalWriteQueue } = loadCompiled('components/terminal/TerminalPane.js')
+  const callbacks = []
+  const reasons = []
+  const term = {
+    write(_data, callback) {
+      callbacks.push(callback)
+    },
+  }
+
+  const queue = createTerminalWriteQueue(term, {
+    maxPendingBytes: 8,
+    writeTimeoutMs: 1000,
+    onBackpressureLimit(reason) {
+      reasons.push(reason)
+    },
+  })
+
+  assert.equal(queue.enqueue('1234'), true)
+  assert.equal(queue.enqueue('56789'), false)
+  assert.deepEqual(reasons, ['overflow'])
+  assert.equal(queue.size(), 0)
+  assert.equal(queue.bytes(), 0)
+  assert.equal(callbacks.length, 1)
+})
+
+test('terminal write queue falls back to safe defaults for invalid option values', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalWriteQueue } = loadCompiled('components/terminal/TerminalPane.js')
+  const callbacks = []
+  const reasons = []
+  const term = {
+    write(_data, callback) {
+      callbacks.push(callback)
+    },
+  }
+
+  const queue = createTerminalWriteQueue(term, {
+    maxPendingBytes: Number.NaN,
+    maxPendingItems: Number.NaN,
+    writeTimeoutMs: Number.NaN,
+    onBackpressureLimit(reason) {
+      reasons.push(reason)
+    },
+  })
+
+  assert.equal(queue.enqueue('1234'), true)
+  assert.equal(queue.enqueue('5678'), true)
+  assert.deepEqual(reasons, [])
+  assert.equal(callbacks.length, 1)
+  queue.dispose()
+})
+
+test('TerminalPane guards websocket lifecycle callbacks against stale sockets', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'terminal', 'TerminalPane.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /const isCurrentSocket = \(\) => !cancelled && !!ws && ws === wsRef\.current/)
+  assert.match(source, /ws\.onopen = \(\) => \{\s*if \(!isCurrentSocket\(\)\) return/)
+  assert.match(source, /ws\.onmessage = \(ev: MessageEvent\) => \{\s*if \(!isCurrentSocket\(\)\) return/)
+})
+
+test('artifact store does not stringify huge payloads to preserve render data', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+  useArtifactStore.getState().reset()
+
+  const payload = [
+    {
+      id: 'huge-live-log',
+      type: 'logs',
+      title: 'Huge Live Log',
+      timestamp: 1713379200000,
+      data: { markdown: 'x'.repeat(300 * 1024) },
+    },
+  ]
+
+  useArtifactStore.getState().applyArtifacts(payload)
+  const firstArtifact = useArtifactStore.getState().tabs[0]
+  const nextPayload = JSON.parse(JSON.stringify(payload))
+  nextPayload[0].timestamp = 1713379205000
+
+  useArtifactStore.getState().applyArtifacts(nextPayload)
+
+  const secondArtifact = useArtifactStore.getState().tabs[0]
+  assert.notEqual(secondArtifact.data, firstArtifact.data)
+})
+
+test('terminal session detector handles Session marker split across frames', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createSessionIdDetector } = loadCompiled('components/terminal/TerminalPane.js')
+  const detected = []
+  const detect = createSessionIdDetector((sid) => detected.push(sid))
+
+  assert.equal(detect('Hermes Ses'), null)
+  assert.equal(detect('sion: 20260429_091600_abcdef ready'), '20260429_091600_abcdef')
+  assert.deepEqual(detected, ['20260429_091600_abcdef'])
+
+  // Only detect once; later prompt redraws should not re-trigger session changes.
+  assert.equal(detect('Session: 20260429_091601_123456'), null)
+  assert.deepEqual(detected, ['20260429_091600_abcdef'])
+})
+
+test('terminal output filter strips TUI mouse tracking while preserving other modes', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { stripTerminalMouseModeSequences } = loadCompiled('components/terminal/TerminalPane.js')
+  const esc = '\u001b'
+
+  assert.equal(stripTerminalMouseModeSequences(`a${esc}[?1000h${esc}[?1006hb`), 'ab')
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?1000;1006l`), '')
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?1049;1000;1006h`), `${esc}[?1049h`)
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?1007h`), `${esc}[?1007h`)
+  assert.equal(stripTerminalMouseModeSequences(`${esc}[?25lcursor${esc}[?2004h`), `${esc}[?25lcursor${esc}[?2004h`)
+})
+
+test('terminal TUI wheel helper maps alternate-screen scroll intent to page keys', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { normalizeTerminalWheelDeltaRows, terminalWheelRowsToPageSequence } = loadCompiled('components/terminal/TerminalPane.js')
+  const esc = '\u001b'
+
+  assert.equal(terminalWheelRowsToPageSequence(normalizeTerminalWheelDeltaRows(48, 0, 30)), `${esc}[6~`)
+  assert.equal(terminalWheelRowsToPageSequence(normalizeTerminalWheelDeltaRows(-3, 1, 30)), `${esc}[5~`)
+  assert.equal(terminalWheelRowsToPageSequence(normalizeTerminalWheelDeltaRows(2, 1, 30)), null)
+  assert.equal(terminalWheelRowsToPageSequence(normalizeTerminalWheelDeltaRows(1, 2, 30)), `${esc}[6~`)
+})
+
+test('terminal mouse mode filter handles private mode sequences split across frames', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { createTerminalMouseModeFilter } = loadCompiled('components/terminal/TerminalPane.js')
+  const esc = '\u001b'
+  const filter = createTerminalMouseModeFilter()
+
+  assert.equal(filter.filter(`before${esc}[?10`), 'before')
+  assert.equal(filter.filter('00;1006hafter'), 'after')
+  assert.equal(filter.filter(`x${esc}[?2`), 'x')
+  assert.equal(filter.filter('5ly'), `${esc}[?25ly`)
+})
+
+test('artifact realtime token ignores stale websocket disconnects', async () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const originalFetch = global.fetch
+  let calls = 0
+  global.fetch = async () => {
+    calls += 1
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return []
+      },
+    }
+  }
+
+  try {
+    const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+    useArtifactStore.getState().reset()
+    useArtifactStore.getState().startPolling()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const initialCalls = calls
+    assert.equal(initialCalls, 1)
+
+    useArtifactStore.getState().setRealtimeUpdatesActive(true, 'new-socket')
+    useArtifactStore.getState().setRealtimeUpdatesActive(false, 'old-socket')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(calls, initialCalls)
+
+    useArtifactStore.getState().setRealtimeUpdatesActive(false, 'new-socket')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(calls, initialCalls + 1)
+  } finally {
+    try {
+      const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+      useArtifactStore.getState().stopPolling()
+    } catch {}
+    if (originalFetch === undefined) delete global.fetch
+    else global.fetch = originalFetch
+  }
+})
+
+test('font setup keeps Google JetBrains globally and self-hosted B1 available for terminal panes', () => {
+  const indexCssPath = path.join(SOURCE_ROOT, 'index.css')
+  const fontsCssPath = path.join(SOURCE_ROOT, 'fonts.css')
+  const mainPath = path.join(SOURCE_ROOT, 'main.tsx')
+  const indexSource = fs.readFileSync(indexCssPath, 'utf8')
+  const fontsSource = fs.readFileSync(fontsCssPath, 'utf8')
+  const mainSource = fs.readFileSync(mainPath, 'utf8')
+
+  assert.match(indexSource, /fonts\.googleapis\.com\/css2\?family=JetBrains\+Mono/)
+  assert.match(mainSource, /import '\.\/fonts\.css'/)
+  assert.match(fontsSource, /font-family:\s*'JetBrains Mono B1'/)
+  assert.doesNotMatch(fontsSource, /font-family:\s*'JetBrains Mono';/)
+})
+
+test('TerminalPane uses the self-hosted B1 font for both classic CLI and TUI launches', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const {
+    inferTerminalFontMode,
+    TERMINAL_FONT_FAMILY_CHAT,
+    TERMINAL_FONT_FAMILY_TUI,
+  } = loadCompiled('components/terminal/TerminalPane.js')
+
+  assert.equal(TERMINAL_FONT_FAMILY_CHAT, "'JetBrains Mono B1', 'JetBrains Mono', monospace")
+  assert.equal(TERMINAL_FONT_FAMILY_TUI, "'JetBrains Mono B1', 'JetBrains Mono', monospace")
+  assert.equal(inferTerminalFontMode({ hermelin: { hermes_launch_mode: 'chat' } }), 'chat')
+  assert.equal(inferTerminalFontMode({ hermelin: { hermes_launch_mode: 'tui' } }), 'tui')
+  assert.equal(inferTerminalFontMode({ hermelin: { effective_hermes_cmd: 'hermes chat --tui' } }), 'tui')
 })
 
 test('appearance settings uses the active theme accent for timestamps', () => {
@@ -393,4 +1063,79 @@ test('samaritan theme uses warm palette and sprite artwork', () => {
   assert.equal(THEMES.samaritan.icons.alignmentImageHref || '', '')
   assert.equal(THEMES.samaritan.icons.alignmentAlwaysVisible, true)
   assert.equal(THEMES.samaritan.icons.alignmentBob, true)
+})
+
+test('Hermes dashboard settings panel exposes same-origin dashboard as an external link', () => {
+  const dashboardPath = path.join(SOURCE_ROOT, 'components', 'settings', 'HermesDashboardSettings.tsx')
+  const settingsPanelPath = path.join(SOURCE_ROOT, 'components', 'settings', 'SettingsPanel.tsx')
+  const dashboardSource = fs.readFileSync(dashboardPath, 'utf8')
+  const settingsSource = fs.readFileSync(settingsPanelPath, 'utf8')
+
+  assert.match(dashboardSource, /\/api\/runners\/hermes-dashboard\//)
+  assert.match(dashboardSource, /\/api\/hermes-dashboard\/status/)
+  assert.match(dashboardSource, /\/api\/hermes-dashboard\/start/)
+  assert.match(dashboardSource, /window\.open\(dashboardProxyUrl, '_blank', 'noopener,noreferrer'\)/)
+  assert.ok(!dashboardSource.includes('<iframe'), 'settings panel should not embed the native dashboard')
+  assert.ok(!dashboardSource.includes('frameNonce'), 'dashboard card should not keep iframe reload state')
+  assert.ok(!dashboardSource.includes('127.0.0.1'))
+  assert.match(settingsSource, /HermesDashboardSettings/)
+})
+
+test('integrated settings no longer exposes stale Hermes model or API-key editors', () => {
+  const settingsPanelPath = path.join(SOURCE_ROOT, 'components', 'settings', 'SettingsPanel.tsx')
+  const agentSettingsPath = path.join(SOURCE_ROOT, 'components', 'settings', 'AgentSettings.tsx')
+  const settingsSource = fs.readFileSync(settingsPanelPath, 'utf8')
+  const agentSource = fs.readFileSync(agentSettingsPath, 'utf8')
+
+  assert.ok(!fs.existsSync(path.join(SOURCE_ROOT, 'components', 'settings', 'ModelSettings.tsx')))
+  assert.ok(!fs.existsSync(path.join(SOURCE_ROOT, 'components', 'settings', 'KeySettings.tsx')))
+  assert.ok(!settingsSource.includes('ModelSettings'))
+  assert.ok(!settingsSource.includes('KeySettings'))
+  assert.ok(!settingsSource.includes('API-Keys'))
+  assert.ok(!agentSource.includes('Reasoning effort'))
+  assert.ok(!agentSource.includes('Summary model'))
+  assert.match(agentSource, /Launch mode for new terminals\./)
+  assert.ok(!agentSource.includes('Local launch options only'))
+  assert.ok(!agentSource.includes('Use the native Hermes Dashboard link'))
+  assert.ok(!agentSource.includes('Used for new terminal sessions.'))
+})
+
+test('Hermes dashboard proxy path validator rejects non-same-origin values', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { normalizeDashboardProxyUrl } = loadCompiled('components/settings/HermesDashboardSettings.js')
+  const fallback = '/api/runners/hermes-dashboard/'
+
+  assert.equal(normalizeDashboardProxyUrl('/api/custom-dashboard'), '/api/custom-dashboard/')
+  assert.equal(normalizeDashboardProxyUrl('/api/custom-dashboard/'), '/api/custom-dashboard/')
+
+  for (const unsafe of [
+    'https://evil.example/dashboard',
+    'http://127.0.0.1:9119/',
+    '//evil.example/dashboard',
+    'ws://evil.example/api/ws',
+    'wss://evil.example/api/ws',
+    'javascript:alert(1)',
+    'data:text/html,pwned',
+    'vbscript:msgbox(1)',
+    '/r/hermes-dashboard/',
+    'api/missing-leading-slash',
+    '',
+  ]) {
+    assert.equal(normalizeDashboardProxyUrl(unsafe), fallback, unsafe)
+  }
+})
+
+test('Hermes dashboard settings hides locked proxy details and process metadata', () => {
+  const dashboardPath = path.join(SOURCE_ROOT, 'components', 'settings', 'HermesDashboardSettings.tsx')
+  const dashboardSource = fs.readFileSync(dashboardPath, 'utf8')
+
+  assert.match(dashboardSource, /Log in to manage Hermes Dashboard\./)
+  assert.ok(!dashboardSource.includes('dashboard theme:'), 'dashboard theme detail should not be rendered in settings')
+  assert.ok(!dashboardSource.includes('iframe source:'), 'dashboard proxy path should not be rendered as plain text')
+  assert.ok(!dashboardSource.includes('status?.pid'), 'dashboard pid should not be rendered')
+  assert.ok(!dashboardSource.includes('status?.host'), 'dashboard host should not be rendered')
+  assert.ok(!dashboardSource.includes('status?.port'), 'dashboard port should not be rendered')
 })

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import uvicorn
 
-from .config import HermelinConfig
-from .server import create_app
+from .config import DEFAULT_HERMELIN_HERMES_CMD, HermelinConfig
+from .server import _is_managed_hermes_command, _managed_hermes_executable, create_app
 
 
 def _env_bool(name: str, default: str = "0") -> bool:
@@ -66,11 +66,8 @@ def main() -> None:
     )
     p.add_argument(
         "--hermes-cmd",
-        default=os.getenv(
-            "HERMELIN_HERMES_CMD",
-            'hermes chat --toolsets "hermes-cli, artifacts"',
-        ),
-        help='Hermes command to spawn (add strudel toolset explicitly if you want Strudel controls)',
+        default=None,
+        help='Hermes command to spawn (advanced override; default is managed from settings)',
     )
     p.add_argument("--hermes-home", default=os.getenv("HERMES_HOME", str(Path.home() / ".hermes")))
     p.add_argument("--spawn-cwd", default=os.getenv("HERMELIN_SPAWN_CWD", os.getcwd()))
@@ -99,11 +96,25 @@ def main() -> None:
 
     args = p.parse_args()
 
+    env_hermes_cmd = os.getenv("HERMELIN_HERMES_CMD", "").strip()
+    env_cmd_override = _env_bool("HERMELIN_HERMES_CMD_OVERRIDE", "0")
+    env_hermes_cmd_override = bool(env_hermes_cmd) and (env_cmd_override or not _is_managed_hermes_command(env_hermes_cmd))
+    hermes_cmd_override = args.hermes_cmd is not None or env_hermes_cmd_override
+    hermes_cmd = str(args.hermes_cmd if args.hermes_cmd is not None else (env_hermes_cmd or DEFAULT_HERMELIN_HERMES_CMD))
+
     if args.reload:
         # Uvicorn reload requires an import string. We pass config via env.
         os.environ["HERMELIN_HOST"] = str(args.host)
         os.environ["HERMELIN_PORT"] = str(args.port)
-        os.environ["HERMELIN_HERMES_CMD"] = str(args.hermes_cmd)
+        if hermes_cmd_override:
+            os.environ["HERMELIN_HERMES_CMD"] = hermes_cmd
+            os.environ["HERMELIN_HERMES_CMD_OVERRIDE"] = "1"
+        elif _is_managed_hermes_command(hermes_cmd) and _managed_hermes_executable(hermes_cmd) != "hermes":
+            os.environ["HERMELIN_HERMES_CMD"] = hermes_cmd
+            os.environ.pop("HERMELIN_HERMES_CMD_OVERRIDE", None)
+        else:
+            os.environ.pop("HERMELIN_HERMES_CMD", None)
+            os.environ.pop("HERMELIN_HERMES_CMD_OVERRIDE", None)
         os.environ["HERMES_HOME"] = str(args.hermes_home)
         os.environ["HERMELIN_SPAWN_CWD"] = str(args.spawn_cwd)
         os.environ["HERMELIN_META_DB_PATH"] = str(args.meta_db)
@@ -140,7 +151,8 @@ def main() -> None:
     cfg = HermelinConfig(
         host=str(args.host),
         port=int(args.port),
-        hermes_cmd=str(args.hermes_cmd),
+        hermes_cmd=hermes_cmd,
+        hermes_cmd_override=hermes_cmd_override,
         hermes_home=Path(args.hermes_home).expanduser(),
         meta_db_path=Path(args.meta_db).expanduser(),
         spawn_cwd=Path(args.spawn_cwd).expanduser(),
