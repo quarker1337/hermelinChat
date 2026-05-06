@@ -20,12 +20,12 @@ DEFAULT_UI_THEME = "hermelin"
 # charge, while hermelinChat remains the upstream source of visual truth.
 _CARD_CLIP = "polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)"
 _TAB_CLIP = "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%, 0 8px)"
-_DASHBOARD_FONT_SANS = (
-    '"Collapse", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
-)
 _DASHBOARD_FONT_MONO = (
     '"JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace'
 )
+# Match hermelinChat's mono-first UI rather than the native dashboard's
+# Mondwest/Rules/Collapse display stacks.
+_DASHBOARD_FONT_SANS = _DASHBOARD_FONT_MONO
 
 
 def _dashboard_skin(
@@ -67,8 +67,11 @@ def _dashboard_skin(
         },
         "customCSS": f"""/* hermelinchat-dashboard-skin: {marker} */
 :root {{
-  --font-sans: var(--theme-font-sans);
+  --font-sans: var(--theme-font-mono);
   --font-mono: var(--theme-font-mono);
+  --font-mondwest: var(--theme-font-mono);
+  --font-rules-compressed: var(--theme-font-mono);
+  --font-rules-expanded: var(--theme-font-mono);
 }}
 
 html,

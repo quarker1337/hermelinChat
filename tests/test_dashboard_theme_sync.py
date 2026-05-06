@@ -206,20 +206,21 @@ class DashboardThemeSyncTests(unittest.TestCase):
                 self.assertNotIn("gradient", theme["customCSS"])
                 self.assertNotIn("repeating-", theme["customCSS"])
 
-    def test_theme_definitions_preserve_native_dashboard_font_stacks(self):
+    def test_theme_definitions_use_hermelinchat_monospace_font_stack(self):
         for ui_theme in available_ui_themes():
             with self.subTest(ui_theme=ui_theme):
                 theme = dashboard_theme_definition_for_ui_theme(ui_theme)
                 typography = theme["typography"]
                 custom_css = theme["customCSS"]
 
-                self.assertIn('"Collapse"', typography["fontSans"])
+                self.assertIn('"JetBrains Mono"', typography["fontSans"])
                 self.assertIn('"JetBrains Mono"', typography["fontMono"])
-                self.assertIn("--font-sans: var(--theme-font-sans);", custom_css)
+                self.assertNotIn('"Collapse"', typography["fontSans"])
+                self.assertIn("--font-sans: var(--theme-font-mono);", custom_css)
                 self.assertIn("--font-mono: var(--theme-font-mono);", custom_css)
-                self.assertNotIn("--font-mondwest: var(--theme-font-sans);", custom_css)
-                self.assertNotIn("--font-rules-expanded: var(--theme-font-sans);", custom_css)
-                self.assertNotIn("--font-rules-compressed: var(--theme-font-sans);", custom_css)
+                self.assertIn("--font-mondwest: var(--theme-font-mono);", custom_css)
+                self.assertIn("--font-rules-expanded: var(--theme-font-mono);", custom_css)
+                self.assertIn("--font-rules-compressed: var(--theme-font-mono);", custom_css)
 
     def test_theme_text_colors_match_hermelinchat_palettes(self):
         expected = {
