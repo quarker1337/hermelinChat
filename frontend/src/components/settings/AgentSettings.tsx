@@ -135,7 +135,7 @@ export const AgentSettings = ({ locked = false, saving = false, handleRef }: Age
         style={{ fontSize: 10, color: SLATE.muted, marginBottom: 8, lineHeight: 1.45 }}
         title={configPath || '~/.hermes/config.yaml'}
       >
-        Local launch options only. Use the native Hermes Dashboard link for advanced Hermes settings.
+        Launch mode for new terminals.
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -157,13 +157,9 @@ export const AgentSettings = ({ locked = false, saving = false, handleRef }: Age
         </select>
       </div>
 
-      <div style={{ marginTop: 8, fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-        Used for new terminal sessions.
-      </div>
-
       {draft.hermelin.hermes_launch_mode === 'tui' && (
         <div style={{ marginTop: 6, fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-          Wheel scroll maps to PageUp/PageDown in TUI mode.
+          TUI wheel: PageUp/PageDown.
         </div>
       )}
 
@@ -180,13 +176,13 @@ export const AgentSettings = ({ locked = false, saving = false, handleRef }: Age
             lineHeight: 1.45,
           }}
         >
-          HERMELIN_HERMES_CMD is active and overrides this setting.
+          Env override active: HERMELIN_HERMES_CMD.
         </div>
       )}
 
       {draft.hermelin.effective_hermes_cmd && (
         <div style={{ marginTop: 8, fontSize: 10, color: SLATE.muted }} title={draft.hermelin.effective_hermes_cmd}>
-          effective command: <span style={{ color: AMBER[500] }}>{draft.hermelin.effective_hermes_cmd}</span>
+          command: <span style={{ color: AMBER[500] }}>{draft.hermelin.effective_hermes_cmd}</span>
         </div>
       )}
     </>

@@ -16,7 +16,7 @@ import type { UiPrefs } from '../../types'
 
 // ─── Version ────────────────────────────────────────────────────────
 
-const HERMELINCHAT_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.14'
+const HERMELINCHAT_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.15'
 
 // ─── Types ──────────────────────────────────────────────────────────
 

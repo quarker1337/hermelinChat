@@ -77,7 +77,6 @@ export function normalizeDashboardProxyUrl(value?: string): string {
 export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSettingsProps) => {
   const uiTheme = useUiPrefsStore((s) => s.prefs.theme)
   const [status, setStatus] = useState<DashboardStatus | null>(null)
-  const [themeSync, setThemeSync] = useState<DashboardThemeSyncStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -117,16 +116,12 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
   }, [refresh])
 
   useEffect(() => {
-    if (locked) {
-      setThemeSync(null)
-      return
-    }
+    if (locked) return
 
     let cancelled = false
     syncDashboardTheme(uiTheme)
       .then((next) => {
         if (cancelled) return
-        setThemeSync(next)
         setStatus((prev) => (prev ? { ...prev, dashboard_theme: next.dashboard_theme, theme_sync: next } : prev))
       })
       .catch((err) => {
@@ -192,7 +187,6 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
   const lastError = error || status?.last_error || ''
   const unsupportedBasePath = status?.base_path_supported === false && !!lastError
   const dashboardProxyUrl = normalizeDashboardProxyUrl(status?.proxy_path || status?.base_path)
-  const matchedDashboardTheme = themeSync?.dashboard_theme || status?.dashboard_theme || status?.theme_sync?.dashboard_theme || ''
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -274,11 +268,6 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
         </div>
       )}
 
-      {matchedDashboardTheme && (
-        <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-          dashboard theme: <span style={{ color: AMBER[500] }}>{matchedDashboardTheme}</span>
-        </div>
-      )}
     </div>
   )
 }

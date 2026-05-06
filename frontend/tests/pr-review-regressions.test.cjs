@@ -1094,7 +1094,10 @@ test('integrated settings no longer exposes stale Hermes model or API-key editor
   assert.ok(!settingsSource.includes('API-Keys'))
   assert.ok(!agentSource.includes('Reasoning effort'))
   assert.ok(!agentSource.includes('Summary model'))
-  assert.match(agentSource, /native Hermes Dashboard link/i)
+  assert.match(agentSource, /Launch mode for new terminals\./)
+  assert.ok(!agentSource.includes('Local launch options only'))
+  assert.ok(!agentSource.includes('Use the native Hermes Dashboard link'))
+  assert.ok(!agentSource.includes('Used for new terminal sessions.'))
 })
 
 test('Hermes dashboard proxy path validator rejects non-same-origin values', () => {
@@ -1130,6 +1133,7 @@ test('Hermes dashboard settings hides locked proxy details and process metadata'
   const dashboardSource = fs.readFileSync(dashboardPath, 'utf8')
 
   assert.match(dashboardSource, /Log in to manage Hermes Dashboard\./)
+  assert.ok(!dashboardSource.includes('dashboard theme:'), 'dashboard theme detail should not be rendered in settings')
   assert.ok(!dashboardSource.includes('iframe source:'), 'dashboard proxy path should not be rendered as plain text')
   assert.ok(!dashboardSource.includes('status?.pid'), 'dashboard pid should not be rendered')
   assert.ok(!dashboardSource.includes('status?.host'), 'dashboard host should not be rendered')
