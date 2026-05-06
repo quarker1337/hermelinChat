@@ -418,6 +418,22 @@ test('artifact bridge commands do not steal active iframe focus', () => {
   assert.equal(useArtifactStore.getState().panelOpen, true)
 })
 
+test('artifact src iframes allow downloads for browser-side recorders', () => {
+  const rendererPath = path.join(SOURCE_ROOT, 'components', 'artifacts', 'ArtifactRenderer.tsx')
+  const rendererSource = fs.readFileSync(rendererPath, 'utf8')
+
+  assert.match(rendererSource, /sandbox=\{src \? 'allow-scripts allow-forms allow-same-origin allow-downloads'/)
+})
+
+test('Strudel recorder keeps blob URLs alive for Firefox downloads', () => {
+  const strudelPath = path.resolve(__dirname, '..', '..', 'hermelin', 'default_artifact_assets', 'strudel', 'index.html')
+  const strudelSource = fs.readFileSync(strudelPath, 'utf8')
+
+  assert.match(strudelSource, /function downloadRecordingBlob\(/)
+  assert.match(strudelSource, /document\.body\.appendChild\(a\)/)
+  assert.match(strudelSource, /setTimeout\(\(\) => URL\.revokeObjectURL\(url\),/)
+})
+
 test('artifact iframe data bridge is bounded and omits iframe transport fields', () => {
   installAssetStubs()
   clearCompiledModules()

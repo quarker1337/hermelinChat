@@ -845,7 +845,7 @@ function HtmlLikeFrame({ srcDoc, src, title, artifactId, artifactData }: HtmlLik
         title={title}
         src={src || undefined}
         srcDoc={sanitizedSrcDoc || undefined}
-        sandbox={src ? 'allow-scripts allow-forms allow-same-origin' : 'allow-scripts allow-forms'}
+        sandbox={src ? 'allow-scripts allow-forms allow-same-origin allow-downloads' : 'allow-scripts allow-forms'}
         referrerPolicy="no-referrer"
         ref={iframeRef}
         onLoad={() => {
