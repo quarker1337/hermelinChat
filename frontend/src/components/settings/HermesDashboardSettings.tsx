@@ -181,7 +181,7 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
             lineHeight: 1.45,
           }}
         >
-          login required to manage the native Hermes Agent dashboard.
+          Log in to manage Hermes Dashboard.
         </div>
       </div>
     )
@@ -197,7 +197,7 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-        Native Hermes Agent dashboard controls. hermelinChat starts it on loopback and exposes it through same-origin auth; open it in a separate tab for the full maintained Hermes settings UI.
+        Start, stop, and open the native Hermes Dashboard through hermelinChat auth.
       </div>
 
       <div
@@ -270,7 +270,7 @@ export const HermesDashboardSettings = ({ locked = false }: HermesDashboardSetti
 
       {!running && enabled && (
         <div style={{ fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-          Start the dashboard first, then use the link to open the maintained Hermes settings and model/provider UI in a new tab.
+          Start it first, then open the dashboard in a new tab.
         </div>
       )}
 

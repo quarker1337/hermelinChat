@@ -209,7 +209,7 @@ export const SettingsPanel = ({
         {/* Scrollable body */}
         <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <CollapsiblePanel
-            title="Hermes-Agent"
+            title="Hermes Agent"
             open={openPanel === 'agent'}
             onToggle={() => togglePanel('agent')}
           >

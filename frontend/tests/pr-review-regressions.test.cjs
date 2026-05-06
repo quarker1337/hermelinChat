@@ -1113,7 +1113,7 @@ test('Hermes dashboard settings hides locked proxy details and process metadata'
   const dashboardPath = path.join(SOURCE_ROOT, 'components', 'settings', 'HermesDashboardSettings.tsx')
   const dashboardSource = fs.readFileSync(dashboardPath, 'utf8')
 
-  assert.match(dashboardSource, /login required/i)
+  assert.match(dashboardSource, /Log in to manage Hermes Dashboard\./)
   assert.ok(!dashboardSource.includes('iframe source:'), 'dashboard proxy path should not be rendered as plain text')
   assert.ok(!dashboardSource.includes('status?.pid'), 'dashboard pid should not be rendered')
   assert.ok(!dashboardSource.includes('status?.host'), 'dashboard host should not be rendered')

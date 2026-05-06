@@ -135,7 +135,7 @@ export const AgentSettings = ({ locked = false, saving = false, handleRef }: Age
         style={{ fontSize: 10, color: SLATE.muted, marginBottom: 8, lineHeight: 1.45 }}
         title={configPath || '~/.hermes/config.yaml'}
       >
-        hermelinChat only keeps local integration toggles here. Use the native Hermes Dashboard link for maintained Hermes model/provider/API/key settings.
+        Local launch options only. Use the native Hermes Dashboard link for advanced Hermes settings.
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -158,12 +158,12 @@ export const AgentSettings = ({ locked = false, saving = false, handleRef }: Age
       </div>
 
       <div style={{ marginTop: 8, fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-        Applies to new terminal sessions. TUI runs <span style={{ color: AMBER[500] }}>hermes chat --tui</span> inside the terminal pane.
+        Used for new terminal sessions.
       </div>
 
       {draft.hermelin.hermes_launch_mode === 'tui' && (
         <div style={{ marginTop: 6, fontSize: 10, color: SLATE.muted, lineHeight: 1.45 }}>
-          Browser wheel scrolling is translated to PageUp/PageDown for the TUI history view while drag selection stays browser-native.
+          Wheel scroll maps to PageUp/PageDown in TUI mode.
         </div>
       )}
 
@@ -180,7 +180,7 @@ export const AgentSettings = ({ locked = false, saving = false, handleRef }: Age
             lineHeight: 1.45,
           }}
         >
-          Custom HERMELIN_HERMES_CMD override is active; this toggle is saved but the override controls the launched command.
+          HERMELIN_HERMES_CMD is active and overrides this setting.
         </div>
       )}
 
