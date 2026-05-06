@@ -12,7 +12,8 @@ from starlette.websockets import WebSocketDisconnect
 
 from hermelin.config import HermelinConfig
 from hermelin.runners import discover_runner_upstream
-from hermelin.server import _websockets_connect_kwargs, create_app
+from hermelin.dashboard_proxy import websockets_connect_kwargs
+from hermelin.server import create_app
 
 
 DASHBOARD_BASE_PATH = "/api/runners/hermes-dashboard"
@@ -26,50 +27,36 @@ def _route_for_path(app, path: str):
 
 
 class HermesDashboardManagerTests(unittest.TestCase):
-    def test_dashboard_command_uses_loopback_base_path_and_no_insecure_flag(self):
+    def test_dashboard_command_uses_secure_loopback_flags_and_base_path_when_supported(self):
         from hermelin.hermes_dashboard import HermesDashboardManager
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manager = HermesDashboardManager(
-                hermes_command="/usr/bin/hermes",
-                hermes_home=Path(tmpdir) / "home",
-                cwd=Path(tmpdir),
-                port=45678,
-                base_path=DASHBOARD_BASE_PATH,
-            )
+        cases = (
+            (True, True),
+            (False, False),
+        )
+        for supported, expects_base_path in cases:
+            with self.subTest(base_path_supported=supported), tempfile.TemporaryDirectory() as tmpdir:
+                manager = HermesDashboardManager(
+                    hermes_command="/usr/bin/hermes",
+                    hermes_home=Path(tmpdir) / "home",
+                    cwd=Path(tmpdir),
+                    port=45678,
+                    base_path=DASHBOARD_BASE_PATH,
+                )
+                manager._base_path_supported = supported
 
-            manager._base_path_supported = True
-            command = manager.build_command(45678)
+                command = manager.build_command(45678)
 
-        self.assertEqual(command[:2], ["/usr/bin/hermes", "dashboard"])
-        self.assertIn("--host", command)
-        self.assertEqual(command[command.index("--host") + 1], "127.0.0.1")
-        self.assertIn("--port", command)
-        self.assertEqual(command[command.index("--port") + 1], "45678")
-        self.assertIn("--no-open", command)
-        self.assertIn("--base-path", command)
-        self.assertEqual(command[command.index("--base-path") + 1], DASHBOARD_BASE_PATH)
-        self.assertNotIn("--insecure", command)
-
-    def test_dashboard_command_omits_base_path_flag_for_older_hermes(self):
-        from hermelin.hermes_dashboard import HermesDashboardManager
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manager = HermesDashboardManager(
-                hermes_command="/usr/bin/hermes",
-                hermes_home=Path(tmpdir) / "home",
-                cwd=Path(tmpdir),
-                port=45678,
-                base_path=DASHBOARD_BASE_PATH,
-            )
-            manager._base_path_supported = False
-
-            command = manager.build_command(45678)
-
-        self.assertIn("--host", command)
-        self.assertIn("--no-open", command)
-        self.assertNotIn("--base-path", command)
-        self.assertNotIn(DASHBOARD_BASE_PATH, command)
+                self.assertEqual(command[:2], ["/usr/bin/hermes", "dashboard"])
+                self.assertEqual(command[command.index("--host") + 1], "127.0.0.1")
+                self.assertEqual(command[command.index("--port") + 1], "45678")
+                self.assertIn("--no-open", command)
+                self.assertNotIn("--insecure", command)
+                if expects_base_path:
+                    self.assertEqual(command[command.index("--base-path") + 1], DASHBOARD_BASE_PATH)
+                else:
+                    self.assertNotIn("--base-path", command)
+                    self.assertNotIn(DASHBOARD_BASE_PATH, command)
 
     def test_dashboard_body_rewriter_scopes_spa_assets_api_and_router(self):
         from hermelin.hermes_dashboard import rewrite_dashboard_body
@@ -137,59 +124,33 @@ class HermesDashboardManagerTests(unittest.TestCase):
         self.assertTrue(auto_started["stopped_by_user"])
         self.assertEqual(auto_started["last_error"], "")
 
-    def test_dashboard_start_reports_configured_port_already_in_use_without_spawning(self):
+    def test_dashboard_start_and_restart_report_configured_port_already_in_use_without_spawning(self):
         from hermelin.hermes_dashboard import HermesDashboardManager
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
-                blocker.bind(("127.0.0.1", 0))
-                blocker.listen(1)
-                blocked_port = int(blocker.getsockname()[1])
+        for action in ("start", "restart"):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
+                    blocker.bind(("127.0.0.1", 0))
+                    blocker.listen(1)
+                    blocked_port = int(blocker.getsockname()[1])
 
-                manager = HermesDashboardManager(
-                    hermes_command=str(root / "missing-hermes"),
-                    hermes_home=root / "home",
-                    cwd=root / "cwd",
-                    port=blocked_port,
-                    base_path=DASHBOARD_BASE_PATH,
-                )
-                manager._base_path_supported = True
+                    manager = HermesDashboardManager(
+                        hermes_command=str(root / "missing-hermes"),
+                        hermes_home=root / "home",
+                        cwd=root / "cwd",
+                        port=blocked_port,
+                        base_path=DASHBOARD_BASE_PATH,
+                    )
+                    manager._base_path_supported = True
 
-                with patch("hermelin.hermes_dashboard.subprocess.Popen") as popen:
-                    status = asyncio.run(manager.start())
+                    with patch("hermelin.hermes_dashboard.subprocess.Popen") as popen:
+                        status = asyncio.run(getattr(manager, action)())
 
-        popen.assert_not_called()
-        self.assertFalse(status["running"])
-        self.assertEqual(status["last_error_code"], "port_in_use")
-        self.assertIn("already in use", status["last_error"])
-
-    def test_dashboard_restart_reports_configured_port_already_in_use_without_spawning(self):
-        from hermelin.hermes_dashboard import HermesDashboardManager
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
-                blocker.bind(("127.0.0.1", 0))
-                blocker.listen(1)
-                blocked_port = int(blocker.getsockname()[1])
-
-                manager = HermesDashboardManager(
-                    hermes_command=str(root / "missing-hermes"),
-                    hermes_home=root / "home",
-                    cwd=root / "cwd",
-                    port=blocked_port,
-                    base_path=DASHBOARD_BASE_PATH,
-                )
-                manager._base_path_supported = True
-
-                with patch("hermelin.hermes_dashboard.subprocess.Popen") as popen:
-                    status = asyncio.run(manager.restart())
-
-        popen.assert_not_called()
-        self.assertFalse(status["running"])
-        self.assertEqual(status["last_error_code"], "port_in_use")
-        self.assertIn("already in use", status["last_error"])
+                popen.assert_not_called()
+                self.assertFalse(status["running"])
+                self.assertEqual(status["last_error_code"], "port_in_use")
+                self.assertIn("already in use", status["last_error"])
 
     def test_dashboard_stop_reports_foreign_process_still_blocking_configured_port(self):
         from hermelin.hermes_dashboard import HermesDashboardManager
@@ -408,50 +369,51 @@ async def _asgi_request(app, method: str, path: str, *, base_url: str = "https:/
         return await client.request(method, path, **kwargs)
 
 
+def _dashboard_config(tmpdir: str, **overrides) -> HermelinConfig:
+    root = Path(tmpdir)
+    values = {
+        "hermes_home": root / "hermes-home",
+        "meta_db_path": root / "hermelin_meta.db",
+        "spawn_cwd": root / "spawn-cwd",
+        "hermes_dashboard_base_path": DASHBOARD_BASE_PATH,
+    }
+    values.update(overrides)
+    return HermelinConfig(**values)
+
+
+def _create_dashboard_app(tmpdir: str, manager_cls=_FakeDashboardManager, **config_overrides):
+    _FakeDashboardManager.instances = []
+    with patch("hermelin.server.HermesDashboardManager", manager_cls):
+        return create_app(_dashboard_config(tmpdir, **config_overrides))
+
+
 class HermesDashboardEndpointTests(unittest.TestCase):
     def test_dashboard_status_and_control_endpoints_use_managed_service(self):
+        endpoint_cases = (
+            ("GET", "/api/hermes-dashboard/status", False),
+            ("POST", "/api/hermes-dashboard/start", True),
+            ("POST", "/api/hermes-dashboard/restart", True),
+            ("POST", "/api/hermes-dashboard/stop", False),
+        )
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-            )
+            app = _create_dashboard_app(tmpdir)
 
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
-
-            status_route = _route_for_path(app, "/api/hermes-dashboard/status")
-            start_route = _route_for_path(app, "/api/hermes-dashboard/start")
-            restart_route = _route_for_path(app, "/api/hermes-dashboard/restart")
-            stop_route = _route_for_path(app, "/api/hermes-dashboard/stop")
+            for _, path, _ in endpoint_cases:
+                _route_for_path(app, path)
             proxy_route = _route_for_path(app, f"{DASHBOARD_BASE_PATH}" + "/{path:path}")
 
-            status = asyncio.run(_asgi_request(app, "GET", "/api/hermes-dashboard/status")).json()
-            started = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/start")).json()
-            restarted = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/restart")).json()
-            stopped = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/stop")).json()
+            for method, path, expected_running in endpoint_cases:
+                with self.subTest(method=method, path=path):
+                    response = asyncio.run(_asgi_request(app, method, path))
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.json()["running"], expected_running)
 
         self.assertEqual(_FakeDashboardManager.instances[0].kwargs["base_path"], DASHBOARD_BASE_PATH)
         self.assertEqual(proxy_route.path, f"{DASHBOARD_BASE_PATH}" + "/{path:path}")
-        self.assertFalse(status["running"])
-        self.assertTrue(started["running"])
-        self.assertTrue(restarted["running"])
-        self.assertFalse(stopped["running"])
 
     def test_dashboard_public_endpoints_do_not_expose_manager_error_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-            )
-
-            with patch("hermelin.server.HermesDashboardManager", _LeakyDashboardManager):
-                app = create_app(config)
+            app = _create_dashboard_app(tmpdir, _LeakyDashboardManager)
 
             status = asyncio.run(_asgi_request(app, "GET", "/api/hermes-dashboard/status"))
             started = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/start"))
@@ -479,16 +441,7 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_public_status_reports_port_conflict_without_raw_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-            )
-
-            with patch("hermelin.server.HermesDashboardManager", _PortBusyDashboardManager):
-                app = create_app(config)
+            app = _create_dashboard_app(tmpdir, _PortBusyDashboardManager)
 
             response = asyncio.run(_asgi_request(app, "POST", "/api/hermes-dashboard/start"))
 
@@ -502,16 +455,7 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_public_status_does_not_expose_process_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-            )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
+            app = _create_dashboard_app(tmpdir)
 
             response = asyncio.run(_asgi_request(app, "GET", "/api/hermes-dashboard/status"))
 
@@ -524,19 +468,10 @@ class HermesDashboardEndpointTests(unittest.TestCase):
     def test_dashboard_theme_sync_errors_do_not_expose_exception_details(self):
         secret = "secret stack detail from /tmp/private/dashboard-theme"
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-            )
+            app = _create_dashboard_app(tmpdir)
 
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
-
-            with patch("hermelin.server.logger"):
-                with patch("hermelin.server.sync_dashboard_theme_for_ui_theme", side_effect=RuntimeError(secret)):
+            with patch("hermelin.dashboard_proxy.logger"):
+                with patch("hermelin.dashboard_proxy.sync_dashboard_theme_for_ui_theme", side_effect=RuntimeError(secret)):
                     response = asyncio.run(
                         _asgi_request(app, "POST", "/api/hermes-dashboard/theme", json={"ui_theme": "matrix"})
                     )
@@ -549,16 +484,7 @@ class HermesDashboardEndpointTests(unittest.TestCase):
     def test_dashboard_proxy_routes_honor_safe_custom_base_path(self):
         custom_base_path = "/api/hermes-dashboard-frame"
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=custom_base_path,
-            )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
+            app = _create_dashboard_app(tmpdir, hermes_dashboard_base_path=custom_base_path)
 
             proxy_route = _route_for_path(app, f"{custom_base_path}" + "/{path:path}")
 
@@ -581,19 +507,8 @@ class HermesDashboardEndpointTests(unittest.TestCase):
         )
         for unsafe_path in unsafe_paths:
             with self.subTest(unsafe_path=unsafe_path), tempfile.TemporaryDirectory() as tmpdir:
-                _FakeDashboardManager.instances = []
-                config = HermelinConfig(
-                    hermes_home=Path(tmpdir) / "hermes-home",
-                    meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                    spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                    hermes_dashboard_base_path=unsafe_path,
-                )
-
-                with (
-                    patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager),
-                    patch("hermelin.server.logger"),
-                ):
-                    app = create_app(config)
+                with patch("hermelin.dashboard_proxy.logger"):
+                    app = _create_dashboard_app(tmpdir, hermes_dashboard_base_path=unsafe_path)
 
                 proxy_route = _route_for_path(app, f"{DASHBOARD_BASE_PATH}" + "/{path:path}")
 
@@ -602,16 +517,7 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_proxy_strips_spoofed_forwarded_headers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-            )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
+            app = _create_dashboard_app(tmpdir)
             capture_client = _CaptureDashboardHttpClient()
             app.state.httpx_client = capture_client
 
@@ -649,16 +555,7 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_proxy_strips_cors_request_and_response_headers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-            )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
+            app = _create_dashboard_app(tmpdir)
             capture_client = _CaptureDashboardHttpClient(
                 response=_FakeDashboardUpstreamResponse(
                     headers={
@@ -699,16 +596,7 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_http_endpoints_reject_cross_site_origin_before_starting_dashboard(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-            )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
+            app = _create_dashboard_app(tmpdir)
             capture_client = _CaptureDashboardHttpClient()
             app.state.httpx_client = capture_client
 
@@ -739,19 +627,12 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_http_origin_accepts_trusted_forwarded_https_proto(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            app = _create_dashboard_app(
+                tmpdir,
                 allowed_ips="*",
                 trust_x_forwarded_for=True,
                 trusted_proxy_ips="127.0.0.1",
             )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
             capture_client = _CaptureDashboardHttpClient()
             app.state.httpx_client = capture_client
 
@@ -772,19 +653,12 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_http_origin_ignores_untrusted_forwarded_https_proto(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            app = _create_dashboard_app(
+                tmpdir,
                 allowed_ips="*",
                 trust_x_forwarded_for=True,
                 trusted_proxy_ips="10.0.0.1",
             )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
             capture_client = _CaptureDashboardHttpClient()
             app.state.httpx_client = capture_client
 
@@ -809,21 +683,8 @@ class HermesDashboardEndpointTests(unittest.TestCase):
             return _FakeDashboardWebSocketUpstream()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-                allowed_ips="*",
-                trust_x_forwarded_for=True,
-            )
-
-            with (
-                patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager),
-                patch("hermelin.server.websockets.connect", fake_connect),
-            ):
-                app = create_app(config)
+            with patch("hermelin.dashboard_proxy.websockets.connect", fake_connect):
+                app = _create_dashboard_app(tmpdir, allowed_ips="*", trust_x_forwarded_for=True)
                 with TestClient(app, base_url="http://chat.example") as client:
                     with client.websocket_connect(
                         f"{DASHBOARD_BASE_PATH}/api/ws",
@@ -843,17 +704,7 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_websocket_rejects_cross_site_origin_before_starting_dashboard(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-                allowed_ips="*",
-            )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
+            app = _create_dashboard_app(tmpdir, allowed_ips="*")
 
             with TestClient(app, base_url="https://chat.example") as client:
                 with self.assertRaises(WebSocketDisconnect) as cm:
@@ -869,16 +720,7 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_proxy_does_not_auto_restart_after_stop(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
-            )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
+            app = _create_dashboard_app(tmpdir)
             capture_client = _CaptureDashboardHttpClient()
             app.state.httpx_client = capture_client
 
@@ -897,18 +739,11 @@ class HermesDashboardEndpointTests(unittest.TestCase):
 
     def test_dashboard_http_endpoints_require_auth_when_password_enabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            _FakeDashboardManager.instances = []
-            config = HermelinConfig(
-                hermes_home=Path(tmpdir) / "hermes-home",
-                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
-                spawn_cwd=Path(tmpdir) / "spawn-cwd",
-                hermes_dashboard_base_path=DASHBOARD_BASE_PATH,
+            app = _create_dashboard_app(
+                tmpdir,
                 auth_password_hash="auth-enabled-without-cookie",
                 cookie_secret="test-cookie-secret",
             )
-
-            with patch("hermelin.server.HermesDashboardManager", _FakeDashboardManager):
-                app = create_app(config)
 
             status_response = asyncio.run(_asgi_request(app, "GET", "/api/hermes-dashboard/status"))
             proxy_response = asyncio.run(_asgi_request(app, "GET", f"{DASHBOARD_BASE_PATH}/"))
@@ -918,7 +753,7 @@ class HermesDashboardEndpointTests(unittest.TestCase):
         self.assertFalse(_FakeDashboardManager.instances[0].started)
 
     def test_dashboard_websocket_header_kwargs_support_installed_websockets(self):
-        kwargs = _websockets_connect_kwargs(
+        kwargs = websockets_connect_kwargs(
             subprotocols=["chat"],
             extra_headers={"X-Forwarded-Prefix": DASHBOARD_BASE_PATH},
         )
