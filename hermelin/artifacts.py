@@ -517,6 +517,38 @@ def latest_artifact_from_list(artifacts: list[dict[str, Any]]) -> dict[str, Any]
     return max(artifacts, key=_artifact_updated_ts)
 
 
+def rename_artifact_title(root: Path, artifact_id: str, title: str) -> bool:
+    if not is_valid_artifact_id(artifact_id):
+        raise ValueError("invalid artifact id")
+
+    clean_title = str(title or "").strip()
+    if not clean_title or len(clean_title) > 200:
+        raise ValueError("invalid artifact title")
+
+    updated_any = False
+    candidates = [
+        artifact_session_dir(root) / f"{artifact_id}.json",
+        artifact_persistent_dir(root) / f"{artifact_id}.json",
+        artifact_root_dir(root) / f"{artifact_id}.json",  # legacy
+    ]
+
+    for target in candidates:
+        if not target.exists():
+            continue
+        payload = _read_json(target)
+        if payload is None:
+            continue
+        payload["id"] = artifact_id
+        payload["title"] = clean_title
+        _write_json_atomic(target, payload)
+        _invalidate_artifact_cache_path(target)
+        updated_any = True
+
+    if updated_any:
+        recompute_latest(root)
+    return updated_any
+
+
 def delete_artifact(root: Path, artifact_id: str) -> bool:
     if not is_valid_artifact_id(artifact_id):
         raise ValueError("invalid artifact id")

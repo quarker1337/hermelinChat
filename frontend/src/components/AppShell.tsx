@@ -122,6 +122,12 @@ const ArtifactPanelHost = memo(function ArtifactPanelHost() {
   const handleDeleteArtifact = useCallback((id: string) => {
     useArtifactStore.getState().deleteTab(id)
   }, [])
+  const handleRenameArtifact = useCallback((id: string, title: string) => {
+    void useArtifactStore.getState().renameTab(id, title)
+  }, [])
+  const handleClearSessionArtifacts = useCallback(() => {
+    void useArtifactStore.getState().clearSessionArtifacts()
+  }, [])
 
   if (!artifactPanelOpen) return null
 
@@ -134,6 +140,8 @@ const ArtifactPanelHost = memo(function ArtifactPanelHost() {
       onSelectArtifact={handleSelectArtifact}
       onClose={handleClose}
       onDeleteArtifact={handleDeleteArtifact}
+      onRenameArtifact={handleRenameArtifact}
+      onClearSessionArtifacts={handleClearSessionArtifacts}
     />
   )
 })

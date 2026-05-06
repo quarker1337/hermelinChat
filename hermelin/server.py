@@ -86,6 +86,7 @@ from .artifacts import (
     is_valid_artifact_id,
     latest_artifact,
     list_artifacts,
+    rename_artifact_title,
 )
 from .auth import (
     create_runner_token,
@@ -1052,6 +1053,26 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         except Exception:
             pass
 
+    @app.post("/api/artifacts/{artifact_id}/rename")
+    async def api_rename_artifact(artifact_id: str, payload: dict = Body(default={})):  # type: ignore[assignment]
+        if not is_valid_artifact_id(artifact_id):
+            return JSONResponse({"detail": "invalid artifact id"}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"detail": "invalid request body"}, status_code=400)
+        title = str(payload.get("title") or "").strip()
+        if not title or len(title) > 200:
+            return JSONResponse({"detail": "invalid artifact title"}, status_code=400)
+        try:
+            updated = rename_artifact_title(config.artifact_dir, artifact_id, title)
+        except ValueError:
+            return JSONResponse({"detail": "invalid artifact rename request"}, status_code=400)
+        except Exception:
+            logger.exception("failed to rename artifact")
+            return JSONResponse({"detail": "internal error renaming artifact"}, status_code=500)
+        if not updated:
+            return JSONResponse({"detail": "artifact not found"}, status_code=404)
+        return {"ok": True, "artifact_id": artifact_id, "title": title, "updated": updated}
+
     @app.delete("/api/artifacts/{artifact_id}")
     async def api_delete_artifact(artifact_id: str):
         if not is_valid_artifact_id(artifact_id):
@@ -1066,6 +1087,15 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             logger.exception("failed to delete artifact")
             return JSONResponse({"detail": "internal error deleting artifact"}, status_code=500)
         return {"ok": True, "artifact_id": artifact_id, "removed": removed}
+
+    @app.post("/api/artifacts/clear-session")
+    async def api_clear_session_artifacts():
+        try:
+            info = cleanup_session_artifacts(config.artifact_dir)
+        except Exception:
+            logger.exception("failed to clear session artifacts")
+            return JSONResponse({"detail": "internal error clearing session artifacts"}, status_code=500)
+        return info
 
     def _hermes_bin() -> str:
         try:

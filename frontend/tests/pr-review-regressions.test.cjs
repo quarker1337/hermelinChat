@@ -490,6 +490,146 @@ test('artifact panel width no-ops when clamped width is unchanged', () => {
   }
 })
 
+test('artifact store can explicitly clear transient artifacts and refresh without auto-opening', async () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const originalFetch = global.fetch
+  const calls = []
+  global.fetch = async (path, opts = {}) => {
+    calls.push({ path: String(path), method: String(opts.method || 'GET') })
+    if (String(path) === '/api/artifacts/clear-session') {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, removed_artifacts: 1, removed_artifact_ids: ['transient'] }
+        },
+      }
+    }
+    if (String(path) === '/api/artifacts') {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return [
+            {
+              id: 'saved',
+              type: 'markdown',
+              title: 'Saved',
+              persistent: true,
+              timestamp: 2,
+              data: { markdown: 'still here' },
+            },
+          ]
+        },
+      }
+    }
+    throw new Error(`unexpected fetch ${String(path)}`)
+  }
+
+  try {
+    const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+    useArtifactStore.getState().reset()
+    useArtifactStore.getState().applyArtifacts([
+      { id: 'transient', type: 'markdown', title: 'Transient', timestamp: 1, data: { markdown: 'tmp' } },
+      { id: 'saved', type: 'markdown', title: 'Saved', persistent: true, timestamp: 2, data: { markdown: 'saved' } },
+    ])
+    useArtifactStore.setState({ panelOpen: false, panelDismissed: true })
+
+    assert.equal(typeof useArtifactStore.getState().clearSessionArtifacts, 'function')
+    await useArtifactStore.getState().clearSessionArtifacts()
+
+    assert.deepEqual(calls, [
+      { path: '/api/artifacts/clear-session', method: 'POST' },
+      { path: '/api/artifacts', method: 'GET' },
+    ])
+    assert.deepEqual(useArtifactStore.getState().tabs.map((item) => item.id), ['saved'])
+    assert.equal(useArtifactStore.getState().panelOpen, false)
+  } finally {
+    if (originalFetch === undefined) delete global.fetch
+    else global.fetch = originalFetch
+  }
+})
+
+test('artifact store can rename an artifact and refresh without auto-opening', async () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const originalFetch = global.fetch
+  const calls = []
+  global.fetch = async (path, opts = {}) => {
+    calls.push({
+      path: String(path),
+      method: String(opts.method || 'GET'),
+      body: opts.body ? JSON.parse(String(opts.body)) : null,
+    })
+    if (String(path) === '/api/artifacts/chart/rename') {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, artifact_id: 'chart', title: 'Quarterly Revenue' }
+        },
+      }
+    }
+    if (String(path) === '/api/artifacts') {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return [
+            {
+              id: 'chart',
+              type: 'markdown',
+              title: 'Quarterly Revenue',
+              timestamp: 1,
+              data: { markdown: 'same data' },
+            },
+          ]
+        },
+      }
+    }
+    throw new Error(`unexpected fetch ${String(path)}`)
+  }
+
+  try {
+    const { useArtifactStore } = loadCompiled('stores/artifacts.js')
+    useArtifactStore.getState().reset()
+    useArtifactStore.getState().applyArtifacts([
+      { id: 'chart', type: 'markdown', title: 'Chart', timestamp: 1, data: { markdown: 'same data' } },
+    ])
+    useArtifactStore.setState({ panelOpen: false, panelDismissed: true })
+
+    assert.equal(typeof useArtifactStore.getState().renameTab, 'function')
+    await useArtifactStore.getState().renameTab('chart', 'Quarterly Revenue')
+
+    assert.deepEqual(calls, [
+      { path: '/api/artifacts/chart/rename', method: 'POST', body: { title: 'Quarterly Revenue' } },
+      { path: '/api/artifacts', method: 'GET', body: null },
+    ])
+    assert.equal(useArtifactStore.getState().tabs[0].title, 'Quarterly Revenue')
+    assert.equal(useArtifactStore.getState().panelOpen, false)
+  } finally {
+    if (originalFetch === undefined) delete global.fetch
+    else global.fetch = originalFetch
+  }
+})
+
+test('artifact panel exposes discoverable per-artifact and bulk delete actions', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'ArtifactPanel.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /artifactPanelDropdown__kebab/)
+  assert.match(source, /Rename artifact/)
+  assert.match(source, /Delete artifact/)
+  assert.match(source, /Clear transient artifacts/)
+  assert.match(source, /onRenameArtifact/)
+  assert.match(source, /onClearSessionArtifacts/)
+})
+
 test('terminal write queue waits for xterm write callbacks before draining more output', () => {
   installAssetStubs()
   clearCompiledModules()

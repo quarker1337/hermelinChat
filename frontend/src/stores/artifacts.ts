@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { ArtifactTab } from '../types'
-import { apiCall } from '../api/client'
+import { apiCall, apiPost } from '../api/client'
 import {
   loadArtifactPanelWidth,
   saveArtifactPanelWidth,
@@ -202,6 +202,8 @@ export interface ArtifactStore {
   togglePin: () => void
   applyArtifacts: (items: ArtifactTab[], opts?: { openOnChange?: boolean }) => void
   deleteTab: (id: string) => Promise<void>
+  renameTab: (id: string, title: string) => Promise<void>
+  clearSessionArtifacts: () => Promise<void>
   startPolling: () => void
   stopPolling: () => void
   setRealtimeUpdatesActive: (active: boolean, token?: unknown) => void
@@ -356,6 +358,34 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
     }
     // Refresh without triggering auto-open
     void refreshArtifacts(get, { openOnChange: false, force: true })
+  },
+
+  // -------------------------------------------------------------------------
+  // renameTab — POST /api/artifacts/{id}/rename then refresh (no auto-open)
+  // -------------------------------------------------------------------------
+  renameTab: async (id: string, title: string) => {
+    const cleanTitle = String(title || '').trim()
+    if (!id || !cleanTitle) return
+    try {
+      await apiPost(`/api/artifacts/${encodeURIComponent(id)}/rename`, { title: cleanTitle })
+    } catch {
+      // ignore
+    }
+    // Refresh without triggering auto-open
+    await refreshArtifacts(get, { openOnChange: false, force: true })
+  },
+
+  // -------------------------------------------------------------------------
+  // clearSessionArtifacts — POST /api/artifacts/clear-session then refresh
+  // -------------------------------------------------------------------------
+  clearSessionArtifacts: async () => {
+    try {
+      await apiCall('/api/artifacts/clear-session', { method: 'POST' })
+    } catch {
+      // ignore
+    }
+    // Refresh without triggering auto-open
+    await refreshArtifacts(get, { openOnChange: false, force: true })
   },
 
   // -------------------------------------------------------------------------
