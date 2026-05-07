@@ -45,6 +45,10 @@ class ArtifactCacheTests(unittest.TestCase):
         ) = self._old_limits
         artifacts._clear_artifact_cache()
 
+    def test_default_read_limit_is_8_mib(self):
+        self.assertEqual(artifacts._ARTIFACT_READ_MAX_FILE_BYTES_DEFAULT, 8 * 1024 * 1024)
+        self.assertEqual(artifacts._ARTIFACT_READ_MAX_FILE_BYTES_ENV, "HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES")
+
     def test_artifact_cache_is_bounded_by_entry_count(self):
         artifacts._ARTIFACT_CACHE_MAX_ENTRIES = 2
         artifacts._ARTIFACT_CACHE_MAX_BYTES = 1024 * 1024
@@ -87,7 +91,7 @@ class ArtifactCacheTests(unittest.TestCase):
             self.assertEqual(list_artifacts(root)[0]["id"], "large")
             self.assertNotIn(target.resolve(), artifacts._ARTIFACT_FILE_CACHE)
 
-    def test_oversized_artifacts_are_not_read_and_invalidate_existing_cache(self):
+    def test_oversized_artifacts_are_listed_with_load_error_and_invalidate_existing_cache(self):
         artifacts._ARTIFACT_CACHE_MAX_ENTRIES = 10
         artifacts._ARTIFACT_CACHE_MAX_BYTES = 1024 * 1024
         artifacts._ARTIFACT_CACHE_MAX_FILE_BYTES = 1024 * 1024
@@ -102,7 +106,16 @@ class ArtifactCacheTests(unittest.TestCase):
 
             write_artifact(root, "large", payload_size=1024)
 
-            self.assertEqual(list_artifacts(root), [])
+            listed = list_artifacts(root)
+            self.assertEqual(len(listed), 1)
+            item = listed[0]
+            self.assertEqual(item["id"], "large")
+            self.assertEqual(item["type"], "error")
+            self.assertEqual(item["load_error"]["code"], "artifact_too_large")
+            self.assertEqual(item["load_error"]["max_file_bytes"], 256)
+            self.assertGreater(item["load_error"]["file_size_bytes"], 256)
+            self.assertIn("HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES", item["load_error"]["message"])
+            self.assertEqual(item["data"], item["load_error"])
             self.assertNotIn(target.resolve(), artifacts._ARTIFACT_FILE_CACHE)
 
     def test_persistent_live_artifact_without_runner_reports_stopped(self):

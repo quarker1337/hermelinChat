@@ -48,6 +48,16 @@ interface ArtifactEmptyProps {
   detail: string
 }
 
+interface ArtifactLoadErrorInfo {
+  code?: string
+  message?: string
+  file_name?: string
+  file_size_label?: string
+  max_file_size_label?: string
+  env_var?: string
+  [key: string]: unknown
+}
+
 interface JsonPreviewProps {
   value: unknown
 }
@@ -304,6 +314,62 @@ function ArtifactEmpty({ title, detail }: ArtifactEmptyProps) {
     >
       <div style={{ color: SLATE.textBright, fontWeight: 600, marginBottom: 6 }}>{title}</div>
       <div>{detail}</div>
+    </div>
+  )
+}
+
+function artifactLoadErrorInfo(artifact?: ArtifactTab | null): ArtifactLoadErrorInfo | null {
+  const raw = artifact?.load_error
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as ArtifactLoadErrorInfo
+  }
+
+  const type = String(artifact?.type || '').toLowerCase()
+  const data = artifact?.data
+  if (type === 'error' && data && typeof data === 'object' && !Array.isArray(data)) {
+    return data as ArtifactLoadErrorInfo
+  }
+
+  return null
+}
+
+function ArtifactLoadErrorNotice({ artifact }: ArtifactProps) {
+  const error = artifactLoadErrorInfo(artifact)
+  const detail = String(error?.message || 'This artifact could not be loaded.')
+  const rawRows: Array<[string, string | undefined]> = [
+    ['File', error?.file_name],
+    ['Size', error?.file_size_label],
+    ['Limit', error?.max_file_size_label],
+    ['Setting', error?.env_var],
+  ]
+  const rows: Array<[string, string]> = rawRows.flatMap(([label, value]) => (
+    typeof value === 'string' && value ? [[label, value]] : []
+  ))
+
+  return (
+    <div>
+      <ArtifactEmpty title="Artifact cannot load" detail={detail} />
+      {rows.length ? (
+        <div
+          style={{
+            margin: '0 16px 16px',
+            padding: '10px 12px',
+            border: `1px solid ${SLATE.border}`,
+            borderRadius: 8,
+            background: `${SLATE.surface}cc`,
+            color: SLATE.text,
+            fontSize: 11,
+            lineHeight: 1.6,
+          }}
+        >
+          {rows.map(([label, value]) => (
+            <div key={label} style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', gap: 8 }}>
+              <span style={{ color: SLATE.muted }}>{label}</span>
+              <span style={{ color: label === 'Setting' ? AMBER[400] : SLATE.textBright, wordBreak: 'break-word' }}>{String(value)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1355,6 +1421,10 @@ function ArtifactRendererInner({ artifact }: ArtifactRendererProps) {
 
   if (!artifact || typeof artifact !== 'object') {
     return <ArtifactEmpty title="No artifact selected" detail="Choose an artifact tab to inspect its content." />
+  }
+
+  if (artifactLoadErrorInfo(artifact)) {
+    return <ArtifactLoadErrorNotice artifact={artifact} />
   }
 
   switch (type) {

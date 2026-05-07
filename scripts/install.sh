@@ -381,6 +381,9 @@ HERMELIN_COOKIE_SECRET='$COOKIE_SECRET'
 HERMES_HOME=$DEFAULT_HERMES_HOME
 HERMELIN_HERMES_CMD="$DEFAULT_HERMES_EXE chat --toolsets \"hermes-cli, artifacts\""
 
+# Artifact JSON read cap in bytes (8 MiB). Raise only if you trust the artifacts.
+HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES=8388608
+
 # Optional
 # HERMELIN_META_DB_PATH=$DEFAULT_HERMES_HOME/hermelin_meta.db
 # HERMELIN_SPAWN_CWD=$ROOT_DIR
@@ -471,6 +474,9 @@ else:
     set_key("HERMELIN_SSL_KEYFILE", "", quote=True)
     set_key("HERMELIN_COOKIE_SECURE", "0")
     set_key("HERMELIN_ALLOW_INSECURE_HTTP", "1")
+
+if not (get("HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES") or "").strip():
+    set_key("HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES", "8388608")
 
 env_file.write_text(txt, encoding="utf-8")
 PY

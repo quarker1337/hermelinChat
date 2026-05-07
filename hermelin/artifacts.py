@@ -29,7 +29,12 @@ def _cache_limit_from_env(name: str, default: int) -> int:
 _ARTIFACT_CACHE_MAX_ENTRIES = _cache_limit_from_env("HERMELIN_ARTIFACT_CACHE_MAX_ENTRIES", 512)
 _ARTIFACT_CACHE_MAX_BYTES = _cache_limit_from_env("HERMELIN_ARTIFACT_CACHE_MAX_BYTES", 32 * 1024 * 1024)
 _ARTIFACT_CACHE_MAX_FILE_BYTES = _cache_limit_from_env("HERMELIN_ARTIFACT_CACHE_MAX_FILE_BYTES", 4 * 1024 * 1024)
-_ARTIFACT_READ_MAX_FILE_BYTES = _cache_limit_from_env("HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES", 8 * 1024 * 1024)
+_ARTIFACT_READ_MAX_FILE_BYTES_ENV = "HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES"
+_ARTIFACT_READ_MAX_FILE_BYTES_DEFAULT = 8 * 1024 * 1024
+_ARTIFACT_READ_MAX_FILE_BYTES = _cache_limit_from_env(
+    _ARTIFACT_READ_MAX_FILE_BYTES_ENV,
+    _ARTIFACT_READ_MAX_FILE_BYTES_DEFAULT,
+)
 
 
 @dataclass
@@ -133,6 +138,54 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _format_bytes(value: int | float | None) -> str:
+    try:
+        size = max(0, float(value or 0))
+    except Exception:
+        size = 0.0
+
+    for suffix, factor in (("GiB", 1024**3), ("MiB", 1024**2), ("KiB", 1024)):
+        if size >= factor:
+            return f"{size / factor:.1f} {suffix}"
+    return f"{int(size)} B"
+
+
+def _oversized_artifact_placeholder(path: Path, *, stat: os.stat_result, persistent: bool) -> dict[str, Any] | None:
+    artifact_id = path.stem
+    if not is_valid_artifact_id(artifact_id):
+        return None
+
+    size_bytes = int(getattr(stat, "st_size", 0) or 0)
+    max_bytes = int(_ARTIFACT_READ_MAX_FILE_BYTES or 0)
+    timestamp = float(getattr(stat, "st_mtime", 0.0) or 0.0)
+    message = (
+        f"Artifact JSON is {_format_bytes(size_bytes)}, which is above the "
+        f"{_format_bytes(max_bytes)} read limit. Increase "
+        f"{_ARTIFACT_READ_MAX_FILE_BYTES_ENV} in .hermelin.env and restart "
+        "hermelinChat, or move large media out of the artifact JSON."
+    )
+    load_error = {
+        "code": "artifact_too_large",
+        "message": message,
+        "file_name": path.name,
+        "file_size_bytes": size_bytes,
+        "file_size_label": _format_bytes(size_bytes),
+        "max_file_bytes": max_bytes,
+        "max_file_size_label": _format_bytes(max_bytes),
+        "env_var": _ARTIFACT_READ_MAX_FILE_BYTES_ENV,
+    }
+    return {
+        "id": artifact_id,
+        "type": "error",
+        "title": artifact_id,
+        "timestamp": timestamp,
+        "updated_at": timestamp,
+        "persistent": bool(persistent),
+        "load_error": load_error,
+        "data": load_error,
+    }
 
 
 def _read_runner_pid(path: Path) -> int | None:
@@ -338,12 +391,12 @@ def _read_artifact_json_cached(path: Path, *, persistent: bool) -> dict[str, Any
     if _ARTIFACT_READ_MAX_FILE_BYTES > 0 and stat.st_size > _ARTIFACT_READ_MAX_FILE_BYTES:
         _invalidate_artifact_cache_path(path)
         logger.debug(
-            "skipping oversized artifact %s (%d bytes > %d byte read limit)",
+            "returning placeholder for oversized artifact %s (%d bytes > %d byte read limit)",
             path,
             stat.st_size,
             _ARTIFACT_READ_MAX_FILE_BYTES,
         )
-        return None
+        return _oversized_artifact_placeholder(path, stat=stat, persistent=persistent)
 
     try:
         cache_key = _cache_key_for_path(path)

@@ -425,6 +425,15 @@ test('artifact src iframes allow downloads for browser-side recorders', () => {
   assert.match(rendererSource, /sandbox=\{src \? 'allow-scripts allow-forms allow-same-origin allow-downloads'/)
 })
 
+test('oversized artifact placeholders render a clear load error', () => {
+  const rendererPath = path.join(SOURCE_ROOT, 'components', 'artifacts', 'ArtifactRenderer.tsx')
+  const rendererSource = fs.readFileSync(rendererPath, 'utf8')
+
+  assert.match(rendererSource, /Artifact cannot load/)
+  assert.match(rendererSource, /artifactLoadErrorInfo\(artifact\)/)
+  assert.match(rendererSource, /HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES|env_var/)
+})
+
 test('Strudel recorder keeps blob URLs alive for Firefox downloads', () => {
   const strudelPath = path.resolve(__dirname, '..', '..', 'hermelin', 'default_artifact_assets', 'strudel', 'index.html')
   const strudelSource = fs.readFileSync(strudelPath, 'utf8')
