@@ -129,6 +129,7 @@ HERMELIN_COOKIE_SECRET=generate-a-long-random-string
 # HERMES_HOME=/home/you/.hermes
 # HERMELIN_META_DB_PATH=/home/you/.hermes/hermelin_meta.db
 # HERMELIN_SPAWN_CWD=/home/you
+# HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES=8388608
 ```
 
 Behind HTTPS? Add `HERMELIN_COOKIE_SECURE=1`.
@@ -347,6 +348,7 @@ Full purge:
 | `HERMELIN_COOKIE_SECRET` | *(none)* | Cookie signing secret (recommended) |
 | `HERMELIN_SESSION_TTL_SECONDS` | `43200` | Session lifetime |
 | `HERMELIN_SESSION_COOKIE` | `hermelin_session` | Cookie name |
+| `HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES` | `8388608` | Artifact JSON read cap in bytes; oversized artifacts still list with a load error |
 | `HERMELIN_COOKIE_SECURE` | `0` | Set to `1` behind HTTPS |
 | `HERMELIN_TRUST_X_FORWARDED_FOR` | `0` | Set to `1` behind a trusted proxy only |
 

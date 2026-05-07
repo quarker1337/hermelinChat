@@ -46,6 +46,8 @@ export const SettingsPanel = ({
     latest: string
     update_available: boolean
     url: string
+    commits_behind_main?: number | null
+    compare_url?: string | null
   } | null>(null)
 
   useEffect(() => {
@@ -151,6 +153,22 @@ export const SettingsPanel = ({
     status.kind === 'error' ? SLATE.danger : status.kind === 'ok' ? SLATE.success : SLATE.muted
 
   const canSave = !locked && !saving && dirty
+  const commitsBehindMain =
+    typeof updateInfo?.commits_behind_main === 'number' && updateInfo.commits_behind_main > 0
+      ? updateInfo.commits_behind_main
+      : null
+  const commitsBehindLabel = commitsBehindMain === null
+    ? ''
+    : `${commitsBehindMain} commit${commitsBehindMain === 1 ? '' : 's'} behind main`
+  const showUpdateNotice = !!updateInfo && (updateInfo.update_available || commitsBehindMain !== null)
+  const updateNoticeTitle = updateInfo?.update_available
+    ? `Update from ${updateInfo.current} → ${updateInfo.latest}`
+    : commitsBehindLabel
+  const updateNoticeUrl = updateInfo
+    ? updateInfo.update_available
+      ? updateInfo.url
+      : updateInfo.compare_url || updateInfo.url
+    : ''
 
   const onUiUpdate = useCallback(
     (updater: (prev: UiPrefs) => UiPrefs) => {
@@ -320,7 +338,7 @@ export const SettingsPanel = ({
             <span style={{ color: SLATE.muted }}>
               hermelinChat Version: {HERMELINCHAT_VERSION}
             </span>
-            {updateInfo?.update_available && (
+            {showUpdateNotice && updateInfo && (
               <div style={{ marginTop: 4 }}>
                 <span
                   style={{
@@ -328,16 +346,20 @@ export const SettingsPanel = ({
                     cursor: 'pointer',
                     textDecoration: 'underline',
                   }}
-                  onClick={() => window.open(updateInfo.url, '_blank')}
-                  title={`Update from ${updateInfo.current} → ${updateInfo.latest}`}
+                  onClick={() => window.open(updateNoticeUrl, '_blank')}
+                  title={updateNoticeTitle}
                 >
-                  ⚡ Update available: v{updateInfo.latest}
+                  {updateInfo.update_available
+                    ? `⚡ Update available: v${updateInfo.latest}`
+                    : '⚡ Main branch is newer'}
                 </span>
+                {commitsBehindLabel && (
+                  <div style={{ color: SLATE.muted, marginTop: 2 }}>
+                    {commitsBehindLabel}
+                  </div>
+                )}
                 <div style={{ color: SLATE.muted, marginTop: 2 }}>
-                  {HERMELINCHAT_VERSION.includes('dev') || HERMELINCHAT_VERSION.includes('+')
-                    ? 'Run: git pull && pip install -e .'
-                    : 'Run: pip install --upgrade hermelin-chat'
-                  }
+                  Run from your hermelinChat checkout: ./scripts/update.sh --restart
                 </div>
               </div>
             )}

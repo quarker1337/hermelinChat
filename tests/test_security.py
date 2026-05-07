@@ -8,7 +8,7 @@ from unittest.mock import patch
 from hermelin.auth import create_session_token, extract_session_jti, verify_session_token
 from hermelin.config import HermelinConfig
 from hermelin.security import ip_allowed
-from hermelin.server import _is_update_available, create_app
+from hermelin.server import _github_release_tag_for_version, _is_update_available, create_app
 
 
 def _route_for_path(app, path: str):
@@ -159,6 +159,42 @@ class _StaticStatusResponse:
         return {}
 
 
+class _JsonStatusResponse(_StaticStatusResponse):
+    def __init__(self, status_code: int, payload: dict):
+        super().__init__(status_code)
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class _GitHubUpdateAsyncClient:
+    calls = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url, *args, **kwargs):
+        type(self).calls.append(url)
+        if url.endswith("/releases/latest"):
+            return _JsonStatusResponse(200, {"tag_name": "v0.15"})
+        if url.endswith("/compare/v0.14...main"):
+            return _JsonStatusResponse(
+                200,
+                {
+                    "ahead_by": 42,
+                    "html_url": "https://github.com/quarker1337/hermelinChat/compare/v0.14...main",
+                },
+            )
+        return _StaticStatusResponse(404)
+
+
 class _Http503AsyncClient:
     calls = 0
 
@@ -195,6 +231,36 @@ class UpdateCheckEndpointTests(unittest.TestCase):
             self.assertNotIn("secret stack detail", response["error"])
             self.assertNotIn("/tmp/private", response["error"])
             self.assertFalse(response["cached"])
+            self.assertIsNone(response["commits_behind_main"])
+
+    def test_update_check_reports_commits_behind_main(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hermes_home = Path(tmpdir) / "hermes-home"
+            config = HermelinConfig(
+                hermes_home=hermes_home,
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+            )
+            app = create_app(config)
+            route = _route_for_path(app, "/api/update-check")
+            _GitHubUpdateAsyncClient.calls = []
+
+            with (
+                patch("hermelin.__version__", "0.14"),
+                patch("hermelin.server.httpx.AsyncClient", _GitHubUpdateAsyncClient),
+            ):
+                response = asyncio.run(route.endpoint())
+
+            self.assertEqual(response["latest"], "0.15")
+            self.assertTrue(response["update_available"])
+            self.assertEqual(response["commits_behind_main"], 42)
+            self.assertEqual(
+                response["compare_url"],
+                "https://github.com/quarker1337/hermelinChat/compare/v0.14...main",
+            )
+            self.assertEqual(len(_GitHubUpdateAsyncClient.calls), 2)
+            self.assertTrue(_GitHubUpdateAsyncClient.calls[0].endswith("/releases/latest"))
+            self.assertTrue(_GitHubUpdateAsyncClient.calls[1].endswith("/compare/v0.14...main"))
 
     def test_update_check_caches_failures_for_backoff(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -226,6 +292,12 @@ class UpdateCheckVersionComparisonTests(unittest.TestCase):
         self.assertTrue(_is_update_available("0.14.dev1", "0.14"))
         self.assertFalse(_is_update_available("0.15.dev1", "0.14"))
         self.assertFalse(_is_update_available("0.14+local", "0.14"))
+
+    def test_update_check_builds_safe_github_compare_tags(self):
+        self.assertEqual(_github_release_tag_for_version("0.14"), "v0.14")
+        self.assertEqual(_github_release_tag_for_version("v0.14+local"), "v0.14")
+        self.assertIsNone(_github_release_tag_for_version("../../main"))
+        self.assertIsNone(_github_release_tag_for_version("0.14/foo"))
 
 
 if __name__ == "__main__":

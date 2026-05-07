@@ -32,10 +32,22 @@ _RELEASE_SUFFIX_ORDER = {
     "c": 2,
     "post": 4,
 }
+_GITHUB_COMPARE_VERSION_RE = re.compile(
+    r"^\d+(?:\.\d+)*(?:[.\-_]?(?:dev|a|alpha|b|beta|rc|c|post)\d*)?$",
+    re.IGNORECASE,
+)
 
 
 def _normalize_release_tag(raw: str | None) -> str:
     return (raw or "").strip().lstrip("v")
+
+
+def _github_release_tag_for_version(raw: str | None) -> str | None:
+    """Return the likely GitHub release tag for a package version."""
+    text = _normalize_release_tag(raw).split("+", 1)[0].strip()
+    if not text or not _GITHUB_COMPARE_VERSION_RE.fullmatch(text):
+        return None
+    return f"v{text}"
 
 
 def _release_sort_key(raw: str | None) -> tuple[tuple[int, ...], int, int] | None:
@@ -266,6 +278,14 @@ def _path_is_or_under(path: str, prefix: str) -> bool:
     normalized_path = str(path or "").rstrip("/") or "/"
     normalized_prefix = str(prefix or "").rstrip("/") or "/"
     return normalized_path == normalized_prefix or normalized_path.startswith(f"{normalized_prefix}/")
+
+
+_RUNNER_PROXY_FRAME_PATH_RE = re.compile(r"^/r/[A-Za-z0-9._-]+/_t/[^/]+(?:/.*)?$")
+
+
+def _is_runner_proxy_frame_path(path: str) -> bool:
+    """Return true only for token-bearing runner proxy paths that iframes load."""
+    return bool(_RUNNER_PROXY_FRAME_PATH_RE.fullmatch(str(path or "")))
 
 
 
@@ -529,12 +549,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         )
 
     def _is_public_path(path: str) -> bool:
-        # SPA + static: public. Guard /api (except /api/auth/* and default artifact assets).
+        # SPA + static: public. Guard /api except explicit auth endpoints.
         if not path.startswith("/api"):
             return True
         if path.startswith("/api/auth/"):
-            return True
-        if path.startswith("/api/default-artifacts/"):
             return True
         return False
 
@@ -560,8 +578,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     async def _security_headers(request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        # Default artifact assets and the authenticated Hermes dashboard iframe are served inside iframes.
-        if _path_is_or_under(request.url.path, "/api/default-artifacts") or _path_is_or_under(request.url.path, dashboard_base_path):
+        # Built-in assets, the authenticated Hermes dashboard, and tokenized runner
+        # iframes must be frameable by hermelinChat. Keep everything else denied.
+        if (
+            _path_is_or_under(request.url.path, "/api/default-artifacts")
+            or _path_is_or_under(request.url.path, dashboard_base_path)
+            or _is_runner_proxy_frame_path(request.url.path)
+        ):
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
         else:
             response.headers["X-Frame-Options"] = "DENY"
@@ -875,6 +898,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     _RUNNER_PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
+    @app.api_route("/r/{tab_id}/_t", methods=_RUNNER_PROXY_METHODS)
+    @app.api_route("/r/{tab_id}/_t/", methods=_RUNNER_PROXY_METHODS)
+    async def runner_proxy_missing_token(tab_id: str):
+        if not is_valid_artifact_id(tab_id):
+            return JSONResponse({"detail": "invalid tab id"}, status_code=400)
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
     @app.api_route("/r/{tab_id}/_t/{token}", methods=_RUNNER_PROXY_METHODS)
     @app.api_route("/r/{tab_id}/_t/{token}/{path:path}", methods=_RUNNER_PROXY_METHODS)
     async def runner_proxy(request: Request, tab_id: str, token: str, path: str = ""):
@@ -953,6 +983,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             status_code=upstream_resp.status_code,
             headers=resp_headers,
         )
+
+    @app.api_route("/r", methods=_RUNNER_PROXY_METHODS)
+    @app.api_route("/r/{path:path}", methods=_RUNNER_PROXY_METHODS)
+    async def runner_proxy_reserved_namespace(path: str = ""):
+        # Reserve /r for token-bearing runner proxy requests so malformed runner
+        # URLs cannot fall through to the public SPA route.
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
     @app.websocket("/r/{tab_id}/_t/{token}")
     @app.websocket("/r/{tab_id}/_t/{token}/{path:path}")
@@ -2205,12 +2242,54 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     # ── Update check (cached) ──────────────────────────────────────────
 
     _GITHUB_REPO = "quarker1337/hermelinChat"
-    _update_cache: dict = {"latest": None, "checked_at": 0.0, "error": None}
+    _update_cache: dict = {
+        "latest": None,
+        "checked_at": 0.0,
+        "error": None,
+        "commits_behind_main": None,
+        "compare_url": None,
+    }
     _UPDATE_CHECK_INTERVAL = 3600  # re-check at most once per hour
+
+    async def _fetch_commits_behind_main(client: httpx.AsyncClient, current_version: str):
+        base_tag = _github_release_tag_for_version(current_version)
+        if not base_tag:
+            return None, None
+
+        compare_url = f"https://github.com/{_GITHUB_REPO}/compare/{base_tag}...main"
+        try:
+            r = await client.get(
+                f"https://api.github.com/repos/{_GITHUB_REPO}/compare/{base_tag}...main",
+                headers={"Accept": "application/vnd.github.v3+json"},
+            )
+            if r.status_code != 200:
+                return None, compare_url
+
+            data = r.json()
+            commits_behind = data.get("ahead_by")
+            if not isinstance(commits_behind, int) or commits_behind < 0:
+                return None, compare_url
+            return commits_behind, data.get("html_url") or compare_url
+        except Exception:
+            logger.debug("commit compare check failed", exc_info=True)
+            return None, compare_url
+
+    def _update_check_response(current_version: str, cached: bool):
+        latest = _update_cache["latest"] or current_version
+        return {
+            "current": current_version,
+            "latest": latest,
+            "update_available": _is_update_available(current_version, latest),
+            "url": f"https://github.com/{_GITHUB_REPO}/releases/latest",
+            "cached": cached,
+            "error": _update_cache.get("error"),
+            "commits_behind_main": _update_cache.get("commits_behind_main"),
+            "compare_url": _update_cache.get("compare_url"),
+        }
 
     @app.get("/api/update-check")
     async def update_check():
-        """Check GitHub for newer hermelinChat releases (cached 1h)."""
+        """Check GitHub for newer hermelinChat releases and main commits (cached 1h)."""
         from hermelin import __version__ as current_version
 
         now = time.time()
@@ -2219,15 +2298,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         if now - _update_cache["checked_at"] < _UPDATE_CHECK_INTERVAL and (
             _update_cache["latest"] is not None or _update_cache["error"] is not None
         ):
-            latest = _update_cache["latest"] or current_version
-            return {
-                "current": current_version,
-                "latest": latest,
-                "update_available": _is_update_available(current_version, latest),
-                "url": f"https://github.com/{_GITHUB_REPO}/releases/latest",
-                "cached": True,
-                "error": _update_cache.get("error"),
-            }
+            return _update_check_response(current_version, cached=True)
 
         # Fetch from GitHub
         try:
@@ -2239,26 +2310,25 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 if r.status_code == 200:
                     data = r.json()
                     tag = (data.get("tag_name") or "").lstrip("v").strip()
+                    commits_behind, compare_url = await _fetch_commits_behind_main(client, current_version)
                     _update_cache["latest"] = tag
                     _update_cache["checked_at"] = now
                     _update_cache["error"] = None
+                    _update_cache["commits_behind_main"] = commits_behind
+                    _update_cache["compare_url"] = compare_url
                 else:
                     _update_cache["checked_at"] = now
                     _update_cache["error"] = f"GitHub API returned {r.status_code}"
+                    _update_cache["commits_behind_main"] = None
+                    _update_cache["compare_url"] = None
         except Exception:
             logger.warning("update check failed", exc_info=True)
             _update_cache["checked_at"] = now
             _update_cache["error"] = "Update check temporarily unavailable"
+            _update_cache["commits_behind_main"] = None
+            _update_cache["compare_url"] = None
 
-        latest = _update_cache["latest"] or current_version
-        return {
-            "current": current_version,
-            "latest": latest,
-            "update_available": _is_update_available(current_version, latest),
-            "url": f"https://github.com/{_GITHUB_REPO}/releases/latest",
-            "cached": False,
-            "error": _update_cache.get("error"),
-        }
+        return _update_check_response(current_version, cached=False)
 
     # -----------------------------------------------------------------
     # Auth (password -> signed session cookie)
