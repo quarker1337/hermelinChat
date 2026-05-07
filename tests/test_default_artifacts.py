@@ -7,7 +7,10 @@ import types
 import unittest
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 from hermelin.artifacts import list_artifacts
+from hermelin.auth import create_session_token
 from hermelin.config import HermelinConfig
 from hermelin.server import create_app
 
@@ -138,6 +141,28 @@ class DefaultArtifactsTests(unittest.TestCase):
 
         self.assertIn("getActiveTheme", renderer_text)
         self.assertIn("type: 'hermes:artifact-theme'", renderer_text)
+
+    def test_default_artifact_assets_require_auth_when_password_enabled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            cookie_secret = "default-artifact-auth-secret"
+            config = HermelinConfig(
+                hermes_home=tmp / "hermes-home",
+                meta_db_path=tmp / "hermelin_meta.db",
+                spawn_cwd=tmp / "spawn-cwd",
+                auth_password_hash="auth-enabled-without-cookie",
+                cookie_secret=cookie_secret,
+                allowed_ips="*",
+            )
+            client = TestClient(create_app(config))
+
+            unauthenticated = client.get(DEFAULT_STRUDEL_SRC)
+            token = create_session_token(secret=cookie_secret.encode("utf-8"), ttl_seconds=300)
+            authenticated = client.get(DEFAULT_STRUDEL_SRC, headers={"Cookie": f"hermelin_session={token}"})
+
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(authenticated.status_code, 200)
+        self.assertIn("<strudel-editor", authenticated.text)
 
     def test_artifact_tool_omits_default_strudel_without_config(self):
         tool_module = _load_artifact_tool_module()

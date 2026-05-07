@@ -280,6 +280,14 @@ def _path_is_or_under(path: str, prefix: str) -> bool:
     return normalized_path == normalized_prefix or normalized_path.startswith(f"{normalized_prefix}/")
 
 
+_RUNNER_PROXY_FRAME_PATH_RE = re.compile(r"^/r/[A-Za-z0-9._-]+/_t/[^/]+(?:/.*)?$")
+
+
+def _is_runner_proxy_frame_path(path: str) -> bool:
+    """Return true only for token-bearing runner proxy paths that iframes load."""
+    return bool(_RUNNER_PROXY_FRAME_PATH_RE.fullmatch(str(path or "")))
+
+
 
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
     config = config or HermelinConfig()
@@ -541,12 +549,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         )
 
     def _is_public_path(path: str) -> bool:
-        # SPA + static: public. Guard /api (except /api/auth/* and default artifact assets).
+        # SPA + static: public. Guard /api except explicit auth endpoints.
         if not path.startswith("/api"):
             return True
         if path.startswith("/api/auth/"):
-            return True
-        if path.startswith("/api/default-artifacts/"):
             return True
         return False
 
@@ -572,8 +578,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     async def _security_headers(request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        # Default artifact assets and the authenticated Hermes dashboard iframe are served inside iframes.
-        if _path_is_or_under(request.url.path, "/api/default-artifacts") or _path_is_or_under(request.url.path, dashboard_base_path):
+        # Built-in assets, the authenticated Hermes dashboard, and tokenized runner
+        # iframes must be frameable by hermelinChat. Keep everything else denied.
+        if (
+            _path_is_or_under(request.url.path, "/api/default-artifacts")
+            or _path_is_or_under(request.url.path, dashboard_base_path)
+            or _is_runner_proxy_frame_path(request.url.path)
+        ):
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
         else:
             response.headers["X-Frame-Options"] = "DENY"
@@ -887,6 +898,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     _RUNNER_PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
+    @app.api_route("/r/{tab_id}/_t", methods=_RUNNER_PROXY_METHODS)
+    @app.api_route("/r/{tab_id}/_t/", methods=_RUNNER_PROXY_METHODS)
+    async def runner_proxy_missing_token(tab_id: str):
+        if not is_valid_artifact_id(tab_id):
+            return JSONResponse({"detail": "invalid tab id"}, status_code=400)
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
     @app.api_route("/r/{tab_id}/_t/{token}", methods=_RUNNER_PROXY_METHODS)
     @app.api_route("/r/{tab_id}/_t/{token}/{path:path}", methods=_RUNNER_PROXY_METHODS)
     async def runner_proxy(request: Request, tab_id: str, token: str, path: str = ""):
@@ -965,6 +983,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             status_code=upstream_resp.status_code,
             headers=resp_headers,
         )
+
+    @app.api_route("/r", methods=_RUNNER_PROXY_METHODS)
+    @app.api_route("/r/{path:path}", methods=_RUNNER_PROXY_METHODS)
+    async def runner_proxy_reserved_namespace(path: str = ""):
+        # Reserve /r for token-bearing runner proxy requests so malformed runner
+        # URLs cannot fall through to the public SPA route.
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
     @app.websocket("/r/{tab_id}/_t/{token}")
     @app.websocket("/r/{tab_id}/_t/{token}/{path:path}")
