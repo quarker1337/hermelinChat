@@ -431,6 +431,7 @@ test('oversized artifact placeholders render a clear load error', () => {
 
   assert.match(rendererSource, /Artifact cannot load/)
   assert.match(rendererSource, /artifactLoadErrorInfo\(artifact\)/)
+  assert.match(rendererSource, /case 'error':/)
   assert.match(rendererSource, /HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES|env_var/)
 })
 

@@ -1442,6 +1442,8 @@ function ArtifactRendererInner({ artifact }: ArtifactRendererProps) {
       return <ChartArtifact artifact={artifact} />
     case 'map':
       return <MapArtifact artifact={artifact} />
+    case 'error':
+      return <ArtifactLoadErrorNotice artifact={artifact} />
     default:
       return (
         <div>
