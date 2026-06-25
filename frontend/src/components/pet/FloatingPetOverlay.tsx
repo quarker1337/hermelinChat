@@ -1,7 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
-import { SLATE } from '../../theme/index'
-
 const DEFAULT_FRAME_W = 192
 const DEFAULT_FRAME_H = 208
 const DEFAULT_FRAMES = 6
@@ -181,8 +179,8 @@ export function FloatingPetOverlay({ paused = false, visible = true }: { paused?
   const scale = Math.max(0.1, Math.min(3, info.scale ?? DEFAULT_SCALE)) * OVERLAY_ZOOM
   const drawW = Math.round(frameW * scale)
   const drawH = Math.round(frameH * scale)
-  const shellW = Math.max(148, drawW + 38)
-  const shellH = Math.max(124, drawH + 24)
+  const shellW = Math.max(96, drawW + 18)
+  const shellH = Math.max(104, drawH + 8)
   const state: PetState = paused ? 'waiting' : 'idle'
 
   return (
@@ -191,7 +189,6 @@ export function FloatingPetOverlay({ paused = false, visible = true }: { paused?
       title={info.displayName || info.slug || 'Hermes pet'}
       style={{
         alignItems: 'flex-end',
-        background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.52) 56%, rgba(0,0,0,0) 72%)',
         bottom: 12,
         display: 'flex',
         height: shellH,
@@ -203,20 +200,7 @@ export function FloatingPetOverlay({ paused = false, visible = true }: { paused?
         zIndex: 9,
       }}
     >
-      <div
-        style={{
-          background: `linear-gradient(180deg, ${SLATE.bg}22, ${SLATE.bg}05)`,
-          borderRadius: '999px',
-          bottom: 4,
-          boxShadow: '0 18px 34px rgba(0,0,0,0.4)',
-          height: Math.max(8, Math.round(drawW * 0.18)),
-          left: '50%',
-          position: 'absolute',
-          transform: 'translateX(-50%)',
-          width: Math.max(42, Math.round(drawW * 0.62)),
-        }}
-      />
-      <div style={{ filter: 'drop-shadow(0 12px 22px rgba(0,0,0,0.5))', lineHeight: 0, position: 'relative' }}>
+      <div style={{ filter: 'drop-shadow(0 8px 12px rgba(0,0,0,0.32))', lineHeight: 0, position: 'relative' }}>
         <PetCanvas info={info} state={state} />
       </div>
     </div>
