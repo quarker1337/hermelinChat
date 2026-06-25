@@ -130,6 +130,7 @@ HERMELIN_COOKIE_SECRET=generate-a-long-random-string
 # HERMELIN_META_DB_PATH=/home/you/.hermes/hermelin_meta.db
 # HERMELIN_SPAWN_CWD=/home/you
 # HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES=8388608
+# HERMELIN_PTY_PET_ENABLED=1  # opt back into Hermes' terminal-rendered pet; browser canvas pet is default
 ```
 
 Behind HTTPS? Add `HERMELIN_COOKIE_SECURE=1`.

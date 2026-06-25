@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 import hmac
 import json
@@ -274,6 +275,13 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _env_flag_default(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip()
+    if raw == "":
+        return default
+    return raw.lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _path_is_or_under(path: str, prefix: str) -> bool:
     normalized_path = str(path or "").rstrip("/") or "/"
     normalized_prefix = str(prefix or "").rstrip("/") or "/"
@@ -287,6 +295,182 @@ def _is_runner_proxy_frame_path(path: str) -> bool:
     """Return true only for token-bearing runner proxy paths that iframes load."""
     return bool(_RUNNER_PROXY_FRAME_PATH_RE.fullmatch(str(path or "")))
 
+
+def _deep_merge_dict(base: dict, overlay: dict) -> dict:
+    """Return a recursive merge where overlay wins at leaves."""
+    out = dict(base or {})
+    for key, value in (overlay or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge_dict(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _safe_read_yaml(path: Path) -> dict:
+    try:
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+_PET_STATE_ROWS = [
+    "idle",
+    "running-right",
+    "running-left",
+    "waving",
+    "jumping",
+    "failed",
+    "waiting",
+    "running",
+    "review",
+]
+
+
+def _mime_for_pet_sheet(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".png":
+        return "image/png"
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".gif":
+        return "image/gif"
+    return "image/webp"
+
+
+def _resolve_installed_pet_dir(pets_dir: Path, configured_slug: str) -> Path | None:
+    slug = str(configured_slug or "").strip()
+    candidates: list[Path] = []
+    if slug:
+        candidates.append(pets_dir / slug)
+    try:
+        candidates.extend(sorted(p for p in pets_dir.iterdir() if p.is_dir()))
+    except Exception:
+        pass
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            root = pets_dir.resolve()
+        except Exception:
+            continue
+        if root != resolved and root not in resolved.parents:
+            continue
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        if (resolved / "pet.json").is_file():
+            return resolved
+    return None
+
+
+def _pet_overlay_info(config: HermelinConfig) -> dict:
+    """Return a browser-canvas-friendly payload for the active installed pet.
+
+    This intentionally reads Hermes' real profile config + installed pet files
+    directly instead of asking the PTY/TUI to render. The browser gets the
+    original spritesheet and can draw it as pixels rather than xterm half-blocks.
+    """
+    cfg = _safe_read_yaml(config.hermes_home / "config.yaml")
+    display = cfg.get("display", {}) if isinstance(cfg.get("display"), dict) else {}
+    pet_cfg = display.get("pet", {}) if isinstance(display.get("pet"), dict) else {}
+    terminal_enabled = bool(pet_cfg.get("enabled"))
+    configured_slug = str(pet_cfg.get("slug", "") or "")
+    try:
+        scale = float(pet_cfg.get("scale", 0.33) or 0.33)
+    except (TypeError, ValueError):
+        scale = 0.33
+    scale = max(0.1, min(3.0, scale))
+
+    if not terminal_enabled:
+        return {"enabled": False, "terminalEnabled": False, "slug": configured_slug or None}
+
+    pets_dir = config.hermes_home / "pets"
+    pet_dir = _resolve_installed_pet_dir(pets_dir, configured_slug)
+    if pet_dir is None:
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+
+    try:
+        meta = json.loads((pet_dir / "pet.json").read_text(encoding="utf-8"))
+        if not isinstance(meta, dict):
+            meta = {}
+    except Exception:
+        meta = {}
+
+    sheet_name = str(meta.get("spritesheetPath") or "spritesheet.webp")
+    try:
+        sheet = (pet_dir / sheet_name).resolve()
+        root = pet_dir.resolve()
+    except Exception:
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+    if root != sheet.parent and root not in sheet.parents:
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+    if not sheet.is_file():
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+
+    try:
+        raw = sheet.read_bytes()
+        stat = sheet.stat()
+    except Exception:
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+
+    slug = str(meta.get("id") or pet_dir.name)
+    return {
+        "enabled": True,
+        "terminalEnabled": terminal_enabled,
+        "slug": slug,
+        "displayName": str(meta.get("displayName") or slug),
+        "description": str(meta.get("description") or ""),
+        "mime": _mime_for_pet_sheet(sheet),
+        "spritesheetBase64": base64.standard_b64encode(raw).decode("ascii"),
+        "spritesheetRevision": f"{int(stat.st_mtime_ns)}:{stat.st_size}",
+        "frameW": 192,
+        "frameH": 208,
+        "framesPerState": 6,
+        "loopMs": 1100,
+        "scale": scale,
+        "stateRows": list(_PET_STATE_ROWS),
+    }
+
+
+def _prepare_pty_managed_scope(config: HermelinConfig, parent_env: dict[str, str]) -> Path | None:
+    """Create a child-only Hermes managed-scope overlay that disables PTY pets.
+
+    HermelinChat renders the pet as a real browser canvas. The Hermes subprocess
+    running inside xterm should not also draw the Unicode half-block pet. Using
+    HERMES_MANAGED_DIR is per-child and leaves the user's config.yaml untouched.
+    If an existing managed scope is present, copy/merge it so deployment policy
+    is preserved before adding the pet-disable leaf.
+    """
+    managed_dir = config.hermes_home / "hermelin" / "pty-managed-scope"
+    try:
+        managed_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        logger.warning("failed to create Hermelin managed scope at %s", managed_dir, exc_info=True)
+        return None
+
+    base_config: dict = {}
+    inherited = str(parent_env.get("HERMES_MANAGED_DIR") or "").strip()
+    inherited_dir = Path(inherited).expanduser() if inherited else None
+    if inherited_dir and inherited_dir.is_dir():
+        base_config = _safe_read_yaml(inherited_dir / "config.yaml")
+        try:
+            inherited_env = inherited_dir / ".env"
+            if inherited_env.is_file():
+                (managed_dir / ".env").write_text(inherited_env.read_text(encoding="utf-8"), encoding="utf-8")
+        except Exception:
+            logger.debug("failed to copy inherited Hermes managed .env", exc_info=True)
+
+    next_config = _deep_merge_dict(base_config, {"display": {"pet": {"enabled": False}}})
+    try:
+        (managed_dir / "config.yaml").write_text(yaml.safe_dump(next_config, sort_keys=False), encoding="utf-8")
+    except Exception:
+        logger.warning("failed to write Hermelin managed scope config at %s", managed_dir, exc_info=True)
+        return None
+    return managed_dir
 
 
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
@@ -628,6 +812,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "default_model": _read_default_model(),
             "spawn_cwd": str(config.spawn_cwd),
         }
+
+    @app.get("/api/pet/info")
+    async def api_pet_info():
+        return _pet_overlay_info(config)
 
     @app.get("/api/artifacts")
     async def api_artifacts():
@@ -2630,6 +2818,15 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "LINES",
         ):
             env.pop(k, None)
+
+        # Browser xterm renders terminal pets as Unicode half-blocks. HermelinChat
+        # draws the selected pet as a crisp canvas overlay instead, so hide the
+        # subprocess pet through a child-only Hermes managed scope. This preserves
+        # the user's real config and any inherited managed policy.
+        if "hermes" in exe_name and not _env_flag_default("HERMELIN_PTY_PET_ENABLED", False):
+            pty_managed_dir = _prepare_pty_managed_scope(config, env)
+            if pty_managed_dir is not None:
+                env["HERMES_MANAGED_DIR"] = str(pty_managed_dir)
 
         # -------------------------------------------------------------
         # Optional session-scoped artifact cleanup
