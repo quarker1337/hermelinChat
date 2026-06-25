@@ -133,6 +133,11 @@ HERMELIN_COOKIE_SECRET=generate-a-long-random-string
 # HERMELIN_PTY_PET_ENABLED=1  # opt back into Hermes' terminal-rendered pet; browser canvas pet is default
 ```
 
+Pet overlay notes:
+- The browser overlay follows Hermes' active pet by default and animates from terminal activity.
+- Position, visible size, and a local pet slug override are available under Settings → UI → Pet overlay.
+- The slug override is browser-local; it does not rewrite your Hermes `config.yaml`.
+
 Behind HTTPS? Add `HERMELIN_COOKIE_SECURE=1`.
 Behind a trusted reverse proxy? Add `HERMELIN_TRUST_X_FORWARDED_FOR=1`.
 

@@ -10,6 +10,7 @@ export const DEFAULT_ARTIFACT_PANEL_WIDTH = 480
 
 export const CURSOR_STYLE_VALUES = ['bar', 'block', 'underline']
 export const BACKGROUND_EFFECT_VALUES = ['auto', 'particles', 'matrix-rain', 'nous-crt', 'samaritan']
+export const PET_OVERLAY_POSITION_VALUES = ['bottom-right', 'bottom-left', 'top-right', 'top-left']
 
 export const DEFAULT_UI_PREFS: UiPrefs = {
   theme: DEFAULT_THEME_ID,
@@ -39,6 +40,11 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
     intensity: 65,
     glitchPulses: true,
   },
+  petOverlay: {
+    position: 'bottom-right',
+    size: 100,
+    slug: '',
+  },
 }
 
 // ─── Pure utils ─────────────────────────────────────────────────────────────
@@ -56,6 +62,7 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
   const ts = r.timestamps && typeof r.timestamps === 'object' ? (r.timestamps as Record<string, unknown>) : {}
   const term = r.terminal && typeof r.terminal === 'object' ? (r.terminal as Record<string, unknown>) : {}
   const vx = r.videoFx && typeof r.videoFx === 'object' ? (r.videoFx as Record<string, unknown>) : {}
+  const pet = r.petOverlay && typeof r.petOverlay === 'object' ? (r.petOverlay as Record<string, unknown>) : {}
 
   const cursorStyleRaw = term.cursorStyle ?? DEFAULT_UI_PREFS.terminal.cursorStyle
   const cursorStyleStr = String(cursorStyleRaw || '').toLowerCase()
@@ -78,6 +85,17 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
     ? effectStr
     : DEFAULT_UI_PREFS.background.effect
 
+  const petPositionRaw = pet.position ?? DEFAULT_UI_PREFS.petOverlay.position
+  const petPositionStr = String(petPositionRaw || '').toLowerCase()
+  const petPosition = PET_OVERLAY_POSITION_VALUES.includes(petPositionStr)
+    ? (petPositionStr as UiPrefs['petOverlay']['position'])
+    : DEFAULT_UI_PREFS.petOverlay.position
+
+  const petSlug = String(pet.slug ?? DEFAULT_UI_PREFS.petOverlay.slug)
+    .trim()
+    .replace(/[^A-Za-z0-9._-]/g, '')
+    .slice(0, 80)
+
   return {
     theme,
     appName: appName.trim(),
@@ -99,6 +117,11 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
       enabled: vx.enabled === undefined ? DEFAULT_UI_PREFS.videoFx.enabled : !!vx.enabled,
       intensity: clampNum(vx.intensity ?? DEFAULT_UI_PREFS.videoFx.intensity, 0, 100),
       glitchPulses: vx.glitchPulses === undefined ? DEFAULT_UI_PREFS.videoFx.glitchPulses : !!vx.glitchPulses,
+    },
+    petOverlay: {
+      position: petPosition,
+      size: clampNum(pet.size ?? DEFAULT_UI_PREFS.petOverlay.size, 50, 180),
+      slug: petSlug,
     },
   }
 }

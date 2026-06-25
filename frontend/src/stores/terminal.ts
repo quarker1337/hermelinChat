@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { TerminalState } from '../types'
+import type { PetActivityState, TerminalState } from '../types'
 import {
   useSessionStore,
   registerTerminalStore,
@@ -10,13 +10,40 @@ import {
 // Store interface
 // ---------------------------------------------------------------------------
 
+interface PetActivity {
+  state: PetActivityState
+  updatedAt: number
+}
+
 interface TerminalStore {
   state: TerminalState
   spawnNonce: number
+  petActivity: PetActivity
   spawn: (resumeId: string | null) => void
   onConnectionChange: (isUp: boolean, nonce?: number) => void
   onDetectedSessionId: (sid: string) => void
+  noteUserInput: () => void
+  notePtyOutput: (text: string) => void
+  notePetActivity: (state: PetActivityState, holdMs?: number) => void
   reset: () => void
+}
+
+let petActivityTimer: ReturnType<typeof setTimeout> | null = null
+let lastOutputBeat = 0
+
+function clearPetActivityTimer() {
+  if (petActivityTimer !== null) {
+    clearTimeout(petActivityTimer)
+    petActivityTimer = null
+  }
+}
+
+function inferPetStateFromOutput(text: string): PetActivityState {
+  const clean = (text || '').toString()
+  if (/\b(traceback|exception|error|failed|failure)\b|✗|❌/i.test(clean)) return 'failed'
+  if (/\b(review|thinking|reasoning|analyz)/i.test(clean)) return 'review'
+  if (/\b(tool|running|executing|fetching|searching|building|testing)\b|\[terminal\]|\[tool\]/i.test(clean)) return 'running'
+  return 'running'
 }
 
 // ---------------------------------------------------------------------------
@@ -26,6 +53,30 @@ interface TerminalStore {
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
   state: { phase: 'idle' },
   spawnNonce: 0,
+  petActivity: { state: 'idle', updatedAt: Date.now() },
+
+  notePetActivity: (state: PetActivityState, holdMs = 0) => {
+    clearPetActivityTimer()
+    set({ petActivity: { state, updatedAt: Date.now() } })
+    if (holdMs > 0 && state !== 'idle') {
+      petActivityTimer = setTimeout(() => {
+        petActivityTimer = null
+        set({ petActivity: { state: 'idle', updatedAt: Date.now() } })
+      }, holdMs)
+    }
+  },
+
+  noteUserInput: () => {
+    get().notePetActivity('waiting', 1600)
+  },
+
+  notePtyOutput: (text: string) => {
+    const now = Date.now()
+    if (now - lastOutputBeat < 350) return
+    lastOutputBeat = now
+    const state = inferPetStateFromOutput(text)
+    get().notePetActivity(state, state === 'failed' ? 2800 : 1200)
+  },
 
   // -------------------------------------------------------------------------
   // spawn — initiate a terminal connection
@@ -34,6 +85,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     set((s) => ({
       state: { phase: 'connecting', resumeId },
       spawnNonce: s.spawnNonce + 1,
+      petActivity: { state: 'waiting', updatedAt: Date.now() },
     }))
 
     if (resumeId !== null) {
@@ -52,9 +104,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     }
 
     if (!isUp) {
-      set({ state: { phase: 'idle' } })
+      clearPetActivityTimer()
+      set({ state: { phase: 'idle' }, petActivity: { state: 'idle', updatedAt: Date.now() } })
       return
     }
+
+    get().notePetActivity('waiting', 1400)
 
     if (state.phase !== 'connecting') return
 
@@ -90,6 +145,8 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
     if (state.phase !== 'detecting' && state.phase !== 'connected') return
 
+    get().notePetActivity('waving', 1800)
+
     if (state.phase === 'connected' && state.resumeId !== null) {
       // Resume flows already know which session they requested. If the backend later
       // echoes the same "Session: ..." line, keep the resumeId instead of clearing it.
@@ -107,7 +164,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   // reset — return to initial state
   // -------------------------------------------------------------------------
   reset: () => {
-    set({ state: { phase: 'idle' }, spawnNonce: 0 })
+    clearPetActivityTimer()
+    lastOutputBeat = 0
+    set({ state: { phase: 'idle' }, spawnNonce: 0, petActivity: { state: 'idle', updatedAt: Date.now() } })
   },
 }))
 

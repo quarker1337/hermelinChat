@@ -62,6 +62,31 @@ class PetOverlayTests(unittest.TestCase):
             self.assertEqual(data["mime"], "image/webp")
             self.assertEqual(data["scale"], 0.42)
             self.assertEqual(base64.b64decode(data["spritesheetBase64"]), raw)
+            self.assertIn({"slug": "slime", "displayName": "Slime", "description": "test pet"}, data["installedPets"])
+
+    def test_pet_info_can_return_local_slug_override_without_mutating_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            config = self._config(tmp)
+            self._write_pet(config.hermes_home, "slime")
+            ghost_raw = self._write_pet(config.hermes_home, "ghost")
+            config.hermes_home.mkdir(parents=True, exist_ok=True)
+            config_path = config.hermes_home / "config.yaml"
+            config_path.write_text(
+                yaml.safe_dump({"display": {"pet": {"enabled": True, "slug": "slime", "scale": 0.42}}}),
+                encoding="utf-8",
+            )
+
+            response = TestClient(create_app(config)).get("/api/pet/info?slug=ghost")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertTrue(data["enabled"])
+            self.assertEqual(data["source"], "override")
+            self.assertEqual(data["slug"], "ghost")
+            self.assertEqual(data["configuredSlug"], "slime")
+            self.assertEqual(base64.b64decode(data["spritesheetBase64"]), ghost_raw)
+            self.assertEqual(yaml.safe_load(config_path.read_text(encoding="utf-8"))["display"]["pet"]["slug"], "slime")
 
     def test_pet_info_hides_when_user_disabled_pet(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -80,6 +105,7 @@ class PetOverlayTests(unittest.TestCase):
             data = response.json()
             self.assertFalse(data["enabled"])
             self.assertEqual(data["slug"], "slime")
+            self.assertIn({"slug": "slime", "displayName": "Slime", "description": "test pet"}, data["installedPets"])
 
     def test_pty_managed_scope_disables_terminal_pet_without_touching_real_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:

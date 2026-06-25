@@ -367,61 +367,105 @@ def _resolve_installed_pet_dir(pets_dir: Path, configured_slug: str) -> Path | N
     return None
 
 
-def _pet_overlay_info(config: HermelinConfig) -> dict:
-    """Return a browser-canvas-friendly payload for the active installed pet.
+def _read_pet_meta(pet_dir: Path) -> dict:
+    try:
+        meta = json.loads((pet_dir / "pet.json").read_text(encoding="utf-8"))
+        return meta if isinstance(meta, dict) else {}
+    except Exception:
+        return {}
 
-    This intentionally reads Hermes' real profile config + installed pet files
-    directly instead of asking the PTY/TUI to render. The browser gets the
-    original spritesheet and can draw it as pixels rather than xterm half-blocks.
+
+def _installed_pet_summaries(pets_dir: Path) -> list[dict]:
+    out: list[dict] = []
+    try:
+        dirs = sorted((p for p in pets_dir.iterdir() if p.is_dir()), key=lambda p: p.name.lower())
+    except Exception:
+        return out
+    for pet_dir in dirs:
+        meta = _read_pet_meta(pet_dir)
+        if not meta and not (pet_dir / "pet.json").is_file():
+            continue
+        slug = str(meta.get("id") or pet_dir.name)
+        out.append(
+            {
+                "slug": slug,
+                "displayName": str(meta.get("displayName") or slug),
+                "description": str(meta.get("description") or ""),
+            }
+        )
+    return out
+
+
+def _pet_overlay_info(config: HermelinConfig, slug_override: str | None = None) -> dict:
+    """Return a browser-canvas-friendly payload for an installed pet.
+
+    By default this follows Hermes' configured active pet. Passing slug_override
+    lets the HermelinChat browser overlay choose a local pet without mutating the
+    user's Hermes config.
     """
     cfg = _safe_read_yaml(config.hermes_home / "config.yaml")
     display = cfg.get("display", {}) if isinstance(cfg.get("display"), dict) else {}
     pet_cfg = display.get("pet", {}) if isinstance(display.get("pet"), dict) else {}
     terminal_enabled = bool(pet_cfg.get("enabled"))
     configured_slug = str(pet_cfg.get("slug", "") or "")
+    requested_slug = str(slug_override or "").strip()
+    source = "override" if requested_slug else "configured"
     try:
         scale = float(pet_cfg.get("scale", 0.33) or 0.33)
     except (TypeError, ValueError):
         scale = 0.33
     scale = max(0.1, min(3.0, scale))
 
-    if not terminal_enabled:
-        return {"enabled": False, "terminalEnabled": False, "slug": configured_slug or None}
-
     pets_dir = config.hermes_home / "pets"
-    pet_dir = _resolve_installed_pet_dir(pets_dir, configured_slug)
-    if pet_dir is None:
-        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+    installed = _installed_pet_summaries(pets_dir)
 
-    try:
-        meta = json.loads((pet_dir / "pet.json").read_text(encoding="utf-8"))
-        if not isinstance(meta, dict):
-            meta = {}
-    except Exception:
-        meta = {}
+    if not requested_slug and not terminal_enabled:
+        return {
+            "enabled": False,
+            "terminalEnabled": False,
+            "slug": configured_slug or None,
+            "configuredSlug": configured_slug or None,
+            "source": source,
+            "installedPets": installed,
+        }
+
+    pet_dir = _resolve_installed_pet_dir(pets_dir, requested_slug or configured_slug)
+    if pet_dir is None:
+        return {
+            "enabled": False,
+            "terminalEnabled": terminal_enabled,
+            "slug": (requested_slug or configured_slug) or None,
+            "configuredSlug": configured_slug or None,
+            "source": source,
+            "installedPets": installed,
+        }
+
+    meta = _read_pet_meta(pet_dir)
 
     sheet_name = str(meta.get("spritesheetPath") or "spritesheet.webp")
     try:
         sheet = (pet_dir / sheet_name).resolve()
         root = pet_dir.resolve()
     except Exception:
-        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None, "configuredSlug": configured_slug or None, "source": source, "installedPets": installed}
     if root != sheet.parent and root not in sheet.parents:
-        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None, "configuredSlug": configured_slug or None, "source": source, "installedPets": installed}
     if not sheet.is_file():
-        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None, "configuredSlug": configured_slug or None, "source": source, "installedPets": installed}
 
     try:
         raw = sheet.read_bytes()
         stat = sheet.stat()
     except Exception:
-        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None}
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None, "configuredSlug": configured_slug or None, "source": source, "installedPets": installed}
 
     slug = str(meta.get("id") or pet_dir.name)
     return {
         "enabled": True,
         "terminalEnabled": terminal_enabled,
         "slug": slug,
+        "configuredSlug": configured_slug or None,
+        "source": source,
         "displayName": str(meta.get("displayName") or slug),
         "description": str(meta.get("description") or ""),
         "mime": _mime_for_pet_sheet(sheet),
@@ -433,6 +477,7 @@ def _pet_overlay_info(config: HermelinConfig) -> dict:
         "loopMs": 1100,
         "scale": scale,
         "stateRows": list(_PET_STATE_ROWS),
+        "installedPets": installed,
     }
 
 
@@ -814,8 +859,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         }
 
     @app.get("/api/pet/info")
-    async def api_pet_info():
-        return _pet_overlay_info(config)
+    async def api_pet_info(slug: str = ""):
+        return _pet_overlay_info(config, slug_override=slug)
 
     @app.get("/api/artifacts")
     async def api_artifacts():
