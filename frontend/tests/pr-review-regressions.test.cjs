@@ -218,7 +218,7 @@ test('terminal pet ignores focus clicks, blank input, and duplicate session redr
   useTerminalStore.getState().reset()
 })
 
-test('terminal pet follows structured Hermes sidecar events instead of PTY heuristics', () => {
+test('terminal pet follows structured Hermes sidecar events and never falls back to PTY heuristics', () => {
   installAssetStubs()
   clearCompiledModules()
   setWindow(undefined)
