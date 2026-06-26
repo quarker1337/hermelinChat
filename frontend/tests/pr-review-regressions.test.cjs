@@ -182,6 +182,17 @@ test('terminal store uses canonical Hermes pet activity state names', () => {
   useTerminalStore.getState().reset()
 })
 
+test('pet canvas avoids blank transition frames from sparse animation rows', () => {
+  const source = fs.readFileSync(path.join(SOURCE_ROOT, 'components', 'pet', 'FloatingPetOverlay.tsx'), 'utf8')
+
+  assert.match(source, /const DEFAULT_ROW_FRAME_COUNTS: Record<string, number> = \{[\s\S]*waving: 4,[\s\S]*jumping: 5,[\s\S]*\}/)
+  assert.match(source, /function frameCountForRow\(/)
+  assert.match(source, /function canvasHasVisiblePixels\(/)
+  assert.match(source, /const scratch = document\.createElement\('canvas'\)/)
+  assert.match(source, /scratchCtx\.drawImage\(image, frame \* frameW, row \* frameH, frameW, frameH, 0, 0, drawW, drawH\)[\s\S]*if \(!canvasHasVisiblePixels\(scratchCtx, scratch\.width, scratch\.height\)\)/)
+  assert.match(source, /ctx\.clearRect\(0, 0, canvas\.width, canvas\.height\)[\s\S]*ctx\.drawImage\(scratch, 0, 0\)/)
+})
+
 test('video fx store applies saved prefs immediately on startup', () => {
   installAssetStubs()
   clearCompiledModules()

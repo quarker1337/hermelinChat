@@ -23,6 +23,13 @@ const DEFAULT_STATE_ROWS = [
   'review',
 ]
 
+const DEFAULT_ROW_FRAME_COUNTS: Record<string, number> = {
+  wave: 4,
+  waving: 4,
+  jump: 5,
+  jumping: 5,
+}
+
 type PetState = PetActivityState
 
 interface PetSummary {
@@ -81,6 +88,27 @@ function rowIndexForState(rows: string[], state: PetState): number {
     if (idx >= 0) return idx
   }
   return 0
+}
+
+function frameCountForRow(rows: string[], row: number, fallbackFrames: number, physicalColumns: number): number {
+  const rowName = rows[row] || ''
+  const namedCount = DEFAULT_ROW_FRAME_COUNTS[rowName] || fallbackFrames
+  const columnCount = physicalColumns > 0 ? physicalColumns : fallbackFrames
+  return Math.max(1, Math.min(fallbackFrames, columnCount, namedCount))
+}
+
+function canvasHasVisiblePixels(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
+  try {
+    const data = ctx.getImageData(0, 0, width, height).data
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 8) return true
+    }
+    return false
+  } catch {
+    // If pixel reads are unavailable for any browser reason, prefer drawing over
+    // flickering. The source is a same-origin data URL, so this is defensive.
+    return true
+  }
 }
 
 function placementStyle(position: PetOverlayPosition, shellW: number, shellH: number): React.CSSProperties {
@@ -145,20 +173,57 @@ const PetCanvas = memo(function PetCanvas({ info, state, sizePct }: PetCanvasPro
     let lastStep = performance.now()
     let drawnFrame = -1
     let drawnRow = -1
+    let activeRow = -1
+    const scratch = document.createElement('canvas')
+    scratch.width = drawW
+    scratch.height = drawH
+    const scratchCtx = scratch.getContext('2d')
+    if (!scratchCtx) return
+    scratchCtx.imageSmoothingEnabled = false
 
     const render = (now: number) => {
       const row = rowIndexForState(rows, stateRef.current)
-      const stepMs = loopMs / frames
+      if (row !== activeRow) {
+        activeRow = row
+        frame = 0
+        lastStep = now
+      }
+
+      const physicalColumns = Math.floor((image.naturalWidth || 0) / frameW)
+      const physicalRows = Math.floor((image.naturalHeight || 0) / frameH)
+      const rowFrames = frameCountForRow(rows, row, frames, physicalColumns)
+      const stepMs = loopMs / rowFrames
       if (now - lastStep >= stepMs) {
         frame += 1
         lastStep = now
       }
-      frame %= frames
+      frame %= rowFrames
 
-      if ((frame !== drawnFrame || row !== drawnRow) && image.complete && image.naturalWidth > 0) {
+      if (
+        (frame !== drawnFrame || row !== drawnRow) &&
+        image.complete &&
+        image.naturalWidth > 0 &&
+        row >= 0 &&
+        row < physicalRows &&
+        frame >= 0 &&
+        frame < physicalColumns
+      ) {
+        scratchCtx.clearRect(0, 0, scratch.width, scratch.height)
+        try {
+          scratchCtx.drawImage(image, frame * frameW, row * frameH, frameW, frameH, 0, 0, drawW, drawH)
+        } catch {
+          raf = requestAnimationFrame(render)
+          return
+        }
+
+        if (!canvasHasVisiblePixels(scratchCtx, scratch.width, scratch.height)) {
+          raf = requestAnimationFrame(render)
+          return
+        }
+
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         ctx.imageSmoothingEnabled = false
-        ctx.drawImage(image, frame * frameW, row * frameH, frameW, frameH, 0, 0, drawW, drawH)
+        ctx.drawImage(scratch, 0, 0)
         drawnFrame = frame
         drawnRow = row
       }
