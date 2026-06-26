@@ -209,8 +209,7 @@ if [[ "$SKIP_FRONTEND" -eq 0 ]]; then
     fi
     HERMELIN_ACTIVE_HERMES_EXE="$(command -v hermes)" HERMELIN_NPM_AVAILABLE="$HERMELIN_NPM_AVAILABLE" python3 - <<'PY'
 import os
-import shlex
-import shutil
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -218,23 +217,13 @@ from pathlib import Path
 hermes_exe = Path(os.environ["HERMELIN_ACTIVE_HERMES_EXE"])
 npm_available = os.environ.get("HERMELIN_NPM_AVAILABLE") == "1"
 try:
-    first_line = hermes_exe.read_text(encoding="utf-8").splitlines()[0].strip()
-    if not first_line.startswith("#!"):
-        raise RuntimeError(f"unexpected Hermes launcher format: {hermes_exe}")
-    shebang = shlex.split(first_line[2:].strip())
-    if not shebang:
-        raise RuntimeError(f"empty Hermes launcher shebang: {hermes_exe}")
-    if Path(shebang[0]).name == "env" and len(shebang) > 1:
-        resolved = shutil.which(shebang[1])
-        if not resolved:
-            raise RuntimeError(f"could not resolve interpreter from shebang: {shebang[1]}")
-        hermes_python = Path(resolved)
-    else:
-        hermes_python = Path(shebang[0]).expanduser()
-        if not hermes_python.is_absolute():
-            hermes_python = (hermes_exe.parent / hermes_python).absolute()
-    if not hermes_python.is_file():
-        raise RuntimeError(f"Hermes Python not found: {hermes_python}")
+    patch_installer = Path.cwd() / "scripts" / "install_hermes_artifact_patch.py"
+    spec = importlib.util.spec_from_file_location("hermelin_hermes_artifact_patch", patch_installer)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load Hermes patch installer helpers from {patch_installer}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    hermes_python = module._detect_hermes_python(hermes_exe, "")
 except Exception as exc:
     print(f"WARNING: could not inspect Hermes launcher for dashboard build: {exc}", file=sys.stderr)
     sys.exit(0)
