@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -86,6 +87,82 @@ def _resolve_hermes_exe(path_or_name: str) -> Path:
     return Path(found).resolve()
 
 
+def _abs_no_resolve(path: Path, *, base: Path | None = None) -> Path:
+    p = path.expanduser()
+    if p.is_absolute():
+        return p
+    return ((base or Path.cwd()) / p).absolute()
+
+
+def _python_from_shebang(shebang: list[str], script_path: Path) -> Path | None:
+    if not shebang:
+        return None
+
+    command = shebang[0]
+    args = shebang[1:]
+    if Path(command).name == "env":
+        if not args:
+            return None
+        # Skip common env options (e.g. /usr/bin/env -S python3 -I).
+        while args and args[0].startswith("-"):
+            if args[0] == "-S":
+                args = shlex.split(" ".join(args[1:]))
+                break
+            args = args[1:]
+        if not args:
+            return None
+        resolved = shutil.which(args[0])
+        if not resolved:
+            raise RuntimeError(f"Could not resolve interpreter from shebang: {args[0]}")
+        command = resolved
+
+    name = Path(command).name
+    if name == "python" or name.startswith("python3"):
+        python_path = _abs_no_resolve(Path(command), base=script_path.parent)
+        if not python_path.is_file():
+            raise FileNotFoundError(f"Hermes Python not found: {python_path}")
+        return python_path
+
+    return None
+
+
+def _shebang_command_name(shebang: list[str]) -> str:
+    if not shebang:
+        return ""
+    if Path(shebang[0]).name != "env":
+        return Path(shebang[0]).name
+
+    args = shebang[1:]
+    while args and args[0].startswith("-"):
+        if args[0] == "-S":
+            args = shlex.split(" ".join(args[1:]))
+            break
+        args = args[1:]
+    if not args:
+        return Path(shebang[0]).name
+    return Path(args[0]).name
+
+
+def _exec_target_from_shell_launcher(script_path: Path, text: str) -> Path | None:
+    for raw_line in text.splitlines()[1:]:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or not line.startswith("exec "):
+            continue
+        try:
+            parts = shlex.split(line)
+        except ValueError:
+            continue
+        if len(parts) < 2:
+            continue
+        target = parts[1]
+        if "$" in target:
+            continue
+        candidate = _abs_no_resolve(Path(target), base=script_path.parent)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _detect_hermes_python(hermes_exe: Path, explicit: str) -> Path:
     """Resolve the Python interpreter used by the Hermes installation.
 
@@ -97,47 +174,51 @@ def _detect_hermes_python(hermes_exe: Path, explicit: str) -> Path:
     disappear (e.g. model_tools not importable).
     """
 
-    def _abs_no_resolve(path: Path) -> Path:
-        p = path.expanduser()
-        if p.is_absolute():
-            return p
-        return (Path.cwd() / p).absolute()
-
     if explicit:
         python_path = _abs_no_resolve(Path(explicit))
         if not python_path.is_file():
             raise FileNotFoundError(f"Hermes Python not found: {python_path}")
         return python_path
 
-    try:
-        first_line = hermes_exe.read_text(encoding="utf-8").splitlines()[0].strip()
-    except Exception as exc:
-        raise RuntimeError(f"Could not read shebang from {hermes_exe}: {exc}") from exc
+    current = hermes_exe
+    visited: set[Path] = set()
+    for _ in range(5):
+        if current in visited:
+            raise RuntimeError(f"Hermes launcher chain contains a cycle at {current}")
+        visited.add(current)
 
-    if not first_line.startswith("#!"):
-        raise RuntimeError(f"Unexpected Hermes launcher format: {hermes_exe}")
+        try:
+            text = current.read_text(encoding="utf-8")
+            first_line = text.splitlines()[0].strip()
+        except Exception as exc:
+            raise RuntimeError(f"Could not read shebang from {current}: {exc}") from exc
 
-    shebang = first_line[2:].strip().split()
-    if not shebang:
-        raise RuntimeError(f"Could not parse shebang from {hermes_exe}")
+        if not first_line.startswith("#!"):
+            raise RuntimeError(f"Unexpected Hermes launcher format: {current}")
 
-    if Path(shebang[0]).name == "env":
-        if len(shebang) < 2:
-            raise RuntimeError(f"env shebang missing interpreter in {hermes_exe}")
-        resolved = shutil.which(shebang[1])
-        if not resolved:
-            raise RuntimeError(f"Could not resolve interpreter from shebang: {shebang[1]}")
-        python_path = _abs_no_resolve(Path(resolved))
-        if not python_path.is_file():
-            raise FileNotFoundError(f"Hermes Python not found: {python_path}")
-        return python_path
+        try:
+            shebang = shlex.split(first_line[2:].strip())
+        except ValueError as exc:
+            raise RuntimeError(f"Could not parse shebang from {current}: {exc}") from exc
+        if not shebang:
+            raise RuntimeError(f"Could not parse shebang from {current}")
 
-    python_path = Path(shebang[0]).expanduser()
-    if not python_path.is_absolute():
-        python_path = (hermes_exe.parent / python_path).absolute()
-    if not python_path.is_file():
-        raise FileNotFoundError(f"Hermes Python not found: {python_path}")
-    return python_path
+        python_path = _python_from_shebang(shebang, current)
+        if python_path is not None:
+            return python_path
+
+        if _shebang_command_name(shebang) in {"sh", "bash", "dash", "zsh"}:
+            next_launcher = _exec_target_from_shell_launcher(current, text)
+            if next_launcher is not None:
+                current = next_launcher
+                continue
+
+        raise RuntimeError(
+            f"Hermes launcher {current} uses non-Python interpreter {shebang[0]!r}. "
+            "Pass --hermes-python explicitly, or use a launcher that execs the Hermes Python entry point."
+        )
+
+    raise RuntimeError(f"Hermes launcher chain is too deep starting at {hermes_exe}")
 
 
 def _discover_live_paths(hermes_exe: Path, hermes_python: Path) -> dict[str, Path]:
