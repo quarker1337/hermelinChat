@@ -5,7 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hermelin.auth import create_session_token, extract_session_jti, verify_session_token
+from fastapi.testclient import TestClient
+
+from hermelin.auth import create_session_token, extract_session_jti, hash_login_password, verify_session_token
 from hermelin.config import HermelinConfig
 from hermelin.security import ip_allowed
 from hermelin.server import _github_release_tag_for_version, _is_update_available, create_app
@@ -91,6 +93,58 @@ class SessionTokenTests(unittest.TestCase):
         token = create_session_token(secret=secret_a, ttl_seconds=300)
         result = verify_session_token(token=token, secret=secret_b)
         self.assertFalse(result)
+
+
+class AuthSessionCookieTests(unittest.TestCase):
+    def test_auth_me_renews_valid_session_cookie(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            config = HermelinConfig(
+                hermes_home=tmp / "hermes-home",
+                meta_db_path=tmp / "hermelin_meta.db",
+                spawn_cwd=tmp / "spawn-cwd",
+                allowed_ips="*",
+                auth_password_hash=hash_login_password("secret-password"),
+                cookie_secret="stable-cookie-secret",
+                session_ttl_seconds=300,
+            )
+            client = TestClient(create_app(config))
+
+            login = client.post("/api/auth/login", json={"password": "secret-password"})
+            self.assertEqual(login.status_code, 200)
+            initial_cookie = client.cookies.get(config.cookie_name)
+            self.assertTrue(initial_cookie)
+
+            me = client.get("/api/auth/me")
+
+            self.assertEqual(me.status_code, 200)
+            self.assertEqual(me.json()["authenticated"], True)
+            self.assertEqual(me.json()["session_ttl_seconds"], 300)
+            set_cookie = me.headers.get("set-cookie", "")
+            self.assertIn(f"{config.cookie_name}=", set_cookie)
+            self.assertIn("Max-Age=300", set_cookie)
+            self.assertNotEqual(client.cookies.get(config.cookie_name), initial_cookie)
+
+    def test_auth_me_does_not_renew_expired_cookie(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            config = HermelinConfig(
+                hermes_home=tmp / "hermes-home",
+                meta_db_path=tmp / "hermelin_meta.db",
+                spawn_cwd=tmp / "spawn-cwd",
+                allowed_ips="*",
+                auth_password_hash=hash_login_password("secret-password"),
+                cookie_secret="stable-cookie-secret",
+                session_ttl_seconds=300,
+            )
+            client = TestClient(create_app(config))
+            expired = create_session_token(secret=config.cookie_secret.encode("utf-8"), ttl_seconds=0)
+
+            me = client.get("/api/auth/me", cookies={config.cookie_name: expired})
+
+            self.assertEqual(me.status_code, 200)
+            self.assertEqual(me.json()["authenticated"], False)
+            self.assertNotIn("set-cookie", me.headers)
 
 
 class IpAllowlistTests(unittest.TestCase):

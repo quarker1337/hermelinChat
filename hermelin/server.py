@@ -685,6 +685,18 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return False
         return verify_session_token(token=token, secret=cookie_secret, revoked_jtis=_revoked_jtis)
 
+    def _set_session_cookie(response: Response) -> None:
+        token = create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
+        response.set_cookie(
+            key=cookie_name,
+            value=token,
+            max_age=ttl_seconds,
+            httponly=True,
+            secure=cookie_secure,
+            samesite="strict",
+            path="/",
+        )
+
     def _pet_event_state() -> tuple[dict[str, set[asyncio.Queue[str]]], asyncio.Lock]:
         channels = getattr(app.state, "pet_event_channels", None)
         lock = getattr(app.state, "pet_event_lock", None)
@@ -2639,10 +2651,17 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     @app.get("/api/auth/me")
     async def auth_me(request: Request):
         token = request.cookies.get(cookie_name)
-        return {
+        authenticated = _is_authenticated(token)
+        resp = JSONResponse({
             "auth_enabled": auth_enabled,
-            "authenticated": _is_authenticated(token),
-        }
+            "authenticated": authenticated,
+            "session_ttl_seconds": ttl_seconds if auth_enabled else None,
+        })
+        # Sliding-session renewal: an open browser tab periodically calls this
+        # endpoint, so refresh the signed cookie before Max-Age expires.
+        if auth_enabled and authenticated:
+            _set_session_cookie(resp)
+        return resp
 
     @app.post("/api/auth/login")
     async def auth_login(request: Request, payload: dict = Body(...)):
@@ -2671,17 +2690,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         _auth_clear_failures(client_ip)
 
-        token = create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
         resp = JSONResponse({"ok": True, "auth_enabled": True})
-        resp.set_cookie(
-            key=cookie_name,
-            value=token,
-            max_age=ttl_seconds,
-            httponly=True,
-            secure=cookie_secure,
-            samesite="strict",
-            path="/",
-        )
+        _set_session_cookie(resp)
         return resp
 
     @app.post("/api/auth/logout")

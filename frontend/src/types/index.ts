@@ -103,6 +103,7 @@ export interface AuthState {
   loading: boolean
   enabled: boolean
   authenticated: boolean
+  logoutReason: 'explicit' | 'expired' | null
 }
 
 // ─── Runtime ───────────────────────────────────────────────────────

@@ -6,13 +6,14 @@ interface AuthStore extends AuthState {
   login: (password: string) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
-  setUnauthenticated: () => void
+  setUnauthenticated: (reason?: 'explicit' | 'expired') => void
 }
 
 export const useAuthStore = create<AuthStore>((set) => ({
   loading: true,
   enabled: false,
   authenticated: false,
+  logoutReason: null,
   loginError: '',
 
   refresh: async () => {
@@ -23,9 +24,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
         loading: false,
         enabled: !!data.auth_enabled,
         authenticated: !!data.authenticated,
+        logoutReason: data.authenticated ? null : 'expired',
       })
     } catch {
-      set({ loading: false, enabled: false, authenticated: false })
+      set({ loading: false, enabled: false, authenticated: false, logoutReason: 'expired' })
     }
   },
 
@@ -42,6 +44,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
         return
       }
       await useAuthStore.getState().refresh()
+      if (useAuthStore.getState().authenticated) {
+        set({ logoutReason: null })
+      }
     } catch {
       set({ loginError: 'login failed' })
     }
@@ -51,13 +56,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
     try {
       await fetch('/api/auth/logout', { method: 'POST' })
     } finally {
-      set({ authenticated: false })
+      set({ authenticated: false, logoutReason: 'explicit' })
       // Cross-store resets are called by the component that triggers logout
       // (AppShell), not here — avoids circular imports during store init.
     }
   },
 
-  setUnauthenticated: () => {
-    set({ authenticated: false })
+  setUnauthenticated: (reason = 'expired') => {
+    set({ authenticated: false, logoutReason: reason })
   },
 }))

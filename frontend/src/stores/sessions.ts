@@ -138,11 +138,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     const load = async () => {
       if (!useAuthStore.getState().authenticated) {
-        set((s) => ({
-          sessions: [],
-          grouped: { Today: [], Yesterday: [], Earlier: [] },
-          activeSession: computeActiveSession([], s.activeSessionId),
-        }))
+        // Preserve visible session context while the login overlay is shown for
+        // an expired cookie; explicit logout calls reset() separately.
         return
       }
 

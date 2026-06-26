@@ -160,6 +160,7 @@ export function AppShell() {
   const authLoading = useAuthStore((s) => s.loading)
   const authEnabled = useAuthStore((s) => s.enabled)
   const authenticated = useAuthStore((s) => s.authenticated)
+  const logoutReason = useAuthStore((s) => s.logoutReason)
 
   const activeSession = useSessionStore((s) => s.activeSession)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
@@ -201,6 +202,16 @@ export function AppShell() {
   useEffect(() => {
     useAuthStore.getState().refresh()
   }, [])
+
+  // Keep long-lived open tabs authenticated by hitting /api/auth/me.  The
+  // backend renews the signed cookie on successful auth checks.
+  useEffect(() => {
+    if (!authEnabled || !authenticated) return
+    const t = setInterval(() => {
+      void useAuthStore.getState().refresh()
+    }, 5 * 60 * 1000)
+    return () => clearInterval(t)
+  }, [authEnabled, authenticated])
 
   // Check for updates after initial load (wait for auth so protected deployments don't miss it)
   useEffect(() => {
@@ -246,19 +257,19 @@ export function AppShell() {
     }
   }, [authenticated])
 
-  // Cross-store cleanup on logout (auth store sets authenticated=false,
-  // this effect resets all dependent stores). Track previous state to
-  // avoid resetting on initial mount when authenticated starts as false.
+  // Cross-store cleanup on deliberate logout only.  If a cookie expires or a
+  // background request gets a 401, keep the active session in memory so the
+  // login overlay can be dismissed without forcing manual resume.
   const wasAuthenticatedRef = useRef(authenticated)
   useEffect(() => {
-    if (!authenticated && wasAuthenticatedRef.current) {
+    if (!authenticated && wasAuthenticatedRef.current && logoutReason === 'explicit') {
       useSessionStore.getState().reset()
       useArtifactStore.getState().reset()
       useSearchStore.getState().reset()
       useTerminalStore.getState().reset()
     }
     wasAuthenticatedRef.current = authenticated
-  }, [authenticated])
+  }, [authenticated, logoutReason])
 
   // ─── Callbacks ────────────────────────────────────────────────────
 
