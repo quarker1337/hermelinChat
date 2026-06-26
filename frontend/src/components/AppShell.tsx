@@ -532,7 +532,7 @@ export function AppShell() {
                     activityState={petActivityState}
                     paused={overlayOpen}
                     settings={prefs.petOverlay}
-                    visible={authenticated}
+                    visible={authenticated && prefs.petOverlay.enabled}
                   />
                   <AlignmentEasterEgg
                     svgRaw={activeTheme?.icons?.alignmentSvgRaw}

@@ -41,6 +41,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
     glitchPulses: true,
   },
   petOverlay: {
+    enabled: true,
     position: 'bottom-right',
     size: 100,
     slug: '',
@@ -119,6 +120,7 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
       glitchPulses: vx.glitchPulses === undefined ? DEFAULT_UI_PREFS.videoFx.glitchPulses : !!vx.glitchPulses,
     },
     petOverlay: {
+      enabled: pet.enabled === undefined ? DEFAULT_UI_PREFS.petOverlay.enabled : !!pet.enabled,
       position: petPosition,
       size: clampNum(pet.size ?? DEFAULT_UI_PREFS.petOverlay.size, 50, 180),
       slug: petSlug,
