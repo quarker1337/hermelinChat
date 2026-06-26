@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from hermelin.auth import create_session_token, extract_session_jti, hash_login_password, verify_session_token
+from hermelin.auth import create_session_token, extract_session_jti, hash_login_password, renew_session_token, verify_session_token
 from hermelin.config import HermelinConfig
 from hermelin.security import ip_allowed
 from hermelin.server import _github_release_tag_for_version, _is_update_available, create_app
@@ -94,6 +94,20 @@ class SessionTokenTests(unittest.TestCase):
         result = verify_session_token(token=token, secret=secret_b)
         self.assertFalse(result)
 
+    def test_renewed_token_preserves_jti(self):
+        secret = b"test-secret-key-for-renewal"
+        token = create_session_token(secret=secret, ttl_seconds=300)
+        renewed = renew_session_token(token=token, secret=secret, ttl_seconds=600)
+
+        self.assertIsNotNone(renewed)
+        assert renewed is not None
+        self.assertNotEqual(renewed, token)
+        self.assertEqual(
+            extract_session_jti(token=renewed, secret=secret),
+            extract_session_jti(token=token, secret=secret),
+        )
+        self.assertTrue(verify_session_token(token=renewed, secret=secret))
+
 
 class AuthSessionCookieTests(unittest.TestCase):
     def test_auth_me_renews_valid_session_cookie(self):
@@ -116,6 +130,7 @@ class AuthSessionCookieTests(unittest.TestCase):
             initial_cookie = client.cookies.get(config.cookie_name)
             self.assertTrue(initial_cookie)
 
+            time.sleep(1)
             me = client.get("/api/auth/me")
 
             self.assertEqual(me.status_code, 200)
@@ -124,8 +139,18 @@ class AuthSessionCookieTests(unittest.TestCase):
             set_cookie = me.headers.get("set-cookie", "")
             self.assertIn(f"{config.cookie_name}=", set_cookie)
             self.assertIn("Max-Age=300", set_cookie)
-            self.assertNotEqual(client.cookies.get(config.cookie_name), initial_cookie)
+            renewed_cookie = client.cookies.get(config.cookie_name)
+            self.assertNotEqual(renewed_cookie, initial_cookie)
+            self.assertEqual(
+                extract_session_jti(token=renewed_cookie, secret=config.cookie_secret.encode("utf-8")),
+                extract_session_jti(token=initial_cookie, secret=config.cookie_secret.encode("utf-8")),
+            )
 
+            concurrent = TestClient(app).get("/api/health", cookies={config.cookie_name: initial_cookie})
+            self.assertEqual(concurrent.status_code, 200)
+
+            logout = client.post("/api/auth/logout")
+            self.assertEqual(logout.status_code, 200)
             replay = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: initial_cookie})
             self.assertEqual(replay.status_code, 200)
             self.assertEqual(replay.json()["authenticated"], False)

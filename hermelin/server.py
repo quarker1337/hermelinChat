@@ -108,6 +108,7 @@ from .auth import (
     extract_cookie_value,
     extract_session_jti,
     generate_secret_bytes,
+    renew_session_token,
     verify_login_password,
     verify_runner_token,
     verify_session_token,
@@ -685,8 +686,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return False
         return verify_session_token(token=token, secret=cookie_secret, revoked_jtis=_revoked_jtis)
 
-    def _set_session_cookie(response: Response) -> None:
-        token = create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
+    def _set_session_cookie(response: Response, *, token: str | None = None) -> None:
+        token = token or create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
         response.set_cookie(
             key=cookie_name,
             value=token,
@@ -2658,14 +2659,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "session_ttl_seconds": ttl_seconds if auth_enabled else None,
         })
         # Sliding-session renewal: an open browser tab periodically calls this
-        # endpoint, so refresh the signed cookie before Max-Age expires. Revoke
-        # the presented token while rotating so logout cannot be bypassed by
-        # replaying an older cookie from the same browser session.
+        # endpoint, so refresh the signed cookie before Max-Age expires. Keep
+        # the same JTI across renewals so concurrent requests with the previous
+        # cookie remain valid, while logout revokes every token from the session.
         if auth_enabled and authenticated and token:
-            jti = extract_session_jti(token=token, secret=cookie_secret)
-            if jti:
-                _revoked_jtis.add(jti)
-            _set_session_cookie(resp)
+            renewed_token = renew_session_token(token=token, secret=cookie_secret, ttl_seconds=ttl_seconds)
+            if renewed_token:
+                _set_session_cookie(resp, token=renewed_token)
         return resp
 
     @app.post("/api/auth/login")

@@ -252,9 +252,10 @@ export function AppShell() {
     useSessionStore.getState().startPolling()
     useSessionStore.getState().fetchRuntimeInfo()
     useArtifactStore.getState().startPolling()
-    // Auto-spawn terminal on first auth (new session)
+    // Auto-spawn terminal on first auth, or reconnect to the preserved active
+    // session after an expired-auth login overlay is dismissed.
     if (useTerminalStore.getState().state.phase === 'idle') {
-      useTerminalStore.getState().spawn(null)
+      useTerminalStore.getState().spawn(useSessionStore.getState().activeSessionId ?? null)
     }
     return () => {
       useSessionStore.getState().stopPolling()
@@ -271,6 +272,11 @@ export function AppShell() {
       useSessionStore.getState().reset()
       useArtifactStore.getState().reset()
       useSearchStore.getState().reset()
+      useTerminalStore.getState().reset()
+    } else if (!authenticated && wasAuthenticatedRef.current && logoutReason === 'expired') {
+      // TerminalPane unmounts while locked and closes its websocket. Reset only
+      // the terminal connection state so the next successful login reconnects
+      // to the preserved activeSessionId instead of opening a fresh session.
       useTerminalStore.getState().reset()
     }
     wasAuthenticatedRef.current = authenticated
