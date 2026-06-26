@@ -108,7 +108,6 @@ from .auth import (
     extract_cookie_value,
     extract_session_jti,
     generate_secret_bytes,
-    renew_session_token,
     verify_login_password,
     verify_runner_token,
     verify_session_token,
@@ -630,6 +629,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     _auth_failures: dict[str, deque[float]] = defaultdict(deque)
     _revoked_jtis: set[str] = set()
+    _rotated_jtis: dict[str, tuple[str, float]] = {}
+    _rotation_grace_seconds = 10.0
 
     def _auth_prune(dq: deque[float], now: float) -> None:
         if auth_fail_window_seconds <= 0:
@@ -665,6 +666,12 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     def _auth_clear_failures(ip: str) -> None:
         _auth_failures.pop(ip, None)
 
+    def _prune_rotated_jtis(now: float | None = None) -> None:
+        t = time.monotonic() if now is None else now
+        expired = [jti for jti, (_, deadline) in _rotated_jtis.items() if deadline <= t]
+        for jti in expired:
+            _rotated_jtis.pop(jti, None)
+
     cookie_name = (config.cookie_name or "hermelin_session").strip() or "hermelin_session"
     ttl_seconds = int(config.session_ttl_seconds or 0) or 43200
     cookie_secure = bool(config.cookie_secure)
@@ -684,14 +691,51 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return True
         if not token:
             return False
-        return verify_session_token(token=token, secret=cookie_secret, revoked_jtis=_revoked_jtis)
+        _prune_rotated_jtis()
+        if not verify_session_token(token=token, secret=cookie_secret, revoked_jtis=_revoked_jtis):
+            return False
+        jti = extract_session_jti(token=token, secret=cookie_secret)
+        if jti and jti in _rotated_jtis:
+            return _rotated_jtis[jti][1] > time.monotonic()
+        return True
 
-    def _set_session_cookie(response: Response, *, token: str | None = None) -> None:
-        token = token or create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
+    def _set_session_cookie(response: Response) -> str:
+        token = create_session_token(secret=cookie_secret, ttl_seconds=ttl_seconds)
         response.set_cookie(
             key=cookie_name,
             value=token,
             max_age=ttl_seconds,
+            httponly=True,
+            secure=cookie_secure,
+            samesite="strict",
+            path="/",
+        )
+        return token
+
+    def _renew_session_cookie(response: Response, token: str) -> None:
+        old_jti = extract_session_jti(token=token, secret=cookie_secret)
+        if not old_jti:
+            return
+        renewed_token = _set_session_cookie(response)
+        new_jti = extract_session_jti(token=renewed_token, secret=cookie_secret)
+        if new_jti:
+            _prune_rotated_jtis()
+            _rotated_jtis[old_jti] = (new_jti, time.monotonic() + _rotation_grace_seconds)
+
+    def _revoke_session_jti(jti: str | None) -> None:
+        if not jti:
+            return
+        _revoked_jtis.add(jti)
+        predecessors = [old_jti for old_jti, (new_jti, _) in _rotated_jtis.items() if new_jti == jti]
+        for old_jti in predecessors:
+            _revoked_jtis.add(old_jti)
+            _rotated_jtis.pop(old_jti, None)
+
+    def _delete_session_cookie(response: Response) -> None:
+        response.set_cookie(
+            key=cookie_name,
+            value="",
+            max_age=0,
             httponly=True,
             secure=cookie_secure,
             samesite="strict",
@@ -2659,13 +2703,11 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "session_ttl_seconds": ttl_seconds if auth_enabled else None,
         })
         # Sliding-session renewal: an open browser tab periodically calls this
-        # endpoint, so refresh the signed cookie before Max-Age expires. Keep
-        # the same JTI across renewals so concurrent requests with the previous
-        # cookie remain valid, while logout revokes every token from the session.
+        # endpoint, so refresh the signed cookie before Max-Age expires. Give
+        # the previous cookie a short grace window so concurrent same-tab
+        # requests do not 401 while the browser installs the replacement.
         if auth_enabled and authenticated and token:
-            renewed_token = renew_session_token(token=token, secret=cookie_secret, ttl_seconds=ttl_seconds)
-            if renewed_token:
-                _set_session_cookie(resp, token=renewed_token)
+            _renew_session_cookie(resp, token)
         return resp
 
     @app.post("/api/auth/login")
@@ -2704,10 +2746,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         token = request.cookies.get(cookie_name)
         if token:
             jti = extract_session_jti(token=token, secret=cookie_secret)
-            if jti:
-                _revoked_jtis.add(jti)
+            _revoke_session_jti(jti)
         resp = JSONResponse({"ok": True})
-        resp.delete_cookie(cookie_name, path="/")
+        _delete_session_cookie(resp)
         return resp
 
     @app.get("/api/sessions")

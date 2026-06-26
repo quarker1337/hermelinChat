@@ -77,38 +77,6 @@ def create_session_token(*, secret: bytes, ttl_seconds: int) -> str:
     return f"{payload_b64}.{sig_b64}"
 
 
-def renew_session_token(*, token: str, secret: bytes, ttl_seconds: int) -> str | None:
-    """Return a fresh token with the same JTI and an extended expiry."""
-    if not token or "." not in token:
-        return None
-    payload_b64, sig_b64 = token.split(".", 1)
-    expected_sig = hmac.new(secret, payload_b64.encode("utf-8"), hashlib.sha256).digest()
-    if not hmac.compare_digest(_b64url_encode(expected_sig), sig_b64):
-        return None
-    try:
-        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
-    except Exception:
-        return None
-    jti = str(payload.get("jti") or "").strip()
-    if not jti:
-        return None
-
-    now = int(time.time())
-    exp = int(payload.get("exp") or 0)
-    if exp <= now:
-        return None
-    renewed_payload = {
-        "v": int(payload.get("v") or 1),
-        "jti": jti,
-        "iat": now,
-        "exp": now + int(ttl_seconds),
-    }
-    renewed_payload_b = json.dumps(renewed_payload, separators=(",", ":")).encode("utf-8")
-    renewed_payload_b64 = _b64url_encode(renewed_payload_b)
-    renewed_sig = hmac.new(secret, renewed_payload_b64.encode("utf-8"), hashlib.sha256).digest()
-    return f"{renewed_payload_b64}.{_b64url_encode(renewed_sig)}"
-
-
 def verify_session_token(*, token: str, secret: bytes, revoked_jtis: set | None = None) -> bool:
     if not token:
         return False
