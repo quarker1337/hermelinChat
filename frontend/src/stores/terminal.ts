@@ -248,8 +248,11 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
           return
 
         case 'thinking.delta':
+        case 'reasoning.delta':
         case 'reasoning.available':
-          if (!hermesBusy && ev.type === 'thinking.delta') return
+          if ((ev.type === 'thinking.delta' || ev.type === 'reasoning.delta') && !String(ev.payload.text ?? '')) {
+            return
+          }
           hermesBusy = true
           hermesReasoningActive = true
           applyStructuredPetState()

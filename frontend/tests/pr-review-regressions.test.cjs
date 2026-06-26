@@ -236,7 +236,10 @@ test('terminal pet follows structured Hermes sidecar events instead of PTY heuri
   useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
   assert.equal(useTerminalStore.getState().petActivity.state, 'run')
 
-  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.available', payload: { text: 'thinking' } })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'thinking.delta', payload: { text: '' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'thinking through tool choice' } })
   assert.equal(useTerminalStore.getState().petActivity.state, 'review')
 
   useTerminalStore.getState().noteHermesPetEvent({ type: 'tool.start', payload: { tool_id: 'tool-1', name: 'terminal' } })
