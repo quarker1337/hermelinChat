@@ -3369,7 +3369,11 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 )
                 while True:
                     payload = await queue.get()
-                    if not await writer.send_text(payload, priority=5, droppable=True):
+                    # Pet state is control-plane truth, not cosmetic artifact data.
+                    # Dropping a tool/message lifecycle event leaves the browser
+                    # overlay pinned on the last state (commonly `run`), so these
+                    # frames must be non-droppable just like pet_sync/artifact_close.
+                    if not await writer.send_text(payload, priority=5, droppable=False):
                         break
             except asyncio.CancelledError:
                 raise

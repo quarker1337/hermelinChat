@@ -191,6 +191,16 @@ class PetOverlayTests(unittest.TestCase):
             self.assertTrue(saw_pet_sync)
             self.assertTrue(saw_sidecar_env)
 
+    def test_pet_event_frames_are_not_droppable(self):
+        source = (Path(__file__).resolve().parents[1] / "hermelin" / "server.py").read_text(encoding="utf-8")
+        start = source.index("async def pump_pet_events_to_ws")
+        end = source.index("t1 = asyncio.create_task", start)
+        block = source[start:end]
+
+        self.assertIn("payload = await queue.get()", block)
+        self.assertIn("droppable=False", block)
+        self.assertNotIn("droppable=True", block)
+
 
 if __name__ == "__main__":
     unittest.main()
