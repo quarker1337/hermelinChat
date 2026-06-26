@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 import hmac
 import json
 import os
 import re
+import secrets
 import time
 from collections import defaultdict, deque
 import shlex
@@ -85,7 +87,7 @@ import httpx
 import websockets
 from urllib.parse import urlparse
 
-from fastapi import Body, FastAPI, Query, Request, WebSocket
+from fastapi import Body, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
@@ -274,6 +276,13 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _env_flag_default(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip()
+    if raw == "":
+        return default
+    return raw.lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _path_is_or_under(path: str, prefix: str) -> bool:
     normalized_path = str(path or "").rstrip("/") or "/"
     normalized_prefix = str(prefix or "").rstrip("/") or "/"
@@ -287,6 +296,227 @@ def _is_runner_proxy_frame_path(path: str) -> bool:
     """Return true only for token-bearing runner proxy paths that iframes load."""
     return bool(_RUNNER_PROXY_FRAME_PATH_RE.fullmatch(str(path or "")))
 
+
+def _deep_merge_dict(base: dict, overlay: dict) -> dict:
+    """Return a recursive merge where overlay wins at leaves."""
+    out = dict(base or {})
+    for key, value in (overlay or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge_dict(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _safe_read_yaml(path: Path) -> dict:
+    try:
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+_PET_STATE_ROWS = [
+    "idle",
+    "running-right",
+    "running-left",
+    "waving",
+    "jumping",
+    "failed",
+    "waiting",
+    "running",
+    "review",
+]
+
+
+def _mime_for_pet_sheet(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".png":
+        return "image/png"
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".gif":
+        return "image/gif"
+    return "image/webp"
+
+
+def _resolve_installed_pet_dir(pets_dir: Path, configured_slug: str) -> Path | None:
+    slug = str(configured_slug or "").strip()
+    candidates: list[Path] = []
+    if slug:
+        candidates.append(pets_dir / slug)
+    try:
+        candidates.extend(sorted(p for p in pets_dir.iterdir() if p.is_dir()))
+    except Exception:
+        pass
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            root = pets_dir.resolve()
+        except Exception:
+            continue
+        if root != resolved and root not in resolved.parents:
+            continue
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        if (resolved / "pet.json").is_file():
+            return resolved
+    return None
+
+
+def _read_pet_meta(pet_dir: Path) -> dict:
+    try:
+        meta = json.loads((pet_dir / "pet.json").read_text(encoding="utf-8"))
+        return meta if isinstance(meta, dict) else {}
+    except Exception:
+        return {}
+
+
+def _installed_pet_summaries(pets_dir: Path) -> list[dict]:
+    out: list[dict] = []
+    try:
+        dirs = sorted((p for p in pets_dir.iterdir() if p.is_dir()), key=lambda p: p.name.lower())
+    except Exception:
+        return out
+    for pet_dir in dirs:
+        meta = _read_pet_meta(pet_dir)
+        if not meta and not (pet_dir / "pet.json").is_file():
+            continue
+        slug = str(meta.get("id") or pet_dir.name)
+        out.append(
+            {
+                "slug": slug,
+                "displayName": str(meta.get("displayName") or slug),
+                "description": str(meta.get("description") or ""),
+            }
+        )
+    return out
+
+
+def _pet_overlay_info(config: HermelinConfig, slug_override: str | None = None) -> dict:
+    """Return a browser-canvas-friendly payload for an installed pet.
+
+    By default this follows Hermes' configured active pet. Passing slug_override
+    lets the HermelinChat browser overlay choose a local pet without mutating the
+    user's Hermes config.
+    """
+    cfg = _safe_read_yaml(config.hermes_home / "config.yaml")
+    display = cfg.get("display", {}) if isinstance(cfg.get("display"), dict) else {}
+    pet_cfg = display.get("pet", {}) if isinstance(display.get("pet"), dict) else {}
+    terminal_enabled = bool(pet_cfg.get("enabled"))
+    configured_slug = str(pet_cfg.get("slug", "") or "")
+    requested_slug = str(slug_override or "").strip()
+    source = "override" if requested_slug else "configured"
+    try:
+        scale = float(pet_cfg.get("scale", 0.33) or 0.33)
+    except (TypeError, ValueError):
+        scale = 0.33
+    scale = max(0.1, min(3.0, scale))
+
+    pets_dir = config.hermes_home / "pets"
+    installed = _installed_pet_summaries(pets_dir)
+
+    if not requested_slug and not terminal_enabled:
+        return {
+            "enabled": False,
+            "terminalEnabled": False,
+            "slug": configured_slug or None,
+            "configuredSlug": configured_slug or None,
+            "source": source,
+            "installedPets": installed,
+        }
+
+    pet_dir = _resolve_installed_pet_dir(pets_dir, requested_slug or configured_slug)
+    if pet_dir is None:
+        return {
+            "enabled": False,
+            "terminalEnabled": terminal_enabled,
+            "slug": (requested_slug or configured_slug) or None,
+            "configuredSlug": configured_slug or None,
+            "source": source,
+            "installedPets": installed,
+        }
+
+    meta = _read_pet_meta(pet_dir)
+
+    sheet_name = str(meta.get("spritesheetPath") or "spritesheet.webp")
+    try:
+        sheet = (pet_dir / sheet_name).resolve()
+        root = pet_dir.resolve()
+    except Exception:
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None, "configuredSlug": configured_slug or None, "source": source, "installedPets": installed}
+    if root != sheet.parent and root not in sheet.parents:
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None, "configuredSlug": configured_slug or None, "source": source, "installedPets": installed}
+    if not sheet.is_file():
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None, "configuredSlug": configured_slug or None, "source": source, "installedPets": installed}
+
+    try:
+        raw = sheet.read_bytes()
+        stat = sheet.stat()
+    except Exception:
+        return {"enabled": False, "terminalEnabled": terminal_enabled, "slug": configured_slug or None, "configuredSlug": configured_slug or None, "source": source, "installedPets": installed}
+
+    slug = str(meta.get("id") or pet_dir.name)
+    return {
+        "enabled": True,
+        "terminalEnabled": terminal_enabled,
+        "slug": slug,
+        "configuredSlug": configured_slug or None,
+        "source": source,
+        "displayName": str(meta.get("displayName") or slug),
+        "description": str(meta.get("description") or ""),
+        "mime": _mime_for_pet_sheet(sheet),
+        "spritesheetBase64": base64.standard_b64encode(raw).decode("ascii"),
+        "spritesheetRevision": f"{int(stat.st_mtime_ns)}:{stat.st_size}",
+        "frameW": 192,
+        "frameH": 208,
+        "framesPerState": 6,
+        "loopMs": 1100,
+        "scale": scale,
+        "stateRows": list(_PET_STATE_ROWS),
+        "installedPets": installed,
+    }
+
+
+def _prepare_pty_managed_scope(config: HermelinConfig, parent_env: dict[str, str]) -> Path | None:
+    """Create a child-only Hermes managed-scope overlay that disables PTY pets.
+
+    HermelinChat renders the pet as a real browser canvas. The Hermes subprocess
+    running inside xterm should not also draw the Unicode half-block pet. Using
+    HERMES_MANAGED_DIR is per-child and leaves the user's config.yaml untouched.
+    If an existing managed scope is present, copy/merge it so deployment policy
+    is preserved before adding the pet-disable leaf.
+    """
+    managed_dir = config.hermes_home / "hermelin" / "pty-managed-scope"
+    try:
+        managed_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        logger.warning("failed to create Hermelin managed scope at %s", managed_dir, exc_info=True)
+        return None
+
+    base_config: dict = {}
+    inherited = str(parent_env.get("HERMES_MANAGED_DIR") or "").strip()
+    inherited_dir = Path(inherited).expanduser() if inherited else None
+    if inherited_dir and inherited_dir.is_dir():
+        base_config = _safe_read_yaml(inherited_dir / "config.yaml")
+        try:
+            inherited_env = inherited_dir / ".env"
+            if inherited_env.is_file():
+                (managed_dir / ".env").write_text(inherited_env.read_text(encoding="utf-8"), encoding="utf-8")
+        except Exception:
+            logger.debug("failed to copy inherited Hermes managed .env", exc_info=True)
+
+    next_config = _deep_merge_dict(base_config, {"display": {"pet": {"enabled": False}}})
+    try:
+        (managed_dir / "config.yaml").write_text(yaml.safe_dump(next_config, sort_keys=False), encoding="utf-8")
+    except Exception:
+        logger.warning("failed to write Hermelin managed scope config at %s", managed_dir, exc_info=True)
+        return None
+    return managed_dir
 
 
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
@@ -302,6 +532,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     hermes_cmd_override_runtime = [
         config_explicit_override or env_hermes_cmd_override or config_custom_override
     ]
+    pet_sidecar_secret = secrets.token_urlsafe(32)
+    pet_sidecar_channel_re = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
     def _get_hermes_cmd() -> str:
         return str(hermes_cmd_runtime[0] or "").strip()
@@ -354,6 +586,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             follow_redirects=False,
         )
         app.state.hermes_dashboard_manager = dashboard_manager
+        app.state.pet_event_channels = {}
+        app.state.pet_event_lock = asyncio.Lock()
         try:
             yield
         finally:
@@ -450,6 +684,70 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         if not token:
             return False
         return verify_session_token(token=token, secret=cookie_secret, revoked_jtis=_revoked_jtis)
+
+    def _pet_event_state() -> tuple[dict[str, set[asyncio.Queue[str]]], asyncio.Lock]:
+        channels = getattr(app.state, "pet_event_channels", None)
+        lock = getattr(app.state, "pet_event_lock", None)
+        if channels is None:
+            channels = {}
+            app.state.pet_event_channels = channels
+        if lock is None:
+            lock = asyncio.Lock()
+            app.state.pet_event_lock = lock
+        return channels, lock
+
+    async def _broadcast_pet_event(channel: str, payload: str) -> None:
+        channels, lock = _pet_event_state()
+        async with lock:
+            queues = list(channels.get(channel, ()))
+        for queue in queues:
+            try:
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    _ = queue.get_nowait()
+                except Exception:
+                    pass
+                try:
+                    queue.put_nowait(payload)
+                except Exception:
+                    pass
+
+    def _pet_sidecar_host() -> str:
+        host = str(getattr(config, "host", "") or "").strip()
+        if not host or host in {"0.0.0.0", "::", "[::]"}:
+            return "127.0.0.1"
+        return host.strip("[]")
+
+    def _build_pet_sidecar_url(channel: str) -> str | None:
+        if not pet_sidecar_channel_re.match(channel):
+            return None
+        port = int(getattr(config, "port", 0) or 0)
+        if port <= 0:
+            return None
+        host = _pet_sidecar_host()
+        netloc = f"[{host}]:{port}" if ":" in host and not host.startswith("[") else f"{host}:{port}"
+        from urllib.parse import urlencode
+        return f"ws://{netloc}/ws/pet-events-pub?{urlencode({'token': pet_sidecar_secret, 'channel': channel})}"
+
+    def _command_supports_pet_sidecar(argv: list[str]) -> bool:
+        return any(part == "--tui" for part in argv)
+
+    def _new_pet_event_channel() -> str:
+        return secrets.token_urlsafe(18)
+
+    def _normalise_pet_event_frame(raw: str) -> str | None:
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            return None
+        params = obj.get("params") if isinstance(obj, dict) and obj.get("method") == "event" else obj
+        if not isinstance(params, dict):
+            return None
+        event_type = params.get("type")
+        if not event_type:
+            return None
+        return json.dumps({"type": "pet_event", "payload": params}, ensure_ascii=False)
 
     def _default_origin_port(scheme: str) -> int | None:
         if scheme == "https":
@@ -628,6 +926,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "default_model": _read_default_model(),
             "spawn_cwd": str(config.spawn_cwd),
         }
+
+    @app.get("/api/pet/info")
+    async def api_pet_info(slug: str = ""):
+        return _pet_overlay_info(config, slug_override=slug)
 
     @app.get("/api/artifacts")
     async def api_artifacts():
@@ -2530,6 +2832,41 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         return ctx
 
+    @app.websocket("/ws/pet-events-pub")
+    async def ws_pet_events_pub(
+        websocket: WebSocket,
+        token: str = "",
+        channel: str = "",
+    ):
+        client_ip = extract_client_ip(
+            client_host=websocket.client.host if websocket.client else "",
+            headers=websocket.headers,
+            trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
+        )
+        if not _check_allowed(client_ip):
+            await websocket.close(code=1008)
+            return
+        if not hmac.compare_digest(str(token).encode(), pet_sidecar_secret.encode()):
+            await websocket.close(code=1008)
+            return
+        if not pet_sidecar_channel_re.match(str(channel or "")):
+            await websocket.close(code=1008)
+            return
+
+        await websocket.accept()
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                payload = _normalise_pet_event_frame(raw)
+                if payload is not None:
+                    await _broadcast_pet_event(str(channel), payload)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.debug("pet event publisher ended", exc_info=True)
+            pass
+
     @app.websocket("/ws/pty")
     async def ws_pty(
         websocket: WebSocket,
@@ -2630,6 +2967,20 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "LINES",
         ):
             env.pop(k, None)
+
+        # Browser xterm renders terminal pets as Unicode half-blocks. HermelinChat
+        # draws the selected pet as a crisp canvas overlay instead, so hide the
+        # subprocess pet through a child-only Hermes managed scope. This preserves
+        # the user's real config and any inherited managed policy.
+        if "hermes" in exe_name and not _env_flag_default("HERMELIN_PTY_PET_ENABLED", False):
+            pty_managed_dir = _prepare_pty_managed_scope(config, env)
+            if pty_managed_dir is not None:
+                env["HERMES_MANAGED_DIR"] = str(pty_managed_dir)
+
+        pet_event_channel = _new_pet_event_channel()
+        pet_sidecar_url = _build_pet_sidecar_url(pet_event_channel) if _command_supports_pet_sidecar(argv) else None
+        if pet_sidecar_url:
+            env["HERMES_TUI_SIDECAR_URL"] = pet_sidecar_url
 
         # -------------------------------------------------------------
         # Optional session-scoped artifact cleanup
@@ -2995,9 +3346,56 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 logger.warning("pump_artifacts_to_ws failed", exc_info=True)
                 pass
 
+        async def pump_pet_events_to_ws() -> None:
+            if not pet_sidecar_url:
+                return
+
+            queue: asyncio.Queue[str] = asyncio.Queue(maxsize=512)
+            channels, lock = _pet_event_state()
+            async with lock:
+                channels.setdefault(pet_event_channel, set()).add(queue)
+
+            try:
+                await writer.send_text(
+                    json.dumps(
+                        {
+                            "type": "pet_sync",
+                            "payload": {"mode": "structured", "source": "tui-sidecar"},
+                        },
+                        ensure_ascii=False,
+                    ),
+                    priority=5,
+                    droppable=False,
+                )
+                while True:
+                    payload = await queue.get()
+                    # Pet state is control-plane truth, not cosmetic artifact data.
+                    # Dropping a tool/message lifecycle event leaves the browser
+                    # overlay pinned on the last state (commonly `run`), so these
+                    # frames must be non-droppable just like pet_sync/artifact_close.
+                    if not await writer.send_text(payload, priority=5, droppable=False):
+                        break
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("pump_pet_events_to_ws ended", exc_info=True)
+                pass
+            finally:
+                try:
+                    channels, lock = _pet_event_state()
+                    async with lock:
+                        queues = channels.get(pet_event_channel)
+                        if queues is not None:
+                            queues.discard(queue)
+                            if not queues:
+                                channels.pop(pet_event_channel, None)
+                except Exception:
+                    pass
+
         t1 = asyncio.create_task(pump_pty_to_ws())
         t2 = asyncio.create_task(pump_ws_to_pty())
         t3 = asyncio.create_task(pump_artifacts_to_ws())
+        t4 = asyncio.create_task(pump_pet_events_to_ws())
         writer_task = asyncio.create_task(writer.run())
 
         try:
@@ -3005,16 +3403,18 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         finally:
             try:
                 t3.cancel()
+                t4.cancel()
                 for task in (t1, t2):
                     if not task.done():
                         task.cancel()
 
-                try:
-                    await t3
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    pass
+                for task in (t3, t4):
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
 
                 try:
                     await writer.stop()

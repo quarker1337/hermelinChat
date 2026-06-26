@@ -72,6 +72,18 @@ export interface VideoFxPrefs {
   glitchPulses: boolean
 }
 
+export type PetOverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
+
+export type PetActivityState = 'idle' | 'wave' | 'run' | 'failed' | 'review' | 'jump' | 'waiting'
+
+export interface PetOverlayPrefs {
+  position: PetOverlayPosition
+  // Local browser-only multiplier, expressed as percent. 100 = Hermes pet scale.
+  size: number
+  // Empty string means "follow Hermes active pet". Any value is an installed pet slug override.
+  slug: string
+}
+
 export interface UiPrefs {
   theme: string
   appName: string
@@ -80,6 +92,7 @@ export interface UiPrefs {
   timestamps: TimestampPrefs
   terminal: TerminalPrefs
   videoFx: VideoFxPrefs
+  petOverlay: PetOverlayPrefs
 }
 
 // ─── Auth ──────────────────────────────────────────────────────────

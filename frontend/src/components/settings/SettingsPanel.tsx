@@ -10,6 +10,7 @@ import { AppearanceSettings } from './AppearanceSettings'
 import { BackgroundSettings } from './BackgroundSettings'
 import { TerminalCursorSettings } from './TerminalCursorSettings'
 import { VideoFxSettings } from './VideoFxSettings'
+import { PetOverlaySettings } from './PetOverlaySettings'
 import { HermesDashboardSettings } from './HermesDashboardSettings'
 
 import type { UiPrefs } from '../../types'
@@ -258,6 +259,22 @@ export const SettingsPanel = ({
             <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
 
             <BackgroundSettings ui={ui} onUpdate={onUiUpdate} />
+
+            <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
+
+            <div
+              style={{
+                marginTop: 12,
+                fontSize: 10,
+                color: SLATE.muted,
+                letterSpacing: 0.9,
+                textTransform: 'uppercase',
+              }}
+            >
+              Pet overlay
+            </div>
+
+            <PetOverlaySettings ui={ui} onUpdate={onUiUpdate} />
 
             <div style={{ height: 1, background: SLATE.border, margin: '12px 0' }} />
 

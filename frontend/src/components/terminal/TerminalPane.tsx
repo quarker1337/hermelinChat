@@ -345,6 +345,10 @@ function TerminalPane() {
   const spawnNonce = useTerminalStore((s) => s.spawnNonce)
   const onConnectionChange = useTerminalStore((s) => s.onConnectionChange)
   const onDetectedSessionId = useTerminalStore((s) => s.onDetectedSessionId)
+  const noteUserInput = useTerminalStore((s) => s.noteUserInput)
+  const notePtyOutput = useTerminalStore((s) => s.notePtyOutput)
+  const notePetSyncMode = useTerminalStore((s) => s.notePetSyncMode)
+  const noteHermesPetEvent = useTerminalStore((s) => s.noteHermesPetEvent)
   const terminalState = useTerminalStore((s) => s.state)
 
   const prefs = useUiPrefsStore((s) => s.prefs)
@@ -368,6 +372,26 @@ function TerminalPane() {
   useEffect(() => {
     onDetectedSessionIdRef.current = onDetectedSessionId
   }, [onDetectedSessionId])
+
+  const noteUserInputRef = useRef(noteUserInput)
+  useEffect(() => {
+    noteUserInputRef.current = noteUserInput
+  }, [noteUserInput])
+
+  const notePtyOutputRef = useRef(notePtyOutput)
+  useEffect(() => {
+    notePtyOutputRef.current = notePtyOutput
+  }, [notePtyOutput])
+
+  const notePetSyncModeRef = useRef(notePetSyncMode)
+  useEffect(() => {
+    notePetSyncModeRef.current = notePetSyncMode
+  }, [notePetSyncMode])
+
+  const noteHermesPetEventRef = useRef(noteHermesPetEvent)
+  useEffect(() => {
+    noteHermesPetEventRef.current = noteHermesPetEvent
+  }, [noteHermesPetEvent])
 
   // ── Init: open xterm once ────────────────────────────────────────────────
   useEffect(() => {
@@ -800,6 +824,7 @@ function TerminalPane() {
 
       onDataDisposable = term.onData((data) => {
         if (isCurrentSocket() && ws && ws.readyState === WebSocket.OPEN) {
+          noteUserInputRef.current?.(data)
           ws.send(encoder.encode(data))
         }
       })
@@ -835,7 +860,9 @@ function TerminalPane() {
             writeQueue?.enqueue(filteredOutput)
           }
           try {
-            maybeDetectSessionId(decoder.decode(u8, { stream: true }))
+            const decoded = decoder.decode(u8, { stream: true })
+            notePtyOutputRef.current?.(stripAnsi(decoded))
+            maybeDetectSessionId(decoded)
           } catch {
             // ignore
           }
@@ -844,13 +871,19 @@ function TerminalPane() {
         if (typeof ev.data === 'string') {
           try {
             const payload = JSON.parse(ev.data) as unknown
-            if (
-              payload &&
-              typeof payload === 'object' &&
-              (payload as Record<string, unknown>).type &&
-              handleControlMessage(payload)
-            ) {
-              return
+            if (payload && typeof payload === 'object') {
+              const message = payload as Record<string, unknown>
+              if (message.type === 'pet_sync') {
+                notePetSyncModeRef.current?.(message.payload)
+                return
+              }
+              if (message.type === 'pet_event') {
+                noteHermesPetEventRef.current?.(message.payload)
+                return
+              }
+              if (message.type && handleControlMessage(payload)) {
+                return
+              }
             }
           } catch {
             // not a control message
@@ -859,6 +892,7 @@ function TerminalPane() {
           if (typeof filteredOutput === 'string' && filteredOutput.length > 0) {
             writeQueue?.enqueue(filteredOutput)
           }
+          notePtyOutputRef.current?.(stripAnsi(ev.data))
           maybeDetectSessionId(ev.data)
         }
       }

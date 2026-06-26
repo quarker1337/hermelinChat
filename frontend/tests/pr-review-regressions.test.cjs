@@ -154,6 +154,184 @@ test('terminal store keeps resumeId when a resumed session echoes its session id
   assert.equal(useSessionStore.getState().activeSessionId, '20260413_134408_76e00f')
 })
 
+test('terminal store uses canonical Hermes pet activity state names', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().noteUserInput('hello boba\r')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().notePtyOutput('[tool] executing terminal command')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().noteUserInput('break please\r')
+  useTerminalStore.getState().notePtyOutput('Traceback: tool failed')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'failed')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().spawn(null)
+  const nonce = useTerminalStore.getState().spawnNonce
+  useTerminalStore.getState().onConnectionChange(true, nonce)
+  useTerminalStore.getState().onDetectedSessionId('20260626_120000_deadbe')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'wave')
+
+  useTerminalStore.getState().reset()
+})
+
+test('terminal pet ignores focus clicks, blank input, and duplicate session redraws', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useSessionStore } = loadCompiled('stores/sessions.js')
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useSessionStore.getState().reset()
+  useTerminalStore.getState().reset()
+
+  useTerminalStore.getState().noteUserInput('\x1b[I')
+  useTerminalStore.getState().noteUserInput('\x1b[O')
+  useTerminalStore.getState().noteUserInput('\r')
+  useTerminalStore.getState().notePtyOutput('[tool] stale focus repaint')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+
+  useTerminalStore.getState().noteUserInput('not submitted yet')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+  useTerminalStore.getState().noteUserInput('\r')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().notePetActivity('idle')
+  useTerminalStore.getState().spawn(null)
+  const nonce = useTerminalStore.getState().spawnNonce
+  useTerminalStore.getState().onConnectionChange(true, nonce)
+  useTerminalStore.getState().onDetectedSessionId('20260626_120000_deadbe')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'wave')
+  useTerminalStore.getState().notePetActivity('idle')
+  useTerminalStore.getState().onDetectedSessionId('20260626_120000_deadbe')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+
+  useTerminalStore.getState().reset()
+})
+
+test('terminal pet follows structured Hermes sidecar events and never falls back to PTY heuristics', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'tui-sidecar' })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+
+  useTerminalStore.getState().noteUserInput('run a tool\r')
+  useTerminalStore.getState().notePtyOutput('[tool] terminal repaint should not drive pet')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'thinking.delta', payload: { text: '' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'thinking through tool choice' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'tool.start', payload: { tool_id: 'tool-1', name: 'terminal' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'tool.complete', payload: { tool_id: 'tool-1', name: 'terminal' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.complete', payload: {} })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'wave')
+
+  useTerminalStore.getState().reset()
+})
+
+test('terminal pet does not let missing tool ids pin structured sync on run', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'tui-sidecar' })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'thinking before tool' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'tool.start', payload: { tool_id: 'tool-1', name: 'terminal' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'tool.complete', payload: { name: 'terminal' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'reading tool output' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.complete', payload: {} })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'wave')
+
+  useTerminalStore.getState().reset()
+})
+
+test('terminal pet exposes structured sync debug state on window', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'tui-sidecar' })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'thinking' } })
+
+  assert.equal(global.window.__HERMELIN_PET_SYNC__.state, 'review')
+  assert.equal(global.window.__HERMELIN_PET_SYNC__.lastEventType, 'reasoning.delta')
+  assert.deepEqual(global.window.__HERMELIN_PET_SYNC__.tools, [])
+
+  useTerminalStore.getState().reset()
+  setWindow(undefined)
+})
+
+test('terminal pet maps structured Hermes prompts and errors to waiting and failed states', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured' })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'approval.request', payload: { command: 'rm -rf /tmp/nope' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'waiting')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'error', payload: { message: 'boom' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'failed')
+
+  useTerminalStore.getState().reset()
+})
+
+test('pet canvas avoids blank transition frames from sparse animation rows', () => {
+  const source = fs.readFileSync(path.join(SOURCE_ROOT, 'components', 'pet', 'FloatingPetOverlay.tsx'), 'utf8')
+
+  assert.match(source, /const DEFAULT_ROW_FRAME_COUNTS: Record<string, number> = \{[\s\S]*waving: 4,[\s\S]*jumping: 5,[\s\S]*\}/)
+  assert.match(source, /function frameCountForRow\(/)
+  assert.match(source, /function canvasHasVisiblePixels\(/)
+  assert.match(source, /const scratch = document\.createElement\('canvas'\)/)
+  assert.match(source, /scratchCtx\.drawImage\(image, frame \* frameW, row \* frameH, frameW, frameH, 0, 0, drawW, drawH\)[\s\S]*if \(!canvasHasVisiblePixels\(scratchCtx, scratch\.width, scratch\.height\)\)/)
+  assert.match(source, /ctx\.clearRect\(0, 0, canvas\.width, canvas\.height\)[\s\S]*ctx\.drawImage\(scratch, 0, 0\)/)
+})
+
 test('video fx store applies saved prefs immediately on startup', () => {
   installAssetStubs()
   clearCompiledModules()

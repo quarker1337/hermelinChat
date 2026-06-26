@@ -26,6 +26,7 @@ import { LoginScreen } from './modals/LoginScreen'
 import { SessionContextMenu } from './modals/SessionContextMenu'
 import { RenameSessionModal } from './modals/RenameSessionModal'
 import { DeleteSessionModal } from './modals/DeleteSessionModal'
+import { FloatingPetOverlay } from './pet/FloatingPetOverlay'
 
 import ArtifactPanel from './ArtifactPanel'
 import VideoFxOverlay from './VideoFxOverlay'
@@ -165,6 +166,7 @@ export function AppShell() {
   const runtimeInfo = useSessionStore((s) => s.runtimeInfo)
 
   const connected = useTerminalStore(selectConnected)
+  const petActivityState = useTerminalStore((s) => s.petActivity.state)
 
   const videoFxFilter = useVideoFxStore((s) => s.filter)
   const videoFxTransform = useVideoFxStore((s) => s.transform)
@@ -526,6 +528,12 @@ export function AppShell() {
               {authenticated ? (
                 <>
                   <TerminalPane />
+                  <FloatingPetOverlay
+                    activityState={petActivityState}
+                    paused={overlayOpen}
+                    settings={prefs.petOverlay}
+                    visible={authenticated}
+                  />
                   <AlignmentEasterEgg
                     svgRaw={activeTheme?.icons?.alignmentSvgRaw}
                     imageHref={activeTheme?.icons?.alignmentImageHref}
