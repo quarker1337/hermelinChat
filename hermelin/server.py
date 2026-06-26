@@ -2658,8 +2658,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             "session_ttl_seconds": ttl_seconds if auth_enabled else None,
         })
         # Sliding-session renewal: an open browser tab periodically calls this
-        # endpoint, so refresh the signed cookie before Max-Age expires.
-        if auth_enabled and authenticated:
+        # endpoint, so refresh the signed cookie before Max-Age expires. Revoke
+        # the presented token while rotating so logout cannot be bypassed by
+        # replaying an older cookie from the same browser session.
+        if auth_enabled and authenticated and token:
+            jti = extract_session_jti(token=token, secret=cookie_secret)
+            if jti:
+                _revoked_jtis.add(jti)
             _set_session_cookie(resp)
         return resp
 

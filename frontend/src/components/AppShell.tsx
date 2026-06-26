@@ -161,6 +161,7 @@ export function AppShell() {
   const authEnabled = useAuthStore((s) => s.enabled)
   const authenticated = useAuthStore((s) => s.authenticated)
   const logoutReason = useAuthStore((s) => s.logoutReason)
+  const sessionTtlSeconds = useAuthStore((s) => s.sessionTtlSeconds)
 
   const activeSession = useSessionStore((s) => s.activeSession)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
@@ -207,11 +208,15 @@ export function AppShell() {
   // backend renews the signed cookie on successful auth checks.
   useEffect(() => {
     if (!authEnabled || !authenticated) return
+    const ttlMs = Math.max(0, Number(sessionTtlSeconds || 0) * 1000)
+    // Default to the previous 5-minute cadence when the server omits a TTL,
+    // but for shorter deployments renew halfway through the advertised TTL.
+    const keepaliveMs = ttlMs > 0 ? Math.max(500, Math.min(5 * 60 * 1000, Math.floor(ttlMs * 0.5))) : 5 * 60 * 1000
     const t = setInterval(() => {
       void useAuthStore.getState().refresh()
-    }, 5 * 60 * 1000)
+    }, keepaliveMs)
     return () => clearInterval(t)
-  }, [authEnabled, authenticated])
+  }, [authEnabled, authenticated, sessionTtlSeconds])
 
   // Check for updates after initial load (wait for auth so protected deployments don't miss it)
   useEffect(() => {

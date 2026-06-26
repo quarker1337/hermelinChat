@@ -108,7 +108,8 @@ class AuthSessionCookieTests(unittest.TestCase):
                 cookie_secret="stable-cookie-secret",
                 session_ttl_seconds=300,
             )
-            client = TestClient(create_app(config))
+            app = create_app(config)
+            client = TestClient(app)
 
             login = client.post("/api/auth/login", json={"password": "secret-password"})
             self.assertEqual(login.status_code, 200)
@@ -124,6 +125,11 @@ class AuthSessionCookieTests(unittest.TestCase):
             self.assertIn(f"{config.cookie_name}=", set_cookie)
             self.assertIn("Max-Age=300", set_cookie)
             self.assertNotEqual(client.cookies.get(config.cookie_name), initial_cookie)
+
+            replay = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: initial_cookie})
+            self.assertEqual(replay.status_code, 200)
+            self.assertEqual(replay.json()["authenticated"], False)
+            self.assertNotIn("set-cookie", replay.headers)
 
     def test_auth_me_does_not_renew_expired_cookie(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -1230,8 +1230,11 @@ test('AppShell keeps auth alive and only clears session state on explicit logout
   const source = fs.readFileSync(sourcePath, 'utf8')
 
   assert.match(source, /Keep long-lived open tabs authenticated/)
-  assert.match(source, /setInterval\(\(\) => \{[\s\S]*useAuthStore\.getState\(\)\.refresh\(\)[\s\S]*5 \* 60 \* 1000/)
+  assert.match(source, /sessionTtlSeconds/)
+  assert.match(source, /Math\.floor\(ttlMs \* 0\.5\)/)
+  assert.match(source, /setInterval\(\(\) => \{[\s\S]*useAuthStore\.getState\(\)\.refresh\(\)[\s\S]*keepaliveMs/)
   assert.match(source, /logoutReason === 'explicit'/)
+  assert.match(source, /\}, \[authEnabled, authenticated, sessionTtlSeconds\]\)/)
   assert.match(source, /\}, \[authenticated, logoutReason\]\)/)
 
   const sessionsSource = fs.readFileSync(path.join(SOURCE_ROOT, 'stores', 'sessions.ts'), 'utf8')
@@ -1254,7 +1257,7 @@ test('auth store distinguishes expired auth from deliberate logout', async () =>
           ok: true,
           status: 200,
           async json() {
-            return { auth_enabled: true, authenticated: false }
+            return { auth_enabled: true, authenticated: false, session_ttl_seconds: 120 }
           },
         }
       }
@@ -1267,6 +1270,7 @@ test('auth store distinguishes expired auth from deliberate logout', async () =>
     await useAuthStore.getState().refresh()
     assert.equal(useAuthStore.getState().authenticated, false)
     assert.equal(useAuthStore.getState().logoutReason, 'expired')
+    assert.equal(useAuthStore.getState().sessionTtlSeconds, 120)
 
     useAuthStore.setState({ authenticated: true, logoutReason: null })
     await useAuthStore.getState().logout()

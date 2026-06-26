@@ -14,6 +14,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   enabled: false,
   authenticated: false,
   logoutReason: null,
+  sessionTtlSeconds: null,
   loginError: '',
 
   refresh: async () => {
@@ -25,9 +26,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
         enabled: !!data.auth_enabled,
         authenticated: !!data.authenticated,
         logoutReason: data.authenticated ? null : 'expired',
+        sessionTtlSeconds: typeof data.session_ttl_seconds === 'number' ? data.session_ttl_seconds : null,
       })
     } catch {
-      set({ loading: false, enabled: false, authenticated: false, logoutReason: 'expired' })
+      set({ loading: false, enabled: false, authenticated: false, logoutReason: 'expired', sessionTtlSeconds: null })
     }
   },
 

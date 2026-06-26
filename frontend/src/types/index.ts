@@ -104,6 +104,7 @@ export interface AuthState {
   enabled: boolean
   authenticated: boolean
   logoutReason: 'explicit' | 'expired' | null
+  sessionTtlSeconds: number | null
 }
 
 // ─── Runtime ───────────────────────────────────────────────────────
