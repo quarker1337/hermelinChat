@@ -22,7 +22,7 @@ interface TerminalStore {
   spawn: (resumeId: string | null) => void
   onConnectionChange: (isUp: boolean, nonce?: number) => void
   onDetectedSessionId: (sid: string) => void
-  noteUserInput: () => void
+  noteUserInput: (data?: string) => void
   notePtyOutput: (text: string) => void
   notePetActivity: (state: PetActivityState, holdMs?: number, afterState?: PetActivityState) => void
   reset: () => void
@@ -32,6 +32,7 @@ let petActivityTimer: ReturnType<typeof setTimeout> | null = null
 let completionTimer: ReturnType<typeof setTimeout> | null = null
 let lastOutputBeat = 0
 let turnInFlight = false
+let pendingUserInput = ''
 
 function clearPetActivityTimer() {
   if (petActivityTimer !== null) {
@@ -50,6 +51,64 @@ function clearCompletionTimer() {
 function clearPetTimers() {
   clearPetActivityTimer()
   clearCompletionTimer()
+}
+
+function skipEscapeSequence(text: string, start: number): number {
+  const next = text[start + 1]
+  if (next === '[') {
+    for (let i = start + 2; i < text.length; i += 1) {
+      const code = text.charCodeAt(i)
+      if (code >= 0x40 && code <= 0x7e) return i
+    }
+    return text.length - 1
+  }
+
+  if (next === ']') {
+    for (let i = start + 2; i < text.length; i += 1) {
+      if (text[i] === '\u0007') return i
+      if (text[i] === '\u001b' && text[i + 1] === '\\') return i + 1
+    }
+    return text.length - 1
+  }
+
+  return Math.min(start + 1, text.length - 1)
+}
+
+function terminalInputSubmitsNonEmptyText(data = ''): boolean {
+  let submitted = false
+
+  for (let i = 0; i < data.length; i += 1) {
+    const ch = data[i]
+    const code = data.charCodeAt(i)
+
+    if (ch === '\u001b') {
+      i = skipEscapeSequence(data, i)
+      continue
+    }
+
+    if (ch === '\u0003' || ch === '\u0004') {
+      pendingUserInput = ''
+      turnInFlight = false
+      clearCompletionTimer()
+      continue
+    }
+
+    if (ch === '\b' || ch === '\u007f') {
+      pendingUserInput = pendingUserInput.slice(0, -1)
+      continue
+    }
+
+    if (ch === '\r' || ch === '\n') {
+      if (pendingUserInput.trim().length > 0) submitted = true
+      pendingUserInput = ''
+      continue
+    }
+
+    if (code < 32 || code === 0x7f) continue
+    pendingUserInput += ch
+  }
+
+  return submitted
 }
 
 function inferPetStateFromOutput(text: string): PetActivityState {
@@ -100,16 +159,21 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
       }
     },
 
-    noteUserInput: () => {
+    noteUserInput: (data = '') => {
+      if (!terminalInputSubmitsNonEmptyText(data)) return
+
       // The user just submitted work to Hermes. Default Hermes shows model
       // thinking/reading as `review`; `waiting` is reserved for clarify/approval
       // prompts that block on the user.
       turnInFlight = true
+      lastOutputBeat = 0
       clearCompletionTimer()
       get().notePetActivity('review')
     },
 
     notePtyOutput: (text: string) => {
+      if (!turnInFlight) return
+
       const now = Date.now()
       if (now - lastOutputBeat < 250) return
       lastOutputBeat = now
@@ -214,6 +278,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
 
       if (state.phase !== 'detecting' && state.phase !== 'connected') return
 
+      const activeSessionId = useSessionStore.getState().activeSessionId
+      if (state.phase === 'connected' && (activeSessionId === sid || state.resumeId === sid)) {
+        useSessionStore.getState().setActiveSessionId(sid)
+        return
+      }
+
       get().notePetActivity('wave', 1800, 'idle')
 
       if (state.phase === 'connected' && state.resumeId !== null) {
@@ -236,6 +306,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
       clearPetTimers()
       lastOutputBeat = 0
       turnInFlight = false
+      pendingUserInput = ''
       set({ state: { phase: 'idle' }, spawnNonce: 0, petActivity: { state: 'idle', updatedAt: Date.now() } })
     },
   }

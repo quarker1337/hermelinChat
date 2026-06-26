@@ -812,7 +812,7 @@ function TerminalPane() {
 
       onDataDisposable = term.onData((data) => {
         if (isCurrentSocket() && ws && ws.readyState === WebSocket.OPEN) {
-          noteUserInputRef.current?.()
+          noteUserInputRef.current?.(data)
           ws.send(encoder.encode(data))
         }
       })

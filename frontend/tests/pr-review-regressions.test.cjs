@@ -162,13 +162,14 @@ test('terminal store uses canonical Hermes pet activity state names', () => {
   const { useTerminalStore } = loadCompiled('stores/terminal.js')
 
   useTerminalStore.getState().reset()
-  useTerminalStore.getState().noteUserInput()
+  useTerminalStore.getState().noteUserInput('hello boba\r')
   assert.equal(useTerminalStore.getState().petActivity.state, 'review')
 
   useTerminalStore.getState().notePtyOutput('[tool] executing terminal command')
   assert.equal(useTerminalStore.getState().petActivity.state, 'run')
 
   useTerminalStore.getState().reset()
+  useTerminalStore.getState().noteUserInput('break please\r')
   useTerminalStore.getState().notePtyOutput('Traceback: tool failed')
   assert.equal(useTerminalStore.getState().petActivity.state, 'failed')
 
@@ -178,6 +179,41 @@ test('terminal store uses canonical Hermes pet activity state names', () => {
   useTerminalStore.getState().onConnectionChange(true, nonce)
   useTerminalStore.getState().onDetectedSessionId('20260626_120000_deadbe')
   assert.equal(useTerminalStore.getState().petActivity.state, 'wave')
+
+  useTerminalStore.getState().reset()
+})
+
+test('terminal pet ignores focus clicks, blank input, and duplicate session redraws', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useSessionStore } = loadCompiled('stores/sessions.js')
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useSessionStore.getState().reset()
+  useTerminalStore.getState().reset()
+
+  useTerminalStore.getState().noteUserInput('\x1b[I')
+  useTerminalStore.getState().noteUserInput('\x1b[O')
+  useTerminalStore.getState().noteUserInput('\r')
+  useTerminalStore.getState().notePtyOutput('[tool] stale focus repaint')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+
+  useTerminalStore.getState().noteUserInput('not submitted yet')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+  useTerminalStore.getState().noteUserInput('\r')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().notePetActivity('idle')
+  useTerminalStore.getState().spawn(null)
+  const nonce = useTerminalStore.getState().spawnNonce
+  useTerminalStore.getState().onConnectionChange(true, nonce)
+  useTerminalStore.getState().onDetectedSessionId('20260626_120000_deadbe')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'wave')
+  useTerminalStore.getState().notePetActivity('idle')
+  useTerminalStore.getState().onDetectedSessionId('20260626_120000_deadbe')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
 
   useTerminalStore.getState().reset()
 })
