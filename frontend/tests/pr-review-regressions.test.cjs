@@ -154,6 +154,34 @@ test('terminal store keeps resumeId when a resumed session echoes its session id
   assert.equal(useSessionStore.getState().activeSessionId, '20260413_134408_76e00f')
 })
 
+test('terminal store uses canonical Hermes pet activity state names', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().noteUserInput()
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().notePtyOutput('[tool] executing terminal command')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().notePtyOutput('Traceback: tool failed')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'failed')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().spawn(null)
+  const nonce = useTerminalStore.getState().spawnNonce
+  useTerminalStore.getState().onConnectionChange(true, nonce)
+  useTerminalStore.getState().onDetectedSessionId('20260626_120000_deadbe')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'wave')
+
+  useTerminalStore.getState().reset()
+})
+
 test('video fx store applies saved prefs immediately on startup', () => {
   installAssetStubs()
   clearCompiledModules()

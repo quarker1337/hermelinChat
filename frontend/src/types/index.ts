@@ -74,7 +74,7 @@ export interface VideoFxPrefs {
 
 export type PetOverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
 
-export type PetActivityState = 'idle' | 'waiting' | 'running' | 'review' | 'failed' | 'waving' | 'jumping'
+export type PetActivityState = 'idle' | 'wave' | 'run' | 'failed' | 'review' | 'jump' | 'waiting'
 
 export interface PetOverlayPrefs {
   position: PetOverlayPosition

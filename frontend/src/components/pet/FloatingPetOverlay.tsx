@@ -66,11 +66,11 @@ function clampSizePct(size: unknown): number {
 function rowAliasesForState(state: PetState): string[] {
   switch (state) {
     case 'waiting': return ['waiting', 'idle']
-    case 'running': return ['running', 'running-right', 'running-left', 'waiting', 'idle']
-    case 'review': return ['review', 'waving', 'idle']
+    case 'run': return ['run', 'running', 'idle']
+    case 'review': return ['review', 'idle']
     case 'failed': return ['failed', 'idle']
-    case 'waving': return ['waving', 'idle']
-    case 'jumping': return ['jumping', 'idle']
+    case 'wave': return ['wave', 'waving', 'idle']
+    case 'jump': return ['jump', 'jumping', 'idle']
     default: return ['idle']
   }
 }

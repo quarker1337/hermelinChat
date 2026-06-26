@@ -134,7 +134,7 @@ HERMELIN_COOKIE_SECRET=generate-a-long-random-string
 ```
 
 Pet overlay notes:
-- The browser overlay follows Hermes' active pet by default and animates from terminal activity.
+- The browser overlay follows Hermes' active pet by default and animates from terminal activity using Hermes' canonical pet states: `review`, `run`, `wave`, `jump`, `failed`, `waiting`, and `idle`.
 - Position, visible size, and a local pet slug override are available under Settings → UI → Pet overlay.
 - The slug override is browser-local; it does not rewrite your Hermes `config.yaml`.
 
