@@ -1,5 +1,6 @@
 import base64
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -133,6 +134,62 @@ class PetOverlayTests(unittest.TestCase):
             self.assertEqual(managed_config["display"]["skin"], "matrix")
             self.assertFalse(managed_config["display"]["pet"]["enabled"])
             self.assertIn("enabled: true", real_config.read_text(encoding="utf-8"))
+
+    def test_pty_tui_launch_injects_pet_sidecar_and_announces_structured_sync(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            code = (
+                "import os, time; "
+                "print(os.environ.get('HERMES_TUI_SIDECAR_URL', 'missing'), flush=True); "
+                "time.sleep(0.2)"
+            )
+            config = HermelinConfig(
+                hermes_home=tmp / "hermes-home",
+                meta_db_path=tmp / "hermelin_meta.db",
+                spawn_cwd=tmp / "spawn-cwd",
+                allowed_ips="*",
+                auth_password_hash="",
+                cookie_secret="test-secret",
+                hermes_dashboard_enabled=False,
+                hermes_cmd=f"{sys.executable} -c {json.dumps(code)} --tui",
+                hermes_cmd_override=True,
+                host="127.0.0.1",
+                port=32123,
+            )
+
+            saw_pet_sync = False
+            saw_sidecar_env = False
+            with TestClient(create_app(config)) as client:
+                with client.websocket_connect("/ws/pty?cols=80&rows=20") as ws:
+                    for _ in range(20):
+                        message = ws.receive()
+                        if message.get("type") == "websocket.close":
+                            break
+
+                        text = message.get("text")
+                        if text:
+                            try:
+                                payload = json.loads(text)
+                            except Exception:
+                                payload = None
+                            if isinstance(payload, dict) and payload.get("type") == "pet_sync":
+                                self.assertEqual(payload.get("payload", {}).get("mode"), "structured")
+                                self.assertEqual(payload.get("payload", {}).get("source"), "tui-sidecar")
+                                saw_pet_sync = True
+                            if "/ws/pet-events-pub" in text and "channel=" in text:
+                                saw_sidecar_env = True
+
+                        data = message.get("bytes")
+                        if data:
+                            decoded = data.decode("utf-8", errors="ignore")
+                            if "/ws/pet-events-pub" in decoded and "channel=" in decoded:
+                                saw_sidecar_env = True
+
+                        if saw_pet_sync and saw_sidecar_env:
+                            break
+
+            self.assertTrue(saw_pet_sync)
+            self.assertTrue(saw_sidecar_env)
 
 
 if __name__ == "__main__":

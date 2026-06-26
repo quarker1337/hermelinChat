@@ -24,6 +24,8 @@ interface TerminalStore {
   onDetectedSessionId: (sid: string) => void
   noteUserInput: (data?: string) => void
   notePtyOutput: (text: string) => void
+  notePetSyncMode: (info: unknown) => void
+  noteHermesPetEvent: (event: unknown) => void
   notePetActivity: (state: PetActivityState, holdMs?: number, afterState?: PetActivityState) => void
   reset: () => void
 }
@@ -33,6 +35,55 @@ let completionTimer: ReturnType<typeof setTimeout> | null = null
 let lastOutputBeat = 0
 let turnInFlight = false
 let pendingUserInput = ''
+let structuredPetSyncActive = false
+let hermesBusy = false
+let hermesReasoningActive = false
+let hermesAwaitingInput = false
+let hermesTodosDone = false
+const hermesActiveToolIds = new Set<string>()
+
+function resetStructuredPetState() {
+  hermesBusy = false
+  hermesReasoningActive = false
+  hermesAwaitingInput = false
+  hermesTodosDone = false
+  hermesActiveToolIds.clear()
+}
+
+function deriveStructuredPetState(): PetActivityState {
+  if (hermesAwaitingInput) return 'waiting'
+  if (hermesActiveToolIds.size > 0) return 'run'
+  if (hermesReasoningActive) return 'review'
+  if (hermesBusy) return 'run'
+  return 'idle'
+}
+
+function normaliseHermesEvent(event: unknown): { type: string; payload: Record<string, unknown> } | null {
+  if (!event || typeof event !== 'object') return null
+  const raw = event as Record<string, unknown>
+  const params = raw.method === 'event' && raw.params && typeof raw.params === 'object'
+    ? (raw.params as Record<string, unknown>)
+    : raw
+  const type = String(params.type || '').trim()
+  if (!type) return null
+  const payload = params.payload && typeof params.payload === 'object'
+    ? (params.payload as Record<string, unknown>)
+    : {}
+  return { type, payload }
+}
+
+function toolIdFromPayload(payload: Record<string, unknown>): string {
+  return String(payload.tool_id ?? payload.id ?? payload.name ?? 'tool')
+}
+
+function todosDone(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length === 0) return false
+  return value.every((item) => {
+    if (!item || typeof item !== 'object') return false
+    const status = String((item as Record<string, unknown>).status ?? '')
+    return status === 'completed' || status === 'cancelled'
+  })
+}
 
 function clearPetActivityTimer() {
   if (petActivityTimer !== null) {
@@ -143,6 +194,11 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
     }, 950)
   }
 
+  const applyStructuredPetState = () => {
+    clearPetActivityTimer()
+    set({ petActivity: { state: deriveStructuredPetState(), updatedAt: Date.now() } })
+  }
+
   return {
     state: { phase: 'idle' },
     spawnNonce: 0,
@@ -159,19 +215,113 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
       }
     },
 
+    notePetSyncMode: (info: unknown) => {
+      const mode = info && typeof info === 'object'
+        ? String((info as Record<string, unknown>).mode || '')
+        : String(info || '')
+      structuredPetSyncActive = mode === 'structured'
+      resetStructuredPetState()
+      clearPetTimers()
+      if (structuredPetSyncActive) {
+        turnInFlight = false
+        pendingUserInput = ''
+        lastOutputBeat = 0
+        set({ petActivity: { state: 'idle', updatedAt: Date.now() } })
+      }
+    },
+
+    noteHermesPetEvent: (event: unknown) => {
+      const ev = normaliseHermesEvent(event)
+      if (!ev) return
+
+      structuredPetSyncActive = true
+      clearCompletionTimer()
+
+      switch (ev.type) {
+        case 'message.start':
+          hermesBusy = true
+          hermesReasoningActive = false
+          hermesAwaitingInput = false
+          hermesTodosDone = false
+          hermesActiveToolIds.clear()
+          applyStructuredPetState()
+          return
+
+        case 'thinking.delta':
+        case 'reasoning.available':
+          if (!hermesBusy && ev.type === 'thinking.delta') return
+          hermesBusy = true
+          hermesReasoningActive = true
+          applyStructuredPetState()
+          return
+
+        case 'tool.start':
+          hermesBusy = true
+          hermesReasoningActive = false
+          hermesAwaitingInput = false
+          if (todosDone(ev.payload.todos)) hermesTodosDone = true
+          hermesActiveToolIds.add(toolIdFromPayload(ev.payload))
+          applyStructuredPetState()
+          return
+
+        case 'tool.complete':
+          if (todosDone(ev.payload.todos)) hermesTodosDone = true
+          hermesActiveToolIds.delete(toolIdFromPayload(ev.payload))
+          hermesReasoningActive = false
+          hermesAwaitingInput = false
+          hermesBusy = true
+          applyStructuredPetState()
+          return
+
+        case 'message.delta':
+          hermesBusy = true
+          hermesReasoningActive = false
+          applyStructuredPetState()
+          return
+
+        case 'clarify.request':
+        case 'approval.request':
+        case 'sudo.request':
+        case 'secret.request':
+          hermesBusy = true
+          hermesAwaitingInput = true
+          applyStructuredPetState()
+          return
+
+        case 'message.complete': {
+          const flashState: PetActivityState = hermesTodosDone || todosDone(ev.payload.todos) ? 'jump' : 'wave'
+          turnInFlight = false
+          pendingUserInput = ''
+          resetStructuredPetState()
+          get().notePetActivity(flashState, 1600, 'idle')
+          return
+        }
+
+        case 'error':
+          turnInFlight = false
+          pendingUserInput = ''
+          resetStructuredPetState()
+          get().notePetActivity('failed', 1600, 'idle')
+          return
+
+        default:
+          return
+      }
+    },
+
     noteUserInput: (data = '') => {
       if (!terminalInputSubmitsNonEmptyText(data)) return
 
-      // The user just submitted work to Hermes. Default Hermes shows model
-      // thinking/reading as `review`; `waiting` is reserved for clarify/approval
-      // prompts that block on the user.
       turnInFlight = true
       lastOutputBeat = 0
       clearCompletionTimer()
-      get().notePetActivity('review')
+      if (!structuredPetSyncActive) {
+        get().notePetActivity('review')
+      }
     },
 
     notePtyOutput: (text: string) => {
+      if (structuredPetSyncActive) return
       if (!turnInFlight) return
 
       const now = Date.now()
@@ -214,6 +364,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
     spawn: (resumeId: string | null) => {
       clearPetTimers()
       turnInFlight = false
+      pendingUserInput = ''
+      structuredPetSyncActive = false
+      resetStructuredPetState()
       set((s) => ({
         state: { phase: 'connecting', resumeId },
         spawnNonce: s.spawnNonce + 1,
@@ -238,6 +391,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
       if (!isUp) {
         clearPetTimers()
         turnInFlight = false
+        pendingUserInput = ''
+        structuredPetSyncActive = false
+        resetStructuredPetState()
         set({ state: { phase: 'idle' }, petActivity: { state: 'idle', updatedAt: Date.now() } })
         return
       }
@@ -284,7 +440,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
         return
       }
 
-      get().notePetActivity('wave', 1800, 'idle')
+      if (!structuredPetSyncActive) get().notePetActivity('wave', 1800, 'idle')
 
       if (state.phase === 'connected' && state.resumeId !== null) {
         // Resume flows already know which session they requested. If the backend later
@@ -307,6 +463,8 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
       lastOutputBeat = 0
       turnInFlight = false
       pendingUserInput = ''
+      structuredPetSyncActive = false
+      resetStructuredPetState()
       set({ state: { phase: 'idle' }, spawnNonce: 0, petActivity: { state: 'idle', updatedAt: Date.now() } })
     },
   }

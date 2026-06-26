@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import time
 from collections import defaultdict, deque
 import shlex
@@ -86,7 +87,7 @@ import httpx
 import websockets
 from urllib.parse import urlparse
 
-from fastapi import Body, FastAPI, Query, Request, WebSocket
+from fastapi import Body, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
@@ -531,6 +532,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     hermes_cmd_override_runtime = [
         config_explicit_override or env_hermes_cmd_override or config_custom_override
     ]
+    pet_sidecar_secret = secrets.token_urlsafe(32)
+    pet_sidecar_channel_re = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
     def _get_hermes_cmd() -> str:
         return str(hermes_cmd_runtime[0] or "").strip()
@@ -583,6 +586,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             follow_redirects=False,
         )
         app.state.hermes_dashboard_manager = dashboard_manager
+        app.state.pet_event_channels = {}
+        app.state.pet_event_lock = asyncio.Lock()
         try:
             yield
         finally:
@@ -679,6 +684,70 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         if not token:
             return False
         return verify_session_token(token=token, secret=cookie_secret, revoked_jtis=_revoked_jtis)
+
+    def _pet_event_state() -> tuple[dict[str, set[asyncio.Queue[str]]], asyncio.Lock]:
+        channels = getattr(app.state, "pet_event_channels", None)
+        lock = getattr(app.state, "pet_event_lock", None)
+        if channels is None:
+            channels = {}
+            app.state.pet_event_channels = channels
+        if lock is None:
+            lock = asyncio.Lock()
+            app.state.pet_event_lock = lock
+        return channels, lock
+
+    async def _broadcast_pet_event(channel: str, payload: str) -> None:
+        channels, lock = _pet_event_state()
+        async with lock:
+            queues = list(channels.get(channel, ()))
+        for queue in queues:
+            try:
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    _ = queue.get_nowait()
+                except Exception:
+                    pass
+                try:
+                    queue.put_nowait(payload)
+                except Exception:
+                    pass
+
+    def _pet_sidecar_host() -> str:
+        host = str(getattr(config, "host", "") or "").strip()
+        if not host or host in {"0.0.0.0", "::", "[::]"}:
+            return "127.0.0.1"
+        return host.strip("[]")
+
+    def _build_pet_sidecar_url(channel: str) -> str | None:
+        if not pet_sidecar_channel_re.match(channel):
+            return None
+        port = int(getattr(config, "port", 0) or 0)
+        if port <= 0:
+            return None
+        host = _pet_sidecar_host()
+        netloc = f"[{host}]:{port}" if ":" in host and not host.startswith("[") else f"{host}:{port}"
+        from urllib.parse import urlencode
+        return f"ws://{netloc}/ws/pet-events-pub?{urlencode({'token': pet_sidecar_secret, 'channel': channel})}"
+
+    def _command_supports_pet_sidecar(argv: list[str]) -> bool:
+        return any(part == "--tui" for part in argv)
+
+    def _new_pet_event_channel() -> str:
+        return secrets.token_urlsafe(18)
+
+    def _normalise_pet_event_frame(raw: str) -> str | None:
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            return None
+        params = obj.get("params") if isinstance(obj, dict) and obj.get("method") == "event" else obj
+        if not isinstance(params, dict):
+            return None
+        event_type = params.get("type")
+        if not event_type:
+            return None
+        return json.dumps({"type": "pet_event", "payload": params}, ensure_ascii=False)
 
     def _default_origin_port(scheme: str) -> int | None:
         if scheme == "https":
@@ -2763,6 +2832,41 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         return ctx
 
+    @app.websocket("/ws/pet-events-pub")
+    async def ws_pet_events_pub(
+        websocket: WebSocket,
+        token: str = "",
+        channel: str = "",
+    ):
+        client_ip = extract_client_ip(
+            client_host=websocket.client.host if websocket.client else "",
+            headers=websocket.headers,
+            trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
+        )
+        if not _check_allowed(client_ip):
+            await websocket.close(code=1008)
+            return
+        if not hmac.compare_digest(str(token).encode(), pet_sidecar_secret.encode()):
+            await websocket.close(code=1008)
+            return
+        if not pet_sidecar_channel_re.match(str(channel or "")):
+            await websocket.close(code=1008)
+            return
+
+        await websocket.accept()
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                payload = _normalise_pet_event_frame(raw)
+                if payload is not None:
+                    await _broadcast_pet_event(str(channel), payload)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.debug("pet event publisher ended", exc_info=True)
+            pass
+
     @app.websocket("/ws/pty")
     async def ws_pty(
         websocket: WebSocket,
@@ -2872,6 +2976,11 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             pty_managed_dir = _prepare_pty_managed_scope(config, env)
             if pty_managed_dir is not None:
                 env["HERMES_MANAGED_DIR"] = str(pty_managed_dir)
+
+        pet_event_channel = _new_pet_event_channel()
+        pet_sidecar_url = _build_pet_sidecar_url(pet_event_channel) if _command_supports_pet_sidecar(argv) else None
+        if pet_sidecar_url:
+            env["HERMES_TUI_SIDECAR_URL"] = pet_sidecar_url
 
         # -------------------------------------------------------------
         # Optional session-scoped artifact cleanup
@@ -3237,9 +3346,52 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 logger.warning("pump_artifacts_to_ws failed", exc_info=True)
                 pass
 
+        async def pump_pet_events_to_ws() -> None:
+            if not pet_sidecar_url:
+                return
+
+            queue: asyncio.Queue[str] = asyncio.Queue(maxsize=512)
+            channels, lock = _pet_event_state()
+            async with lock:
+                channels.setdefault(pet_event_channel, set()).add(queue)
+
+            try:
+                await writer.send_text(
+                    json.dumps(
+                        {
+                            "type": "pet_sync",
+                            "payload": {"mode": "structured", "source": "tui-sidecar"},
+                        },
+                        ensure_ascii=False,
+                    ),
+                    priority=5,
+                    droppable=False,
+                )
+                while True:
+                    payload = await queue.get()
+                    if not await writer.send_text(payload, priority=5, droppable=True):
+                        break
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("pump_pet_events_to_ws ended", exc_info=True)
+                pass
+            finally:
+                try:
+                    channels, lock = _pet_event_state()
+                    async with lock:
+                        queues = channels.get(pet_event_channel)
+                        if queues is not None:
+                            queues.discard(queue)
+                            if not queues:
+                                channels.pop(pet_event_channel, None)
+                except Exception:
+                    pass
+
         t1 = asyncio.create_task(pump_pty_to_ws())
         t2 = asyncio.create_task(pump_ws_to_pty())
         t3 = asyncio.create_task(pump_artifacts_to_ws())
+        t4 = asyncio.create_task(pump_pet_events_to_ws())
         writer_task = asyncio.create_task(writer.run())
 
         try:
@@ -3247,16 +3399,18 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         finally:
             try:
                 t3.cancel()
+                t4.cancel()
                 for task in (t1, t2):
                     if not task.done():
                         task.cancel()
 
-                try:
-                    await t3
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    pass
+                for task in (t3, t4):
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
 
                 try:
                     await writer.stop()

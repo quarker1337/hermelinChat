@@ -347,6 +347,8 @@ function TerminalPane() {
   const onDetectedSessionId = useTerminalStore((s) => s.onDetectedSessionId)
   const noteUserInput = useTerminalStore((s) => s.noteUserInput)
   const notePtyOutput = useTerminalStore((s) => s.notePtyOutput)
+  const notePetSyncMode = useTerminalStore((s) => s.notePetSyncMode)
+  const noteHermesPetEvent = useTerminalStore((s) => s.noteHermesPetEvent)
   const terminalState = useTerminalStore((s) => s.state)
 
   const prefs = useUiPrefsStore((s) => s.prefs)
@@ -380,6 +382,16 @@ function TerminalPane() {
   useEffect(() => {
     notePtyOutputRef.current = notePtyOutput
   }, [notePtyOutput])
+
+  const notePetSyncModeRef = useRef(notePetSyncMode)
+  useEffect(() => {
+    notePetSyncModeRef.current = notePetSyncMode
+  }, [notePetSyncMode])
+
+  const noteHermesPetEventRef = useRef(noteHermesPetEvent)
+  useEffect(() => {
+    noteHermesPetEventRef.current = noteHermesPetEvent
+  }, [noteHermesPetEvent])
 
   // ── Init: open xterm once ────────────────────────────────────────────────
   useEffect(() => {
@@ -859,13 +871,19 @@ function TerminalPane() {
         if (typeof ev.data === 'string') {
           try {
             const payload = JSON.parse(ev.data) as unknown
-            if (
-              payload &&
-              typeof payload === 'object' &&
-              (payload as Record<string, unknown>).type &&
-              handleControlMessage(payload)
-            ) {
-              return
+            if (payload && typeof payload === 'object') {
+              const message = payload as Record<string, unknown>
+              if (message.type === 'pet_sync') {
+                notePetSyncModeRef.current?.(message.payload)
+                return
+              }
+              if (message.type === 'pet_event') {
+                noteHermesPetEventRef.current?.(message.payload)
+                return
+              }
+              if (message.type && handleControlMessage(payload)) {
+                return
+              }
             }
           } catch {
             // not a control message

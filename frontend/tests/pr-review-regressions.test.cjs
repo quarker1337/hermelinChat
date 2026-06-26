@@ -218,6 +218,58 @@ test('terminal pet ignores focus clicks, blank input, and duplicate session redr
   useTerminalStore.getState().reset()
 })
 
+test('terminal pet follows structured Hermes sidecar events instead of PTY heuristics', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'tui-sidecar' })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+
+  useTerminalStore.getState().noteUserInput('run a tool\r')
+  useTerminalStore.getState().notePtyOutput('[tool] terminal repaint should not drive pet')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.available', payload: { text: 'thinking' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'tool.start', payload: { tool_id: 'tool-1', name: 'terminal' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'tool.complete', payload: { tool_id: 'tool-1', name: 'terminal' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.complete', payload: {} })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'wave')
+
+  useTerminalStore.getState().reset()
+})
+
+test('terminal pet maps structured Hermes prompts and errors to waiting and failed states', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured' })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'approval.request', payload: { command: 'rm -rf /tmp/nope' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'waiting')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'error', payload: { message: 'boom' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'failed')
+
+  useTerminalStore.getState().reset()
+})
+
 test('pet canvas avoids blank transition frames from sparse animation rows', () => {
   const source = fs.readFileSync(path.join(SOURCE_ROOT, 'components', 'pet', 'FloatingPetOverlay.tsx'), 'utf8')
 
