@@ -254,6 +254,54 @@ test('terminal pet follows structured Hermes sidecar events instead of PTY heuri
   useTerminalStore.getState().reset()
 })
 
+test('terminal pet does not let missing tool ids pin structured sync on run', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'tui-sidecar' })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'thinking before tool' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'tool.start', payload: { tool_id: 'tool-1', name: 'terminal' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'tool.complete', payload: { name: 'terminal' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'reading tool output' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.complete', payload: {} })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'wave')
+
+  useTerminalStore.getState().reset()
+})
+
+test('terminal pet exposes structured sync debug state on window', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(makeWindow())
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'tui-sidecar' })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'thinking' } })
+
+  assert.equal(global.window.__HERMELIN_PET_SYNC__.state, 'review')
+  assert.equal(global.window.__HERMELIN_PET_SYNC__.lastEventType, 'reasoning.delta')
+  assert.deepEqual(global.window.__HERMELIN_PET_SYNC__.tools, [])
+
+  useTerminalStore.getState().reset()
+  setWindow(undefined)
+})
+
 test('terminal pet maps structured Hermes prompts and errors to waiting and failed states', () => {
   installAssetStubs()
   clearCompiledModules()

@@ -15,6 +15,39 @@ interface PetActivity {
   updatedAt: number
 }
 
+interface PetActivitySignals {
+  awaitingInput?: boolean
+  busy?: boolean
+  celebrate?: boolean
+  error?: boolean
+  justCompleted?: boolean
+  reasoning?: boolean
+  toolRunning?: boolean
+}
+
+interface PetSyncDebug {
+  active: boolean
+  awaitingInput: boolean
+  busy: boolean
+  lastEventAt: number
+  lastEventType: string
+  reasoning: boolean
+  state: PetActivityState
+  tools: string[]
+  trace: Array<{
+    at: number
+    event: string
+    state: PetActivityState
+    tools: string[]
+  }>
+}
+
+declare global {
+  interface Window {
+    __HERMELIN_PET_SYNC__?: PetSyncDebug
+  }
+}
+
 interface TerminalStore {
   state: TerminalState
   spawnNonce: number
@@ -40,7 +73,14 @@ let hermesBusy = false
 let hermesReasoningActive = false
 let hermesAwaitingInput = false
 let hermesTodosDone = false
+let lastStructuredEventAt = 0
+let lastStructuredEventType = ''
+let structuredSettleTimer: ReturnType<typeof setTimeout> | null = null
+const STRUCTURED_STALE_MS = 2500
+const STRUCTURED_SETTLE_MS = 10000
+const PET_TRACE_LIMIT = 80
 const hermesActiveToolIds = new Set<string>()
+const petSyncTrace: PetSyncDebug['trace'] = []
 
 function resetStructuredPetState() {
   hermesBusy = false
@@ -50,12 +90,50 @@ function resetStructuredPetState() {
   hermesActiveToolIds.clear()
 }
 
-function deriveStructuredPetState(): PetActivityState {
-  if (hermesAwaitingInput) return 'waiting'
-  if (hermesActiveToolIds.size > 0) return 'run'
-  if (hermesReasoningActive) return 'review'
-  if (hermesBusy) return 'run'
+function derivePetState(signals: PetActivitySignals): PetActivityState {
+  if (signals.error) return 'failed'
+  if (signals.celebrate) return 'jump'
+  if (signals.justCompleted) return 'wave'
+  if (signals.awaitingInput) return 'waiting'
+  if (signals.toolRunning) return 'run'
+  if (signals.reasoning) return 'review'
+  if (signals.busy) return 'run'
   return 'idle'
+}
+
+function deriveStructuredPetState(): PetActivityState {
+  // Mirror Hermes desktop/TUI: steady tool/reasoning flags only count while the
+  // turn is actually busy, so stale flags cannot pin the pet on run/review.
+  return derivePetState({
+    awaitingInput: hermesAwaitingInput,
+    busy: hermesBusy,
+    reasoning: hermesBusy && hermesReasoningActive,
+    toolRunning: hermesBusy && hermesActiveToolIds.size > 0,
+  })
+}
+
+function recordPetSyncDebug(event: string, state: PetActivityState) {
+  lastStructuredEventType = event
+  petSyncTrace.push({
+    at: Date.now(),
+    event,
+    state,
+    tools: [...hermesActiveToolIds],
+  })
+  while (petSyncTrace.length > PET_TRACE_LIMIT) petSyncTrace.shift()
+
+  if (typeof window === 'undefined') return
+  window.__HERMELIN_PET_SYNC__ = {
+    active: structuredPetSyncActive,
+    awaitingInput: hermesAwaitingInput,
+    busy: hermesBusy,
+    lastEventAt: lastStructuredEventAt,
+    lastEventType: lastStructuredEventType,
+    reasoning: hermesReasoningActive,
+    state,
+    tools: [...hermesActiveToolIds],
+    trace: [...petSyncTrace],
+  }
 }
 
 function normaliseHermesEvent(event: unknown): { type: string; payload: Record<string, unknown> } | null {
@@ -73,7 +151,11 @@ function normaliseHermesEvent(event: unknown): { type: string; payload: Record<s
 }
 
 function toolIdFromPayload(payload: Record<string, unknown>): string {
-  return String(payload.tool_id ?? payload.id ?? payload.name ?? 'tool')
+  return String(payload.tool_id ?? payload.id ?? '').trim()
+}
+
+function toolKeyFromPayload(payload: Record<string, unknown>): string {
+  return toolIdFromPayload(payload) || String(payload.name ?? 'tool').trim() || 'tool'
 }
 
 function todosDone(value: unknown): boolean {
@@ -99,9 +181,17 @@ function clearCompletionTimer() {
   }
 }
 
+function clearStructuredSettleTimer() {
+  if (structuredSettleTimer !== null) {
+    clearTimeout(structuredSettleTimer)
+    structuredSettleTimer = null
+  }
+}
+
 function clearPetTimers() {
   clearPetActivityTimer()
   clearCompletionTimer()
+  clearStructuredSettleTimer()
 }
 
 function skipEscapeSequence(text: string, start: number): number {
@@ -194,9 +284,29 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
     }, 950)
   }
 
-  const applyStructuredPetState = () => {
+  const applyStructuredPetState = (event = lastStructuredEventType || 'state') => {
     clearPetActivityTimer()
-    set({ petActivity: { state: deriveStructuredPetState(), updatedAt: Date.now() } })
+    const state = deriveStructuredPetState()
+    set({ petActivity: { state, updatedAt: Date.now() } })
+    recordPetSyncDebug(event, state)
+  }
+
+  const scheduleStructuredCompletionFallback = () => {
+    clearStructuredSettleTimer()
+    const scheduledAt = Date.now()
+    structuredSettleTimer = setTimeout(() => {
+      structuredSettleTimer = null
+      if (!structuredPetSyncActive) return
+      if (!hermesBusy || hermesAwaitingInput || hermesActiveToolIds.size > 0) return
+      if (lastStructuredEventAt > scheduledAt) return
+
+      const flashState: PetActivityState = hermesTodosDone ? 'jump' : 'wave'
+      turnInFlight = false
+      pendingUserInput = ''
+      resetStructuredPetState()
+      get().notePetActivity(flashState, 1600, 'idle')
+      recordPetSyncDebug('watchdog.complete', flashState)
+    }, STRUCTURED_SETTLE_MS)
   }
 
   return {
@@ -207,10 +317,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
     notePetActivity: (state: PetActivityState, holdMs = 0, afterState: PetActivityState = 'idle') => {
       clearPetActivityTimer()
       set({ petActivity: { state, updatedAt: Date.now() } })
+      recordPetSyncDebug(`flash.${state}`, state)
       if (holdMs > 0 && state !== afterState) {
         petActivityTimer = setTimeout(() => {
           petActivityTimer = null
           set({ petActivity: { state: afterState, updatedAt: Date.now() } })
+          recordPetSyncDebug(`flash.after.${afterState}`, afterState)
         }, holdMs)
       }
     },
@@ -222,11 +334,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
       structuredPetSyncActive = mode === 'structured'
       resetStructuredPetState()
       clearPetTimers()
+      lastStructuredEventAt = Date.now()
+      lastStructuredEventType = 'pet_sync'
       if (structuredPetSyncActive) {
         turnInFlight = false
         pendingUserInput = ''
         lastOutputBeat = 0
         set({ petActivity: { state: 'idle', updatedAt: Date.now() } })
+        recordPetSyncDebug('pet_sync', 'idle')
       }
     },
 
@@ -235,16 +350,20 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
       if (!ev) return
 
       structuredPetSyncActive = true
+      lastStructuredEventAt = Date.now()
+      lastStructuredEventType = ev.type
       clearCompletionTimer()
+      clearStructuredSettleTimer()
 
       switch (ev.type) {
         case 'message.start':
+          turnInFlight = true
           hermesBusy = true
           hermesReasoningActive = false
           hermesAwaitingInput = false
           hermesTodosDone = false
           hermesActiveToolIds.clear()
-          applyStructuredPetState()
+          applyStructuredPetState(ev.type)
           return
 
         case 'thinking.delta':
@@ -255,7 +374,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
           }
           hermesBusy = true
           hermesReasoningActive = true
-          applyStructuredPetState()
+          applyStructuredPetState(ev.type)
           return
 
         case 'tool.start':
@@ -263,23 +382,36 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
           hermesReasoningActive = false
           hermesAwaitingInput = false
           if (todosDone(ev.payload.todos)) hermesTodosDone = true
-          hermesActiveToolIds.add(toolIdFromPayload(ev.payload))
-          applyStructuredPetState()
+          hermesActiveToolIds.add(toolKeyFromPayload(ev.payload))
+          applyStructuredPetState(ev.type)
           return
 
         case 'tool.complete':
           if (todosDone(ev.payload.todos)) hermesTodosDone = true
-          hermesActiveToolIds.delete(toolIdFromPayload(ev.payload))
+          {
+            const id = toolIdFromPayload(ev.payload)
+            if (id) {
+              hermesActiveToolIds.delete(id)
+            } else {
+              // Hermes should send `tool_id`, but if the sidecar/gateway ever
+              // drops it, do not leave an un-clearable active tool that pins
+              // the pet on `run` forever. Completion without identity is still
+              // a real lifecycle edge for the current tool batch.
+              const name = String(ev.payload.name ?? '').trim()
+              if (!name || !hermesActiveToolIds.delete(name)) hermesActiveToolIds.clear()
+            }
+          }
           hermesReasoningActive = false
           hermesAwaitingInput = false
           hermesBusy = true
-          applyStructuredPetState()
+          applyStructuredPetState(ev.type)
           return
 
         case 'message.delta':
           hermesBusy = true
           hermesReasoningActive = false
-          applyStructuredPetState()
+          applyStructuredPetState(ev.type)
+          scheduleStructuredCompletionFallback()
           return
 
         case 'clarify.request':
@@ -288,13 +420,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
         case 'secret.request':
           hermesBusy = true
           hermesAwaitingInput = true
-          applyStructuredPetState()
+          applyStructuredPetState(ev.type)
           return
 
         case 'message.complete': {
           const flashState: PetActivityState = hermesTodosDone || todosDone(ev.payload.todos) ? 'jump' : 'wave'
           turnInFlight = false
           pendingUserInput = ''
+          clearStructuredSettleTimer()
           resetStructuredPetState()
           get().notePetActivity(flashState, 1600, 'idle')
           return
@@ -303,6 +436,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
         case 'error':
           turnInFlight = false
           pendingUserInput = ''
+          clearStructuredSettleTimer()
           resetStructuredPetState()
           get().notePetActivity('failed', 1600, 'idle')
           return
@@ -324,7 +458,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
     },
 
     notePtyOutput: (text: string) => {
-      if (structuredPetSyncActive) return
+      if (structuredPetSyncActive && (!turnInFlight || Date.now() - lastStructuredEventAt < STRUCTURED_STALE_MS)) return
       if (!turnInFlight) return
 
       const now = Date.now()

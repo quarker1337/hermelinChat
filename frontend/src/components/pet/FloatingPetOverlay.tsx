@@ -326,6 +326,7 @@ export function FloatingPetOverlay({
   return (
     <div
       aria-hidden
+      data-hermelin-pet-state={state}
       title={`${info.displayName || info.slug || 'Hermes pet'} · ${state}`}
       style={placementStyle(position, shellW, shellH)}
     >
