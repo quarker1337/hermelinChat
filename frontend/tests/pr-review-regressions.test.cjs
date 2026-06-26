@@ -1253,6 +1253,27 @@ test('samaritan theme uses warm palette and sprite artwork', () => {
   assert.equal(THEMES.samaritan.icons.alignmentBob, true)
 })
 
+test('pet overlay can be disabled from browser-local UI prefs', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { normalizeUiPrefs, DEFAULT_UI_PREFS } = loadCompiled('utils/ui-prefs.js')
+
+  assert.equal(DEFAULT_UI_PREFS.petOverlay.enabled, true)
+  assert.equal(normalizeUiPrefs({ petOverlay: { position: 'top-left', size: 120, slug: 'boba' } }).petOverlay.enabled, true)
+  assert.equal(normalizeUiPrefs({ petOverlay: { enabled: false, position: 'top-left', size: 120, slug: 'boba' } }).petOverlay.enabled, false)
+  assert.equal(normalizeUiPrefs({ petOverlay: { enabled: 0 } }).petOverlay.enabled, false)
+
+  const appShellSource = fs.readFileSync(path.join(SOURCE_ROOT, 'components', 'AppShell.tsx'), 'utf8')
+  const settingsSource = fs.readFileSync(path.join(SOURCE_ROOT, 'components', 'settings', 'PetOverlaySettings.tsx'), 'utf8')
+
+  assert.match(appShellSource, /visible=\{authenticated && prefs\.petOverlay\.enabled\}/)
+  assert.match(settingsSource, /Show browser pet overlay/)
+  assert.match(settingsSource, /type="checkbox"/)
+  assert.match(settingsSource, /updatePetOverlay\(\{ enabled: e\.target\.checked \}\)/)
+})
+
 test('Hermes dashboard settings panel exposes same-origin dashboard as an external link', () => {
   const dashboardPath = path.join(SOURCE_ROOT, 'components', 'settings', 'HermesDashboardSettings.tsx')
   const settingsPanelPath = path.join(SOURCE_ROOT, 'components', 'settings', 'SettingsPanel.tsx')

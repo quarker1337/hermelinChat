@@ -77,6 +77,8 @@ export type PetOverlayPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 
 export type PetActivityState = 'idle' | 'wave' | 'run' | 'failed' | 'review' | 'jump' | 'waiting'
 
 export interface PetOverlayPrefs {
+  // Browser-local master toggle for the HermelinChat overlay. Does not mutate Hermes config.
+  enabled: boolean
   position: PetOverlayPosition
   // Local browser-only multiplier, expressed as percent. 100 = Hermes pet scale.
   size: number

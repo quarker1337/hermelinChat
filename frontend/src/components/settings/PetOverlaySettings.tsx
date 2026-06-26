@@ -64,6 +64,13 @@ export const PetOverlaySettings = ({ ui, onUpdate }: PetOverlaySettingsProps) =>
   }, [info])
 
   const configuredLabel = info?.configuredSlug || info?.slug || 'current pet'
+  const petOverlay = ui.petOverlay || DEFAULT_UI_PREFS.petOverlay
+  const updatePetOverlay = (patch: Partial<typeof DEFAULT_UI_PREFS.petOverlay>) => {
+    onUpdate((prev) => ({
+      ...prev,
+      petOverlay: { ...(prev.petOverlay || DEFAULT_UI_PREFS.petOverlay), ...patch },
+    }))
+  }
   const selectStyle: React.CSSProperties = {
     background: SLATE.elevated,
     border: `1px solid ${SLATE.border}`,
@@ -83,17 +90,41 @@ export const PetOverlaySettings = ({ ui, onUpdate }: PetOverlaySettingsProps) =>
         <span style={{ color: AMBER[500] }}>Hermes active</span> to follow your global Hermes pet.
       </div>
 
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '8px 10px',
+          border: `1px solid ${petOverlay.enabled ? `${AMBER[700]}66` : SLATE.border}`,
+          background: petOverlay.enabled ? `${AMBER[900]}22` : SLATE.elevated,
+          color: SLATE.textBright,
+          cursor: 'pointer',
+          fontSize: 11,
+          borderRadius: 8,
+          userSelect: 'none',
+          marginBottom: 12,
+        }}
+        title="Show or hide the HermelinChat browser pet overlay for this browser"
+      >
+        <input
+          type="checkbox"
+          checked={petOverlay.enabled}
+          onChange={(e) => updatePetOverlay({ enabled: e.target.checked })}
+        />
+        <span style={{ fontWeight: 700 }}>Show browser pet overlay</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: petOverlay.enabled ? AMBER[500] : SLATE.muted }}>
+          {petOverlay.enabled ? 'on' : 'off'}
+        </span>
+      </label>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Pet</div>
         <div style={{ flex: 1 }} />
         <select
-          value={ui.petOverlay.slug || ''}
-          onChange={(e) => {
-            onUpdate((prev) => ({
-              ...prev,
-              petOverlay: { ...(prev.petOverlay || DEFAULT_UI_PREFS.petOverlay), slug: e.target.value },
-            }))
-          }}
+          value={petOverlay.slug || ''}
+          onChange={(e) => updatePetOverlay({ slug: e.target.value })}
           style={selectStyle}
           title="HermelinChat overlay pet"
         >
@@ -112,13 +143,10 @@ export const PetOverlaySettings = ({ ui, onUpdate }: PetOverlaySettingsProps) =>
         <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Position</div>
         <div style={{ flex: 1 }} />
         <select
-          value={ui.petOverlay.position}
+          value={petOverlay.position}
           onChange={(e) => {
             const position = e.target.value as PetOverlayPosition
-            onUpdate((prev) => ({
-              ...prev,
-              petOverlay: { ...(prev.petOverlay || DEFAULT_UI_PREFS.petOverlay), position },
-            }))
+            updatePetOverlay({ position })
           }}
           style={selectStyle}
           title="Pet overlay position"
@@ -136,20 +164,15 @@ export const PetOverlaySettings = ({ ui, onUpdate }: PetOverlaySettingsProps) =>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
         <div style={{ fontSize: 11, color: SLATE.textBright, fontWeight: 600 }}>Size</div>
         <div style={{ flex: 1 }} />
-        <div style={{ fontSize: 11, color: AMBER[500] }}>{ui.petOverlay.size}%</div>
+        <div style={{ fontSize: 11, color: AMBER[500] }}>{petOverlay.size}%</div>
       </div>
       <input
         type="range"
         min={50}
         max={180}
         step={5}
-        value={ui.petOverlay.size}
-        onChange={(e) => {
-          onUpdate((prev) => ({
-            ...prev,
-            petOverlay: { ...(prev.petOverlay || DEFAULT_UI_PREFS.petOverlay), size: Number(e.target.value) },
-          }))
-        }}
+        value={petOverlay.size}
+        onChange={(e) => updatePetOverlay({ size: Number(e.target.value) })}
         style={{ width: '100%' }}
       />
 
