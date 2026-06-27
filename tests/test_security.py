@@ -5,7 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hermelin.auth import create_session_token, extract_session_jti, verify_session_token
+from fastapi.testclient import TestClient
+
+from hermelin.auth import create_session_token, extract_session_exp, extract_session_jti, hash_login_password, verify_session_token
 from hermelin.config import HermelinConfig
 from hermelin.security import ip_allowed
 from hermelin.server import _github_release_tag_for_version, _is_update_available, create_app
@@ -85,12 +87,109 @@ class SessionTokenTests(unittest.TestCase):
         result = verify_session_token(token=token, secret=secret, revoked_jtis=revoked)
         self.assertFalse(result)
 
+    def test_session_token_exp_extracts_signed_expiration(self):
+        secret = b"test-secret-key-for-exp"
+        before = int(time.time())
+        token = create_session_token(secret=secret, ttl_seconds=300)
+
+        exp = extract_session_exp(token=token, secret=secret)
+
+        self.assertIsNotNone(exp)
+        exp_value = int(exp or 0)
+        self.assertGreaterEqual(exp_value, before + 300)
+        self.assertLessEqual(exp_value, int(time.time()) + 300)
+        self.assertIsNone(extract_session_exp(token=token, secret=b"wrong-secret"))
+
     def test_wrong_secret_rejected(self):
         secret_a = b"secret-alpha"
         secret_b = b"secret-bravo"
         token = create_session_token(secret=secret_a, ttl_seconds=300)
         result = verify_session_token(token=token, secret=secret_b)
         self.assertFalse(result)
+
+class AuthSessionCookieTests(unittest.TestCase):
+    def test_auth_me_renews_valid_session_cookie(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            config = HermelinConfig(
+                hermes_home=tmp / "hermes-home",
+                meta_db_path=tmp / "hermelin_meta.db",
+                spawn_cwd=tmp / "spawn-cwd",
+                allowed_ips="*",
+                auth_password_hash=hash_login_password("secret-password"),
+                cookie_secret="stable-cookie-secret",
+                session_ttl_seconds=300,
+            )
+            app = create_app(config)
+            client = TestClient(app)
+
+            login = client.post("/api/auth/login", json={"password": "secret-password"})
+            self.assertEqual(login.status_code, 200)
+            initial_cookie = client.cookies.get(config.cookie_name)
+            self.assertTrue(initial_cookie)
+
+            time.sleep(1)
+            me = client.get("/api/auth/me")
+
+            self.assertEqual(me.status_code, 200)
+            self.assertEqual(me.json()["authenticated"], True)
+            self.assertEqual(me.json()["session_ttl_seconds"], 300)
+            set_cookie = me.headers.get("set-cookie", "")
+            self.assertIn(f"{config.cookie_name}=", set_cookie)
+            self.assertIn("Max-Age=300", set_cookie)
+            renewed_cookie = client.cookies.get(config.cookie_name)
+            self.assertNotEqual(renewed_cookie, initial_cookie)
+            self.assertNotEqual(
+                extract_session_jti(token=renewed_cookie, secret=config.cookie_secret.encode("utf-8")),
+                extract_session_jti(token=initial_cookie, secret=config.cookie_secret.encode("utf-8")),
+            )
+
+            concurrent = TestClient(app).get("/api/health", cookies={config.cookie_name: initial_cookie})
+            self.assertEqual(concurrent.status_code, 200)
+
+            duplicate_rotation = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: initial_cookie})
+            self.assertEqual(duplicate_rotation.status_code, 200)
+            self.assertEqual(duplicate_rotation.json()["authenticated"], True)
+            self.assertNotIn("set-cookie", duplicate_rotation.headers)
+
+            with patch("hermelin.server.time.monotonic", return_value=time.monotonic() + 11):
+                expired_grace = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: initial_cookie})
+            self.assertEqual(expired_grace.status_code, 200)
+            self.assertEqual(expired_grace.json()["authenticated"], False)
+            self.assertNotIn("set-cookie", expired_grace.headers)
+
+            logout = client.post("/api/auth/logout")
+            self.assertEqual(logout.status_code, 200)
+            replay = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: initial_cookie})
+            self.assertEqual(replay.status_code, 200)
+            self.assertEqual(replay.json()["authenticated"], False)
+            self.assertNotIn("set-cookie", replay.headers)
+
+            renewed_replay = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: renewed_cookie})
+            self.assertEqual(renewed_replay.status_code, 200)
+            self.assertEqual(renewed_replay.json()["authenticated"], False)
+            self.assertNotIn("set-cookie", renewed_replay.headers)
+
+    def test_auth_me_does_not_renew_expired_cookie(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            config = HermelinConfig(
+                hermes_home=tmp / "hermes-home",
+                meta_db_path=tmp / "hermelin_meta.db",
+                spawn_cwd=tmp / "spawn-cwd",
+                allowed_ips="*",
+                auth_password_hash=hash_login_password("secret-password"),
+                cookie_secret="stable-cookie-secret",
+                session_ttl_seconds=300,
+            )
+            client = TestClient(create_app(config))
+            expired = create_session_token(secret=config.cookie_secret.encode("utf-8"), ttl_seconds=0)
+
+            me = client.get("/api/auth/me", cookies={config.cookie_name: expired})
+
+            self.assertEqual(me.status_code, 200)
+            self.assertEqual(me.json()["authenticated"], False)
+            self.assertNotIn("set-cookie", me.headers)
 
 
 class IpAllowlistTests(unittest.TestCase):

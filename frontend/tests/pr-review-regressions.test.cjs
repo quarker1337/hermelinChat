@@ -1225,6 +1225,88 @@ test('AppShell waits for authentication before probing for updates', () => {
   assert.match(source, /\}, \[authEnabled, authLoading, authenticated\]\)/)
 })
 
+test('AppShell keeps auth alive and only clears session state on explicit logout', () => {
+  const sourcePath = path.join(SOURCE_ROOT, 'components', 'AppShell.tsx')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+
+  assert.match(source, /Keep long-lived open tabs authenticated/)
+  assert.match(source, /sessionTtlSeconds/)
+  assert.match(source, /Math\.floor\(ttlMs \* 0\.5\)/)
+  assert.match(source, /setInterval\(\(\) => \{[\s\S]*useAuthStore\.getState\(\)\.refresh\(\{ preserveEnabledOnError: true \}\)[\s\S]*keepaliveMs/)
+  assert.match(source, /logoutReason === 'explicit'/)
+  assert.match(source, /\}, \[authEnabled, authenticated, sessionTtlSeconds\]\)/)
+  assert.match(source, /\}, \[authenticated, logoutReason\]\)/)
+  assert.match(source, /didExplicitLogoutCleanupRef/)
+  assert.match(source, /logoutReason === 'explicit' && !didExplicitLogoutCleanupRef\.current/)
+  assert.match(source, /spawn\(useSessionStore\.getState\(\)\.activeSessionId \?\? null\)/)
+  assert.match(source, /logoutReason === 'expired'/)
+  assert.match(source, /useSearchStore\.getState\(\)\.reset\(\)/)
+  assert.match(source, /clear search UI that renders outside[\s\S]*the main lock overlay/)
+  assert.match(source, /preserving activeSessionId[\s\S]*useSearchStore\.getState\(\)\.reset\(\)[\s\S]*useTerminalStore\.getState\(\)\.reset\(\)/)
+
+  const sessionsSource = fs.readFileSync(path.join(SOURCE_ROOT, 'stores', 'sessions.ts'), 'utf8')
+  assert.match(sessionsSource, /Preserve visible session context/)
+  assert.doesNotMatch(sessionsSource, /activeSession: computeActiveSession\(\[\], s\.activeSessionId\)/)
+})
+
+test('auth store distinguishes expired auth from deliberate logout', async () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const originalFetch = global.fetch
+  const { useAuthStore } = loadCompiled('stores/auth.js')
+
+  try {
+    global.fetch = async (path, opts = {}) => {
+      if (String(path) === '/api/auth/me') {
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return { auth_enabled: true, authenticated: false, session_ttl_seconds: 120 }
+          },
+        }
+      }
+      if (String(path) === '/api/auth/logout' && String(opts.method || 'GET') === 'POST') {
+        return { ok: true, status: 200, async json() { return { ok: true } } }
+      }
+      throw new Error(`unexpected fetch ${String(path)}`)
+    }
+
+    await useAuthStore.getState().refresh()
+    assert.equal(useAuthStore.getState().authenticated, false)
+    assert.equal(useAuthStore.getState().logoutReason, 'expired')
+    assert.equal(useAuthStore.getState().sessionTtlSeconds, 120)
+
+    global.fetch = async () => { throw new Error('temporary auth check failure') }
+    useAuthStore.setState({ enabled: true, authenticated: true, logoutReason: null, sessionTtlSeconds: 120 })
+    await useAuthStore.getState().refresh({ preserveEnabledOnError: true })
+    assert.equal(useAuthStore.getState().enabled, true)
+    assert.equal(useAuthStore.getState().authenticated, false)
+    assert.equal(useAuthStore.getState().logoutReason, 'expired')
+    assert.equal(useAuthStore.getState().sessionTtlSeconds, 120)
+
+    useAuthStore.setState({ logoutReason: 'explicit', authenticated: false })
+    useAuthStore.getState().setUnauthenticated('expired')
+    assert.equal(useAuthStore.getState().authenticated, false)
+    assert.equal(useAuthStore.getState().logoutReason, 'explicit')
+
+    global.fetch = async (path, opts = {}) => {
+      if (String(path) === '/api/auth/logout' && String(opts.method || 'GET') === 'POST') {
+        return { ok: true, status: 200, async json() { return { ok: true } } }
+      }
+      throw new Error(`unexpected fetch ${String(path)}`)
+    }
+    useAuthStore.setState({ authenticated: true, logoutReason: null })
+    await useAuthStore.getState().logout()
+    assert.equal(useAuthStore.getState().authenticated, false)
+    assert.equal(useAuthStore.getState().logoutReason, 'explicit')
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
 test('theme background fields do not snapshot canvas into data URLs on pause', () => {
   const paths = [
     path.join(SOURCE_ROOT, 'components', 'backgrounds', 'NousCRTField.tsx'),

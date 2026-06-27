@@ -377,6 +377,10 @@ HERMELIN_PASSWORD_HASH=''
 # Cookie signing secret (recommended). Keep stable across restarts.
 HERMELIN_COOKIE_SECRET='$COOKIE_SECRET'
 
+# Browser login session lifetime in seconds. Open tabs renew this via /api/auth/me.
+# Default: 43200 (12 hours)
+# HERMELIN_SESSION_TTL_SECONDS=43200
+
 # Hermes integration
 HERMES_HOME=$DEFAULT_HERMES_HOME
 HERMELIN_HERMES_CMD="$DEFAULT_HERMES_EXE chat --toolsets \"hermes-cli, artifacts\""

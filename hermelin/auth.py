@@ -6,6 +6,7 @@ import hmac
 import json
 import secrets
 import time
+from collections.abc import Collection
 from http.cookies import SimpleCookie
 from typing import Optional
 
@@ -77,7 +78,7 @@ def create_session_token(*, secret: bytes, ttl_seconds: int) -> str:
     return f"{payload_b64}.{sig_b64}"
 
 
-def verify_session_token(*, token: str, secret: bytes, revoked_jtis: set | None = None) -> bool:
+def verify_session_token(*, token: str, secret: bytes, revoked_jtis: Collection[str] | None = None) -> bool:
     if not token:
         return False
 
@@ -121,6 +122,21 @@ def extract_session_jti(*, token: str, secret: bytes) -> str | None:
     except Exception:
         return None
     return payload.get("jti")
+
+
+def extract_session_exp(*, token: str, secret: bytes) -> int | None:
+    """Extract the embedded expiration from a signed session token."""
+    if not token or "." not in token:
+        return None
+    payload_b64, sig_b64 = token.split(".", 1)
+    expected_sig = hmac.new(secret, payload_b64.encode("utf-8"), hashlib.sha256).digest()
+    if not hmac.compare_digest(_b64url_encode(expected_sig), sig_b64):
+        return None
+    try:
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+        return int(payload.get("exp") or 0) or None
+    except Exception:
+        return None
 
 
 def extract_cookie_value(cookie_header: str, name: str) -> Optional[str]:

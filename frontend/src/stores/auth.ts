@@ -5,17 +5,19 @@ interface AuthStore extends AuthState {
   loginError: string
   login: (password: string) => Promise<void>
   logout: () => Promise<void>
-  refresh: () => Promise<void>
-  setUnauthenticated: () => void
+  refresh: (options?: { preserveEnabledOnError?: boolean }) => Promise<void>
+  setUnauthenticated: (reason?: 'explicit' | 'expired') => void
 }
 
-export const useAuthStore = create<AuthStore>((set) => ({
+export const useAuthStore = create<AuthStore>((set, get) => ({
   loading: true,
   enabled: false,
   authenticated: false,
+  logoutReason: null,
+  sessionTtlSeconds: null,
   loginError: '',
 
-  refresh: async () => {
+  refresh: async (options) => {
     try {
       const r = await fetch('/api/auth/me')
       const data = await r.json()
@@ -23,9 +25,17 @@ export const useAuthStore = create<AuthStore>((set) => ({
         loading: false,
         enabled: !!data.auth_enabled,
         authenticated: !!data.authenticated,
+        logoutReason: data.authenticated ? null : (get().logoutReason === 'explicit' ? 'explicit' : 'expired'),
+        sessionTtlSeconds: typeof data.session_ttl_seconds === 'number' ? data.session_ttl_seconds : null,
       })
     } catch {
-      set({ loading: false, enabled: false, authenticated: false })
+      set({
+        loading: false,
+        enabled: options?.preserveEnabledOnError ? get().enabled : false,
+        authenticated: false,
+        logoutReason: get().logoutReason === 'explicit' ? 'explicit' : 'expired',
+        sessionTtlSeconds: options?.preserveEnabledOnError ? get().sessionTtlSeconds : null,
+      })
     }
   },
 
@@ -42,22 +52,29 @@ export const useAuthStore = create<AuthStore>((set) => ({
         return
       }
       await useAuthStore.getState().refresh()
+      if (useAuthStore.getState().authenticated) {
+        set({ logoutReason: null })
+      }
     } catch {
       set({ loginError: 'login failed' })
     }
   },
 
   logout: async () => {
+    set({ authenticated: false, logoutReason: 'explicit' })
     try {
       await fetch('/api/auth/logout', { method: 'POST' })
     } finally {
-      set({ authenticated: false })
+      set({ authenticated: false, logoutReason: 'explicit' })
       // Cross-store resets are called by the component that triggers logout
       // (AppShell), not here — avoids circular imports during store init.
     }
   },
 
-  setUnauthenticated: () => {
-    set({ authenticated: false })
+  setUnauthenticated: (reason = 'expired') => {
+    set((state) => ({
+      authenticated: false,
+      logoutReason: state.logoutReason === 'explicit' ? 'explicit' : reason,
+    }))
   },
 }))

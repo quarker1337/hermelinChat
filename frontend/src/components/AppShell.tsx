@@ -160,6 +160,8 @@ export function AppShell() {
   const authLoading = useAuthStore((s) => s.loading)
   const authEnabled = useAuthStore((s) => s.enabled)
   const authenticated = useAuthStore((s) => s.authenticated)
+  const logoutReason = useAuthStore((s) => s.logoutReason)
+  const sessionTtlSeconds = useAuthStore((s) => s.sessionTtlSeconds)
 
   const activeSession = useSessionStore((s) => s.activeSession)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
@@ -202,6 +204,20 @@ export function AppShell() {
     useAuthStore.getState().refresh()
   }, [])
 
+  // Keep long-lived open tabs authenticated by hitting /api/auth/me.  The
+  // backend renews the signed cookie on successful auth checks.
+  useEffect(() => {
+    if (!authEnabled || !authenticated) return
+    const ttlMs = Math.max(0, Number(sessionTtlSeconds || 0) * 1000)
+    // Default to the previous 5-minute cadence when the server omits a TTL,
+    // but for shorter deployments renew halfway through the advertised TTL.
+    const keepaliveMs = ttlMs > 0 ? Math.max(500, Math.min(5 * 60 * 1000, Math.floor(ttlMs * 0.5))) : 5 * 60 * 1000
+    const t = setInterval(() => {
+      void useAuthStore.getState().refresh({ preserveEnabledOnError: true })
+    }, keepaliveMs)
+    return () => clearInterval(t)
+  }, [authEnabled, authenticated, sessionTtlSeconds])
+
   // Check for updates after initial load (wait for auth so protected deployments don't miss it)
   useEffect(() => {
     if (authLoading) return
@@ -236,9 +252,10 @@ export function AppShell() {
     useSessionStore.getState().startPolling()
     useSessionStore.getState().fetchRuntimeInfo()
     useArtifactStore.getState().startPolling()
-    // Auto-spawn terminal on first auth (new session)
+    // Auto-spawn terminal on first auth, or reconnect to the preserved active
+    // session after an expired-auth login overlay is dismissed.
     if (useTerminalStore.getState().state.phase === 'idle') {
-      useTerminalStore.getState().spawn(null)
+      useTerminalStore.getState().spawn(useSessionStore.getState().activeSessionId ?? null)
     }
     return () => {
       useSessionStore.getState().stopPolling()
@@ -246,19 +263,31 @@ export function AppShell() {
     }
   }, [authenticated])
 
-  // Cross-store cleanup on logout (auth store sets authenticated=false,
-  // this effect resets all dependent stores). Track previous state to
-  // avoid resetting on initial mount when authenticated starts as false.
+  // Cross-store cleanup on deliberate logout only.  If a cookie expires or a
+  // background request gets a 401, keep the active session in memory so the
+  // login overlay can be dismissed without forcing manual resume.
   const wasAuthenticatedRef = useRef(authenticated)
+  const didExplicitLogoutCleanupRef = useRef(false)
   useEffect(() => {
-    if (!authenticated && wasAuthenticatedRef.current) {
+    if (authenticated || logoutReason !== 'explicit') {
+      didExplicitLogoutCleanupRef.current = false
+    }
+    if (!authenticated && logoutReason === 'explicit' && !didExplicitLogoutCleanupRef.current) {
+      didExplicitLogoutCleanupRef.current = true
       useSessionStore.getState().reset()
       useArtifactStore.getState().reset()
       useSearchStore.getState().reset()
       useTerminalStore.getState().reset()
+    } else if (!authenticated && wasAuthenticatedRef.current && logoutReason === 'expired') {
+      // TerminalPane unmounts while locked and closes its websocket. Reset only
+      // the terminal connection state and clear search UI that renders outside
+      // the main lock overlay, while preserving activeSessionId so the
+      // next successful login reconnects instead of opening a fresh session.
+      useSearchStore.getState().reset()
+      useTerminalStore.getState().reset()
     }
     wasAuthenticatedRef.current = authenticated
-  }, [authenticated])
+  }, [authenticated, logoutReason])
 
   // ─── Callbacks ────────────────────────────────────────────────────
 
