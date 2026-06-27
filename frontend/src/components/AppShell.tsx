@@ -280,10 +280,10 @@ export function AppShell() {
       useTerminalStore.getState().reset()
     } else if (!authenticated && wasAuthenticatedRef.current && logoutReason === 'expired') {
       // TerminalPane unmounts while locked and closes its websocket. Reset only
-      // the terminal connection state and close search peeks that render
-      // outside the main lock overlay, while preserving activeSessionId so the
+      // the terminal connection state and clear search UI that renders outside
+      // the main lock overlay, while preserving activeSessionId so the
       // next successful login reconnects instead of opening a fresh session.
-      useSearchStore.getState().closePeek()
+      useSearchStore.getState().reset()
       useTerminalStore.getState().reset()
     }
     wasAuthenticatedRef.current = authenticated

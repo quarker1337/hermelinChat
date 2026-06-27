@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from hermelin.auth import create_session_token, extract_session_jti, hash_login_password, verify_session_token
+from hermelin.auth import create_session_token, extract_session_exp, extract_session_jti, hash_login_password, verify_session_token
 from hermelin.config import HermelinConfig
 from hermelin.security import ip_allowed
 from hermelin.server import _github_release_tag_for_version, _is_update_available, create_app
@@ -86,6 +86,19 @@ class SessionTokenTests(unittest.TestCase):
         revoked = {jti}
         result = verify_session_token(token=token, secret=secret, revoked_jtis=revoked)
         self.assertFalse(result)
+
+    def test_session_token_exp_extracts_signed_expiration(self):
+        secret = b"test-secret-key-for-exp"
+        before = int(time.time())
+        token = create_session_token(secret=secret, ttl_seconds=300)
+
+        exp = extract_session_exp(token=token, secret=secret)
+
+        self.assertIsNotNone(exp)
+        exp_value = int(exp or 0)
+        self.assertGreaterEqual(exp_value, before + 300)
+        self.assertLessEqual(exp_value, int(time.time()) + 300)
+        self.assertIsNone(extract_session_exp(token=token, secret=b"wrong-secret"))
 
     def test_wrong_secret_rejected(self):
         secret_a = b"secret-alpha"
