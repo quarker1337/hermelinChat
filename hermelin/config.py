@@ -104,6 +104,11 @@ class HermelinConfig:
     ssl_certfile: str = os.getenv("HERMELIN_SSL_CERTFILE", "").strip()
     ssl_keyfile: str = os.getenv("HERMELIN_SSL_KEYFILE", "").strip()
 
+    # Optional host for the child Hermes TUI sidecar callback. Usually inferred
+    # from host/port and TLS cert identities; set this only when deployment DNS
+    # needs an explicit callback hostname.
+    pet_sidecar_host: str = os.getenv("HERMELIN_PET_SIDECAR_HOST", "").strip()
+
     @property
     def db_path(self) -> Path:
         return self.hermes_home / "state.db"
