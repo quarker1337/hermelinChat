@@ -5,11 +5,11 @@ interface AuthStore extends AuthState {
   loginError: string
   login: (password: string) => Promise<void>
   logout: () => Promise<void>
-  refresh: () => Promise<void>
+  refresh: (options?: { preserveEnabledOnError?: boolean }) => Promise<void>
   setUnauthenticated: (reason?: 'explicit' | 'expired') => void
 }
 
-export const useAuthStore = create<AuthStore>((set) => ({
+export const useAuthStore = create<AuthStore>((set, get) => ({
   loading: true,
   enabled: false,
   authenticated: false,
@@ -17,7 +17,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   sessionTtlSeconds: null,
   loginError: '',
 
-  refresh: async () => {
+  refresh: async (options) => {
     try {
       const r = await fetch('/api/auth/me')
       const data = await r.json()
@@ -29,7 +29,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
         sessionTtlSeconds: typeof data.session_ttl_seconds === 'number' ? data.session_ttl_seconds : null,
       })
     } catch {
-      set({ loading: false, enabled: false, authenticated: false, logoutReason: 'expired', sessionTtlSeconds: null })
+      set({
+        loading: false,
+        enabled: options?.preserveEnabledOnError ? get().enabled : false,
+        authenticated: false,
+        logoutReason: 'expired',
+        sessionTtlSeconds: options?.preserveEnabledOnError ? get().sessionTtlSeconds : null,
+      })
     }
   },
 

@@ -213,7 +213,7 @@ export function AppShell() {
     // but for shorter deployments renew halfway through the advertised TTL.
     const keepaliveMs = ttlMs > 0 ? Math.max(500, Math.min(5 * 60 * 1000, Math.floor(ttlMs * 0.5))) : 5 * 60 * 1000
     const t = setInterval(() => {
-      void useAuthStore.getState().refresh()
+      void useAuthStore.getState().refresh({ preserveEnabledOnError: true })
     }, keepaliveMs)
     return () => clearInterval(t)
   }, [authEnabled, authenticated, sessionTtlSeconds])

@@ -89,7 +89,7 @@ export const LoginScreen = ({ faviconHref }: LoginScreenProps) => {
             unlock
           </div>
           <div
-            onClick={refresh}
+            onClick={() => { void refresh() }}
             style={{
               padding: '9px 12px',
               border: `1px solid ${SLATE.border}`,

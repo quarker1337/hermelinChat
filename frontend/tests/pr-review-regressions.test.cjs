@@ -1232,7 +1232,7 @@ test('AppShell keeps auth alive and only clears session state on explicit logout
   assert.match(source, /Keep long-lived open tabs authenticated/)
   assert.match(source, /sessionTtlSeconds/)
   assert.match(source, /Math\.floor\(ttlMs \* 0\.5\)/)
-  assert.match(source, /setInterval\(\(\) => \{[\s\S]*useAuthStore\.getState\(\)\.refresh\(\)[\s\S]*keepaliveMs/)
+  assert.match(source, /setInterval\(\(\) => \{[\s\S]*useAuthStore\.getState\(\)\.refresh\(\{ preserveEnabledOnError: true \}\)[\s\S]*keepaliveMs/)
   assert.match(source, /logoutReason === 'explicit'/)
   assert.match(source, /\}, \[authEnabled, authenticated, sessionTtlSeconds\]\)/)
   assert.match(source, /\}, \[authenticated, logoutReason\]\)/)
@@ -1275,6 +1275,20 @@ test('auth store distinguishes expired auth from deliberate logout', async () =>
     assert.equal(useAuthStore.getState().logoutReason, 'expired')
     assert.equal(useAuthStore.getState().sessionTtlSeconds, 120)
 
+    global.fetch = async () => { throw new Error('temporary auth check failure') }
+    useAuthStore.setState({ enabled: true, authenticated: true, logoutReason: null, sessionTtlSeconds: 120 })
+    await useAuthStore.getState().refresh({ preserveEnabledOnError: true })
+    assert.equal(useAuthStore.getState().enabled, true)
+    assert.equal(useAuthStore.getState().authenticated, false)
+    assert.equal(useAuthStore.getState().logoutReason, 'expired')
+    assert.equal(useAuthStore.getState().sessionTtlSeconds, 120)
+
+    global.fetch = async (path, opts = {}) => {
+      if (String(path) === '/api/auth/logout' && String(opts.method || 'GET') === 'POST') {
+        return { ok: true, status: 200, async json() { return { ok: true } } }
+      }
+      throw new Error(`unexpected fetch ${String(path)}`)
+    }
     useAuthStore.setState({ authenticated: true, logoutReason: null })
     await useAuthStore.getState().logout()
     assert.equal(useAuthStore.getState().authenticated, false)

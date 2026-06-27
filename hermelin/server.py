@@ -717,6 +717,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         old_jti = extract_session_jti(token=token, secret=cookie_secret)
         if not old_jti:
             return
+        if old_jti in _rotated_jtis:
+            return
         renewed_token = _set_session_cookie(response)
         new_jti = extract_session_jti(token=renewed_token, secret=cookie_secret)
         if new_jti:
@@ -726,11 +728,23 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     def _revoke_session_jti(jti: str | None) -> None:
         if not jti:
             return
-        _revoked_jtis.add(jti)
-        predecessors = [old_jti for old_jti, (new_jti, _) in _rotated_jtis.items() if new_jti == jti]
-        for old_jti in predecessors:
-            _revoked_jtis.add(old_jti)
-            _rotated_jtis.pop(old_jti, None)
+        to_revoke = [jti]
+        while to_revoke:
+            current = to_revoke.pop()
+            if current in _revoked_jtis:
+                continue
+            _revoked_jtis.add(current)
+            linked = [
+                (old_jti, new_jti)
+                for old_jti, (new_jti, _) in _rotated_jtis.items()
+                if old_jti == current or new_jti == current
+            ]
+            for old_jti, new_jti in linked:
+                _rotated_jtis.pop(old_jti, None)
+                if old_jti not in _revoked_jtis:
+                    to_revoke.append(old_jti)
+                if new_jti not in _revoked_jtis:
+                    to_revoke.append(new_jti)
 
     def _delete_session_cookie(response: Response) -> None:
         response.set_cookie(

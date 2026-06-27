@@ -134,6 +134,11 @@ class AuthSessionCookieTests(unittest.TestCase):
             concurrent = TestClient(app).get("/api/health", cookies={config.cookie_name: initial_cookie})
             self.assertEqual(concurrent.status_code, 200)
 
+            duplicate_rotation = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: initial_cookie})
+            self.assertEqual(duplicate_rotation.status_code, 200)
+            self.assertEqual(duplicate_rotation.json()["authenticated"], True)
+            self.assertNotIn("set-cookie", duplicate_rotation.headers)
+
             with patch("hermelin.server.time.monotonic", return_value=time.monotonic() + 11):
                 expired_grace = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: initial_cookie})
             self.assertEqual(expired_grace.status_code, 200)
