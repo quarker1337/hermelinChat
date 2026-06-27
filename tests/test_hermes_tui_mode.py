@@ -17,6 +17,7 @@ from hermelin.server import (
     _build_hermes_command_for_launch_mode,
     _is_managed_hermes_command,
     _normalize_hermes_launch_mode,
+    _resolve_hermes_executable,
     create_app,
 )
 
@@ -61,6 +62,30 @@ class HermesTuiModeTests(unittest.TestCase):
             _is_managed_hermes_command('/home/user/.local/bin/hermes chat --toolsets "hermes-cli, artifacts, strudel"')
         )
         self.assertFalse(_is_managed_hermes_command('/home/user/bin/custom-hermes chat --toolsets "hermes-cli, artifacts"'))
+
+    def test_resolve_hermes_executable_falls_back_to_user_local_bin(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            home = tmp / "home"
+            bin_dir = home / ".local" / "bin"
+            bin_dir.mkdir(parents=True)
+            hermes = bin_dir / "hermes"
+            hermes.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            hermes.chmod(0o755)
+
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                self.assertEqual(_resolve_hermes_executable("hermes", {"PATH": "/usr/bin:/bin"}), str(hermes))
+
+    def test_resolve_hermes_executable_prefers_supplied_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            bin_dir = tmp / "bin"
+            bin_dir.mkdir()
+            hermes = bin_dir / "hermes"
+            hermes.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            hermes.chmod(0o755)
+
+            self.assertEqual(_resolve_hermes_executable("hermes", {"PATH": str(bin_dir)}), str(hermes))
 
     def test_update_hermelin_launch_mode_preserves_other_yaml(self):
         text = "model:\n  default: nous/foo\nhermelin:\n  default_artifacts:\n    strudel: true\n"

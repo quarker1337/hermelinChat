@@ -13,9 +13,10 @@ from collections import defaultdict, deque
 import shlex
 import shutil
 import signal
+import ssl
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 import logging
 import yaml
@@ -211,6 +212,34 @@ def _managed_hermes_executable(command: str) -> str:
     if argv and Path(argv[0]).name == "hermes":
         return argv[0]
     return "hermes"
+
+
+def _resolve_hermes_executable(executable: str, env: Mapping[str, str] | None = None) -> str:
+    """Resolve the Hermes binary for subprocess launches.
+
+    systemd/user services often start with a minimal PATH that omits
+    ~/.local/bin, which is where the Hermes installer puts the `hermes` shim.
+    Keep config display values readable (`hermes chat ...`) but resolve the
+    executable at launch time so PTY sessions don't fail with FileNotFoundError.
+    """
+    raw = str(executable or "hermes").strip() or "hermes"
+    expanded = os.path.expanduser(raw)
+    if os.path.isabs(expanded) or os.sep in expanded:
+        return expanded
+
+    found = shutil.which(raw, path=(env or {}).get("PATH"))
+    if found:
+        return found
+
+    for base in (Path.home() / ".local" / "bin", Path.home() / ".hermes" / "bin"):
+        candidate = base / raw
+        try:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        except Exception:
+            pass
+
+    return raw
 
 
 def _is_managed_hermes_command(command: str) -> bool:
@@ -727,8 +756,80 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return None
         host = _pet_sidecar_host()
         netloc = f"[{host}]:{port}" if ":" in host and not host.startswith("[") else f"{host}:{port}"
+        scheme = "wss" if str(config.ssl_certfile or "").strip() and str(config.ssl_keyfile or "").strip() else "ws"
         from urllib.parse import urlencode
-        return f"ws://{netloc}/ws/pet-events-pub?{urlencode({'token': pet_sidecar_secret, 'channel': channel})}"
+        return f"{scheme}://{netloc}/ws/pet-events-pub?{urlencode({'token': pet_sidecar_secret, 'channel': channel})}"
+
+    def _candidate_ca_files(env: Mapping[str, str]) -> list[Path]:
+        candidates: list[Path] = []
+        raw_env_ca = str(env.get("SSL_CERT_FILE") or "").strip()
+        if raw_env_ca:
+            candidates.append(Path(raw_env_ca).expanduser())
+        try:
+            import certifi  # type: ignore
+
+            candidates.append(Path(certifi.where()).expanduser())
+        except Exception:
+            pass
+        try:
+            default_cafile = ssl.get_default_verify_paths().cafile
+            if default_cafile:
+                candidates.append(Path(default_cafile).expanduser())
+        except Exception:
+            pass
+        return candidates
+
+    def _prepare_pet_sidecar_tls_env(env: dict[str, str]) -> None:
+        """Let the child TUI sidecar connect back to built-in HTTPS.
+
+        HermelinChat can serve the browser over uvicorn's built-in TLS. In that
+        mode the Hermes child process must publish pet events over `wss://`, but
+        local installs usually use a self-signed certificate. Build a child-only
+        CA bundle that preserves the normal trust roots and appends Hermelin's
+        local cert; otherwise setting SSL_CERT_FILE to only the self-signed cert
+        would break Hermes' outbound HTTPS calls.
+        """
+        if not (str(config.ssl_certfile or "").strip() and str(config.ssl_keyfile or "").strip()):
+            return
+
+        cert_path = Path(str(config.ssl_certfile)).expanduser()
+        try:
+            cert_text = cert_path.read_text(encoding="utf-8")
+        except Exception:
+            logger.debug("pet sidecar TLS cert is not readable: %s", cert_path, exc_info=True)
+            return
+        if "BEGIN CERTIFICATE" not in cert_text:
+            return
+
+        parts: list[str] = []
+        seen: set[Path] = set()
+        try:
+            resolved_cert_path = cert_path.resolve()
+        except Exception:
+            resolved_cert_path = cert_path
+        for ca_path in _candidate_ca_files(env):
+            try:
+                resolved = ca_path.resolve()
+            except Exception:
+                resolved = ca_path
+            if resolved in seen or resolved == resolved_cert_path:
+                continue
+            seen.add(resolved)
+            try:
+                text = ca_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if "BEGIN CERTIFICATE" in text:
+                parts.append(text.rstrip())
+
+        parts.append(cert_text.rstrip())
+        bundle_path = config.hermes_home / "hermelin" / "pet-sidecar-ca-bundle.pem"
+        try:
+            bundle_path.parent.mkdir(parents=True, exist_ok=True)
+            bundle_path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+            env["SSL_CERT_FILE"] = str(bundle_path)
+        except Exception:
+            logger.debug("failed to write pet sidecar CA bundle at %s", bundle_path, exc_info=True)
 
     def _command_supports_pet_sidecar(argv: list[str]) -> bool:
         return any(part == "--tui" for part in argv)
@@ -1440,10 +1541,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         try:
             argv = shlex.split(_get_hermes_cmd())
             if argv:
-                return argv[0]
+                return _resolve_hermes_executable(argv[0], os.environ)
         except Exception:
             pass
-        return "hermes"
+        return _resolve_hermes_executable("hermes", os.environ)
 
     def _hermes_sessions_rename(session_id: str, title: str) -> tuple[bool, str]:
         sid = str(session_id or "").strip()
@@ -2944,6 +3045,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("HERMES_HOME", str(config.hermes_home))
 
+        if argv and Path(argv[0]).name == "hermes":
+            argv[0] = _resolve_hermes_executable(argv[0], env)
+
         # Avoid surprising overrides: hermes' runtime CLI prioritizes env vars
         # (and loads ~/.hermes/.env via dotenv). We want config.yaml/.env to be
         # the source of truth, not the environment hermelinChat was launched with.
@@ -2980,6 +3084,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         pet_event_channel = _new_pet_event_channel()
         pet_sidecar_url = _build_pet_sidecar_url(pet_event_channel) if _command_supports_pet_sidecar(argv) else None
         if pet_sidecar_url:
+            _prepare_pet_sidecar_tls_env(env)
             env["HERMES_TUI_SIDECAR_URL"] = pet_sidecar_url
 
         # -------------------------------------------------------------
@@ -3099,7 +3204,23 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             logger.warning("failed to create spawn cwd %s", config.spawn_cwd, exc_info=True)
             pass
 
-        p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=init_cols, rows=init_rows)
+        try:
+            p = PtyProcess.spawn(argv, cwd=config.spawn_cwd, env=env, cols=init_cols, rows=init_rows)
+        except FileNotFoundError:
+            missing = argv[0] if argv else "hermes"
+            hint = (
+                f"\r\n\x1b[31mUnable to start Hermes: executable not found: {missing}\x1b[0m\r\n"
+                "Set HERMELIN_HERMES_CMD to the absolute Hermes path or ensure ~/.local/bin is on the service PATH.\r\n"
+            )
+            try:
+                await websocket.send_bytes(hint.encode("utf-8", errors="replace"))
+            except Exception:
+                pass
+            try:
+                await websocket.close(code=1011)
+            except Exception:
+                pass
+            return
 
         def _artifact_snapshot() -> dict[str, dict]:
             items = list_artifacts(config.artifact_dir, hermes_home=config.hermes_home)
