@@ -39,6 +39,7 @@ _GITHUB_COMPARE_VERSION_RE = re.compile(
     r"^\d+(?:\.\d+)*(?:[.\-_]?(?:dev|a|alpha|b|beta|rc|c|post)\d*)?$",
     re.IGNORECASE,
 )
+_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 
 
 def _normalize_release_tag(raw: str | None) -> str:
@@ -51,6 +52,28 @@ def _github_release_tag_for_version(raw: str | None) -> str | None:
     if not text or not _GITHUB_COMPARE_VERSION_RE.fullmatch(text):
         return None
     return f"v{text}"
+
+
+def _source_checkout_head(repo_root: Path | None = None) -> str | None:
+    """Return the current git HEAD SHA when hermelinChat runs from a checkout."""
+    root = repo_root or Path(__file__).resolve().parents[1]
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    sha = (result.stdout or "").strip().splitlines()[0:1]
+    if not sha:
+        return None
+    head = sha[0].strip().lower()
+    return head if _GIT_SHA_RE.fullmatch(head) else None
 
 
 def _release_sort_key(raw: str | None) -> tuple[tuple[int, ...], int, int] | None:
@@ -2858,27 +2881,39 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     _UPDATE_CHECK_INTERVAL = 3600  # re-check at most once per hour
 
     async def _fetch_commits_behind_main(client: httpx.AsyncClient, current_version: str):
+        base_refs = []
+        source_head = _source_checkout_head()
+        if source_head:
+            base_refs.append(source_head)
+
         base_tag = _github_release_tag_for_version(current_version)
-        if not base_tag:
+        if base_tag and base_tag not in base_refs:
+            base_refs.append(base_tag)
+
+        if not base_refs:
             return None, None
 
-        compare_url = f"https://github.com/{_GITHUB_REPO}/compare/{base_tag}...main"
-        try:
-            r = await client.get(
-                f"https://api.github.com/repos/{_GITHUB_REPO}/compare/{base_tag}...main",
-                headers={"Accept": "application/vnd.github.v3+json"},
-            )
-            if r.status_code != 200:
-                return None, compare_url
+        compare_url = None
+        for base_ref in base_refs:
+            compare_url = f"https://github.com/{_GITHUB_REPO}/compare/{base_ref}...main"
+            try:
+                r = await client.get(
+                    f"https://api.github.com/repos/{_GITHUB_REPO}/compare/{base_ref}...main",
+                    headers={"Accept": "application/vnd.github.v3+json"},
+                )
+                if r.status_code != 200:
+                    continue
 
-            data = r.json()
-            commits_behind = data.get("ahead_by")
-            if not isinstance(commits_behind, int) or commits_behind < 0:
-                return None, compare_url
-            return commits_behind, data.get("html_url") or compare_url
-        except Exception:
-            logger.debug("commit compare check failed", exc_info=True)
-            return None, compare_url
+                data = r.json()
+                commits_behind = data.get("ahead_by")
+                if not isinstance(commits_behind, int) or commits_behind < 0:
+                    continue
+                return commits_behind, data.get("html_url") or compare_url
+            except Exception:
+                logger.debug("commit compare check failed", exc_info=True)
+                continue
+
+        return None, compare_url
 
     def _update_check_response(current_version: str, cached: bool):
         latest = _update_cache["latest"] or current_version

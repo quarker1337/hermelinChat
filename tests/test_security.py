@@ -294,6 +294,33 @@ class _GitHubUpdateAsyncClient:
         return _StaticStatusResponse(404)
 
 
+class _GitHubUpdateSourceHeadAsyncClient:
+    calls = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url, *args, **kwargs):
+        type(self).calls.append(url)
+        if url.endswith("/releases/latest"):
+            return _JsonStatusResponse(200, {"tag_name": "v0.16"})
+        if url.endswith("/compare/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...main"):
+            return _JsonStatusResponse(
+                200,
+                {
+                    "ahead_by": 0,
+                    "html_url": "https://github.com/quarker1337/hermelinChat/compare/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...main",
+                },
+            )
+        return _StaticStatusResponse(404)
+
+
 class _Http503AsyncClient:
     calls = 0
 
@@ -346,6 +373,7 @@ class UpdateCheckEndpointTests(unittest.TestCase):
 
             with (
                 patch("hermelin.__version__", "0.14"),
+                patch("hermelin.server._source_checkout_head", return_value=None),
                 patch("hermelin.server.httpx.AsyncClient", _GitHubUpdateAsyncClient),
             ):
                 response = asyncio.run(route.endpoint())
@@ -360,6 +388,40 @@ class UpdateCheckEndpointTests(unittest.TestCase):
             self.assertEqual(len(_GitHubUpdateAsyncClient.calls), 2)
             self.assertTrue(_GitHubUpdateAsyncClient.calls[0].endswith("/releases/latest"))
             self.assertTrue(_GitHubUpdateAsyncClient.calls[1].endswith("/compare/v0.14...main"))
+
+    def test_update_check_prefers_source_checkout_head_for_main_behind_count(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hermes_home = Path(tmpdir) / "hermes-home"
+            config = HermelinConfig(
+                hermes_home=hermes_home,
+                meta_db_path=Path(tmpdir) / "hermelin_meta.db",
+                spawn_cwd=Path(tmpdir) / "spawn-cwd",
+            )
+            app = create_app(config)
+            route = _route_for_path(app, "/api/update-check")
+            _GitHubUpdateSourceHeadAsyncClient.calls = []
+
+            with (
+                patch("hermelin.__version__", "0.16"),
+                patch("hermelin.server._source_checkout_head", return_value="a" * 40),
+                patch("hermelin.server.httpx.AsyncClient", _GitHubUpdateSourceHeadAsyncClient),
+            ):
+                response = asyncio.run(route.endpoint())
+
+            self.assertEqual(response["latest"], "0.16")
+            self.assertFalse(response["update_available"])
+            self.assertEqual(response["commits_behind_main"], 0)
+            self.assertEqual(
+                response["compare_url"],
+                "https://github.com/quarker1337/hermelinChat/compare/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...main",
+            )
+            self.assertEqual(len(_GitHubUpdateSourceHeadAsyncClient.calls), 2)
+            self.assertTrue(_GitHubUpdateSourceHeadAsyncClient.calls[0].endswith("/releases/latest"))
+            self.assertTrue(
+                _GitHubUpdateSourceHeadAsyncClient.calls[1].endswith(
+                    "/compare/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...main"
+                )
+            )
 
     def test_update_check_caches_failures_for_backoff(self):
         with tempfile.TemporaryDirectory() as tmpdir:
