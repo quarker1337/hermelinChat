@@ -670,6 +670,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         t = time.monotonic() if now is None else now
         expired = [jti for jti, (_, deadline) in _rotated_jtis.items() if deadline <= t]
         for jti in expired:
+            _revoked_jtis.add(jti)
             _rotated_jtis.pop(jti, None)
 
     cookie_name = (config.cookie_name or "hermelin_session").strip() or "hermelin_session"

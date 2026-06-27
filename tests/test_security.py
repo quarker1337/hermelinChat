@@ -134,6 +134,12 @@ class AuthSessionCookieTests(unittest.TestCase):
             concurrent = TestClient(app).get("/api/health", cookies={config.cookie_name: initial_cookie})
             self.assertEqual(concurrent.status_code, 200)
 
+            with patch("hermelin.server.time.monotonic", return_value=time.monotonic() + 11):
+                expired_grace = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: initial_cookie})
+            self.assertEqual(expired_grace.status_code, 200)
+            self.assertEqual(expired_grace.json()["authenticated"], False)
+            self.assertNotIn("set-cookie", expired_grace.headers)
+
             logout = client.post("/api/auth/logout")
             self.assertEqual(logout.status_code, 200)
             replay = TestClient(app).get("/api/auth/me", cookies={config.cookie_name: initial_cookie})
