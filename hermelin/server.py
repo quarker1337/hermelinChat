@@ -3038,15 +3038,6 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         token: str = "",
         channel: str = "",
     ):
-        client_ip = extract_client_ip(
-            client_host=websocket.client.host if websocket.client else "",
-            headers=websocket.headers,
-            trust_xff=trust_xff,
-            trusted_proxy_spec=config.trusted_proxy_ips,
-        )
-        if not _check_allowed(client_ip):
-            await websocket.close(code=1008)
-            return
         if not hmac.compare_digest(str(token).encode(), pet_sidecar_secret.encode()):
             await websocket.close(code=1008)
             return
@@ -3054,6 +3045,11 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             await websocket.close(code=1008)
             return
 
+        # This endpoint is a process-local capability URL handed only to the
+        # spawned Hermes TUI child. Do not apply the browser/UI IP allowlist here:
+        # when built-in TLS requires a public DNS name for hostname verification,
+        # the same-machine child callback can arrive via that public/LAN address
+        # instead of loopback. The unguessable token + channel gate is the auth.
         await websocket.accept()
         try:
             while True:

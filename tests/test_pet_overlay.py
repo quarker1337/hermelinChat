@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import parse_qs, urlparse
 
 import yaml
 from fastapi.testclient import TestClient
@@ -339,6 +340,61 @@ class PetOverlayTests(unittest.TestCase):
 
             self.assertIn("wss://chat.example.test:32126/ws/pet-events-pub", decoded_output)
             self.assertNotIn("wss://example.test:32126/ws/pet-events-pub", decoded_output)
+
+    def test_pet_event_publisher_token_bypasses_browser_ip_allowlist(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            code = (
+                "import os, time; "
+                "print(os.environ.get('HERMES_TUI_SIDECAR_URL', 'missing'), flush=True); "
+                "time.sleep(0.2)"
+            )
+            config = HermelinConfig(
+                hermes_home=tmp / "hermes-home",
+                meta_db_path=tmp / "hermelin_meta.db",
+                spawn_cwd=tmp / "spawn-cwd",
+                allowed_ips="127.0.0.1",
+                trust_x_forwarded_for=True,
+                auth_password_hash="",
+                cookie_secret="test-secret",
+                hermes_dashboard_enabled=False,
+                hermes_cmd=f"{sys.executable} -c {json.dumps(code)} --tui",
+                hermes_cmd_override=True,
+                host="127.0.0.1",
+                port=32127,
+            )
+
+            sidecar_url = ""
+            with TestClient(create_app(config)) as client:
+                with client.websocket_connect(
+                    "/ws/pty?cols=80&rows=20",
+                    headers={"x-forwarded-for": "127.0.0.1"},
+                ) as ws:
+                    decoded_output = ""
+                    for _ in range(20):
+                        message = ws.receive()
+                        if message.get("type") == "websocket.close":
+                            break
+                        data = message.get("bytes")
+                        if data:
+                            decoded_output += data.decode("utf-8", errors="ignore")
+                        marker = "/ws/pet-events-pub?"
+                        if marker in decoded_output:
+                            start = decoded_output.rfind("ws://")
+                            end = decoded_output.find("\r", start)
+                            sidecar_url = decoded_output[start : end if end > start else None]
+                            break
+
+                parsed = urlparse(sidecar_url)
+                query = parse_qs(parsed.query)
+                token = query["token"][0]
+                channel = query["channel"][0]
+
+                with client.websocket_connect(
+                    f"/ws/pet-events-pub?token={token}&channel={channel}",
+                    headers={"x-forwarded-for": "203.0.113.10"},
+                ) as pub:
+                    pub.send_text(json.dumps({"type": "message.start", "payload": {}}))
 
     def test_pet_event_frames_are_not_droppable(self):
         source = (Path(__file__).resolve().parents[1] / "hermelin" / "server.py").read_text(encoding="utf-8")
