@@ -1240,7 +1240,9 @@ test('AppShell keeps auth alive and only clears session state on explicit logout
   assert.match(source, /logoutReason === 'explicit' && !didExplicitLogoutCleanupRef\.current/)
   assert.match(source, /spawn\(useSessionStore\.getState\(\)\.activeSessionId \?\? null\)/)
   assert.match(source, /logoutReason === 'expired'/)
-  assert.match(source, /reconnects[\s\S]*preserved activeSessionId/)
+  assert.match(source, /useSearchStore\.getState\(\)\.closePeek\(\)/)
+  assert.match(source, /close search peeks that render[\s\S]*outside the main lock overlay/)
+  assert.match(source, /preserving activeSessionId[\s\S]*useSearchStore\.getState\(\)\.closePeek\(\)[\s\S]*useTerminalStore\.getState\(\)\.reset\(\)/)
 
   const sessionsSource = fs.readFileSync(path.join(SOURCE_ROOT, 'stores', 'sessions.ts'), 'utf8')
   assert.match(sessionsSource, /Preserve visible session context/)
