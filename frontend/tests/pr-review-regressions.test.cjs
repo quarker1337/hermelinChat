@@ -1236,6 +1236,8 @@ test('AppShell keeps auth alive and only clears session state on explicit logout
   assert.match(source, /logoutReason === 'explicit'/)
   assert.match(source, /\}, \[authEnabled, authenticated, sessionTtlSeconds\]\)/)
   assert.match(source, /\}, \[authenticated, logoutReason\]\)/)
+  assert.match(source, /didExplicitLogoutCleanupRef/)
+  assert.match(source, /logoutReason === 'explicit' && !didExplicitLogoutCleanupRef\.current/)
   assert.match(source, /spawn\(useSessionStore\.getState\(\)\.activeSessionId \?\? null\)/)
   assert.match(source, /logoutReason === 'expired'/)
   assert.match(source, /reconnects[\s\S]*preserved activeSessionId/)
@@ -1282,6 +1284,11 @@ test('auth store distinguishes expired auth from deliberate logout', async () =>
     assert.equal(useAuthStore.getState().authenticated, false)
     assert.equal(useAuthStore.getState().logoutReason, 'expired')
     assert.equal(useAuthStore.getState().sessionTtlSeconds, 120)
+
+    useAuthStore.setState({ logoutReason: 'explicit', authenticated: false })
+    useAuthStore.getState().setUnauthenticated('expired')
+    assert.equal(useAuthStore.getState().authenticated, false)
+    assert.equal(useAuthStore.getState().logoutReason, 'explicit')
 
     global.fetch = async (path, opts = {}) => {
       if (String(path) === '/api/auth/logout' && String(opts.method || 'GET') === 'POST') {

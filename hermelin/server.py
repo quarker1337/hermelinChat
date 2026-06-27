@@ -628,9 +628,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         auth_fail_window_seconds = 60
 
     _auth_failures: dict[str, deque[float]] = defaultdict(deque)
-    _revoked_jtis: set[str] = set()
+    _revoked_jtis: dict[str, float] = {}
     _rotated_jtis: dict[str, tuple[str, float]] = {}
     _rotation_grace_seconds = 10.0
+
+    cookie_name = (config.cookie_name or "hermelin_session").strip() or "hermelin_session"
+    ttl_seconds = int(config.session_ttl_seconds or 0) or 43200
+    cookie_secure = bool(config.cookie_secure)
 
     def _auth_prune(dq: deque[float], now: float) -> None:
         if auth_fail_window_seconds <= 0:
@@ -666,16 +670,23 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     def _auth_clear_failures(ip: str) -> None:
         _auth_failures.pop(ip, None)
 
+    def _remember_revoked_jti(jti: str | None, now: float | None = None) -> None:
+        if not jti:
+            return
+        _revoked_jtis[jti] = (time.time() if now is None else now) + max(ttl_seconds, 1)
+
+    def _prune_revoked_jtis(now: float | None = None) -> None:
+        t = time.time() if now is None else now
+        expired = [jti for jti, deadline in _revoked_jtis.items() if deadline <= t]
+        for jti in expired:
+            _revoked_jtis.pop(jti, None)
+
     def _prune_rotated_jtis(now: float | None = None) -> None:
         t = time.monotonic() if now is None else now
         expired = [jti for jti, (_, deadline) in _rotated_jtis.items() if deadline <= t]
         for jti in expired:
-            _revoked_jtis.add(jti)
+            _remember_revoked_jti(jti)
             _rotated_jtis.pop(jti, None)
-
-    cookie_name = (config.cookie_name or "hermelin_session").strip() or "hermelin_session"
-    ttl_seconds = int(config.session_ttl_seconds or 0) or 43200
-    cookie_secure = bool(config.cookie_secure)
 
     cookie_secret_raw = (config.cookie_secret or "").strip()
     cookie_secret = cookie_secret_raw.encode("utf-8") if cookie_secret_raw else generate_secret_bytes()
@@ -692,6 +703,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return True
         if not token:
             return False
+        _prune_revoked_jtis()
         _prune_rotated_jtis()
         if not verify_session_token(token=token, secret=cookie_secret, revoked_jtis=_revoked_jtis):
             return False
@@ -733,7 +745,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             current = to_revoke.pop()
             if current in _revoked_jtis:
                 continue
-            _revoked_jtis.add(current)
+            _remember_revoked_jti(current)
             linked = [
                 (old_jti, new_jti)
                 for old_jti, (new_jti, _) in _rotated_jtis.items()

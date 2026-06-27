@@ -6,6 +6,7 @@ import hmac
 import json
 import secrets
 import time
+from collections.abc import Collection
 from http.cookies import SimpleCookie
 from typing import Optional
 
@@ -77,7 +78,7 @@ def create_session_token(*, secret: bytes, ttl_seconds: int) -> str:
     return f"{payload_b64}.{sig_b64}"
 
 
-def verify_session_token(*, token: str, secret: bytes, revoked_jtis: set | None = None) -> bool:
+def verify_session_token(*, token: str, secret: bytes, revoked_jtis: Collection[str] | None = None) -> bool:
     if not token:
         return False
 

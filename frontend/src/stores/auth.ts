@@ -25,7 +25,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         loading: false,
         enabled: !!data.auth_enabled,
         authenticated: !!data.authenticated,
-        logoutReason: data.authenticated ? null : 'expired',
+        logoutReason: data.authenticated ? null : (get().logoutReason === 'explicit' ? 'explicit' : 'expired'),
         sessionTtlSeconds: typeof data.session_ttl_seconds === 'number' ? data.session_ttl_seconds : null,
       })
     } catch {
@@ -33,7 +33,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         loading: false,
         enabled: options?.preserveEnabledOnError ? get().enabled : false,
         authenticated: false,
-        logoutReason: 'expired',
+        logoutReason: get().logoutReason === 'explicit' ? 'explicit' : 'expired',
         sessionTtlSeconds: options?.preserveEnabledOnError ? get().sessionTtlSeconds : null,
       })
     }
@@ -61,6 +61,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   logout: async () => {
+    set({ authenticated: false, logoutReason: 'explicit' })
     try {
       await fetch('/api/auth/logout', { method: 'POST' })
     } finally {
@@ -71,6 +72,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   setUnauthenticated: (reason = 'expired') => {
-    set({ authenticated: false, logoutReason: reason })
+    set((state) => ({
+      authenticated: false,
+      logoutReason: state.logoutReason === 'explicit' ? 'explicit' : reason,
+    }))
   },
 }))

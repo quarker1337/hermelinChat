@@ -267,8 +267,13 @@ export function AppShell() {
   // background request gets a 401, keep the active session in memory so the
   // login overlay can be dismissed without forcing manual resume.
   const wasAuthenticatedRef = useRef(authenticated)
+  const didExplicitLogoutCleanupRef = useRef(false)
   useEffect(() => {
-    if (!authenticated && wasAuthenticatedRef.current && logoutReason === 'explicit') {
+    if (authenticated || logoutReason !== 'explicit') {
+      didExplicitLogoutCleanupRef.current = false
+    }
+    if (!authenticated && logoutReason === 'explicit' && !didExplicitLogoutCleanupRef.current) {
+      didExplicitLogoutCleanupRef.current = true
       useSessionStore.getState().reset()
       useArtifactStore.getState().reset()
       useSearchStore.getState().reset()
