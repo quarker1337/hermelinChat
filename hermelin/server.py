@@ -794,9 +794,25 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             normalized_value = value.strip().strip("[]")
             if kind == "ip" and normalized_host == normalized_value:
                 return True
-            if kind == "dns" and host_lower == normalized_value.lower():
+            if kind == "dns" and _dns_identity_matches_hostname(host_lower, normalized_value.lower()):
                 return True
         return False
+
+    def _dns_identity_matches_hostname(host: str, pattern: str) -> bool:
+        host = str(host or "").strip().rstrip(".").lower()
+        pattern = str(pattern or "").strip().rstrip(".").lower()
+        if not host or not pattern:
+            return False
+        if "*" not in pattern:
+            return host == pattern
+
+        pattern_labels = pattern.split(".")
+        host_labels = host.split(".")
+        if pattern_labels[0] != "*" or len(pattern_labels) != len(host_labels):
+            return False
+        if len(pattern_labels) < 3:
+            return False
+        return host_labels[1:] == pattern_labels[1:]
 
     def _pet_sidecar_host_from_tls_cert() -> str | None:
         identities = _tls_cert_identities()

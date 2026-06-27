@@ -291,6 +291,55 @@ class PetOverlayTests(unittest.TestCase):
 
             self.assertIn("wss://chat.example.test:32125/ws/pet-events-pub", decoded_output)
 
+    def test_pty_tui_tls_sidecar_keeps_host_matched_by_wildcard_cert(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            cert = tmp / "cert.pem"
+            key = tmp / "key.pem"
+            cert.write_text(
+                "-----BEGIN CERTIFICATE-----\nhermelin-test-cert\n-----END CERTIFICATE-----\n",
+                encoding="utf-8",
+            )
+            key.write_text("test-key\n", encoding="utf-8")
+            code = (
+                "import os, time; "
+                "print(os.environ.get('HERMES_TUI_SIDECAR_URL', 'missing'), flush=True); "
+                "time.sleep(0.2)"
+            )
+            config = HermelinConfig(
+                hermes_home=tmp / "hermes-home",
+                meta_db_path=tmp / "hermelin_meta.db",
+                spawn_cwd=tmp / "spawn-cwd",
+                allowed_ips="*",
+                auth_password_hash="",
+                cookie_secret="test-secret",
+                hermes_dashboard_enabled=False,
+                hermes_cmd=f"{sys.executable} -c {json.dumps(code)} --tui",
+                hermes_cmd_override=True,
+                host="chat.example.test",
+                port=32126,
+                ssl_certfile=str(cert),
+                ssl_keyfile=str(key),
+            )
+
+            decoded_output = ""
+            decoded_cert = {"subjectAltName": (("DNS", "*.example.test"), ("DNS", "example.test"))}
+            with mock.patch("ssl._ssl._test_decode_cert", return_value=decoded_cert):
+                with TestClient(create_app(config)) as client:
+                    with client.websocket_connect("/ws/pty?cols=80&rows=20") as ws:
+                        for _ in range(20):
+                            message = ws.receive()
+                            if message.get("type") == "websocket.close":
+                                break
+                            data = message.get("bytes")
+                            if data:
+                                decoded_output += data.decode("utf-8", errors="ignore")
+                            if "ws/pet-events-pub" in decoded_output:
+                                break
+
+            self.assertIn("wss://chat.example.test:32126/ws/pet-events-pub", decoded_output)
+            self.assertNotIn("wss://example.test:32126/ws/pet-events-pub", decoded_output)
+
     def test_pet_event_frames_are_not_droppable(self):
         source = (Path(__file__).resolve().parents[1] / "hermelin" / "server.py").read_text(encoding="utf-8")
         start = source.index("async def pump_pet_events_to_ws")
