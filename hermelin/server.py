@@ -742,11 +742,94 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 except Exception:
                     pass
 
-    def _pet_sidecar_host() -> str:
+    def _pet_sidecar_tls_enabled() -> bool:
+        return bool(str(config.ssl_certfile or "").strip() and str(config.ssl_keyfile or "").strip())
+
+    def _configured_pet_sidecar_host() -> str | None:
+        host = str(getattr(config, "pet_sidecar_host", "") or "").strip()
+        return host.strip("[]") if host else None
+
+    def _default_pet_sidecar_host() -> str:
         host = str(getattr(config, "host", "") or "").strip()
         if not host or host in {"0.0.0.0", "::", "[::]"}:
             return "127.0.0.1"
         return host.strip("[]")
+
+    def _tls_cert_identities() -> list[tuple[str, str]]:
+        if not _pet_sidecar_tls_enabled():
+            return []
+        cert_path = str(config.ssl_certfile or "").strip()
+        if not cert_path:
+            return []
+        try:
+            decoded = ssl._ssl._test_decode_cert(str(Path(cert_path).expanduser()))  # type: ignore[attr-defined]
+        except Exception:
+            return []
+
+        identities: list[tuple[str, str]] = []
+        for kind, value in decoded.get("subjectAltName", ()) or ():
+            normalized_kind = str(kind or "").strip().lower()
+            normalized_value = str(value or "").strip()
+            if not normalized_value:
+                continue
+            if normalized_kind == "dns":
+                identities.append(("dns", normalized_value))
+            elif normalized_kind == "ip address":
+                identities.append(("ip", normalized_value.strip("[]")))
+
+        for rdn in decoded.get("subject", ()) or ():
+            for key, value in rdn:
+                if str(key).lower() == "commonname":
+                    normalized_value = str(value or "").strip()
+                    if normalized_value:
+                        identities.append(("dns", normalized_value))
+        return identities
+
+    def _host_matches_cert_identity(host: str, identities: list[tuple[str, str]]) -> bool:
+        normalized_host = str(host or "").strip().strip("[]")
+        if not normalized_host:
+            return False
+        host_lower = normalized_host.lower()
+        for kind, value in identities:
+            normalized_value = value.strip().strip("[]")
+            if kind == "ip" and normalized_host == normalized_value:
+                return True
+            if kind == "dns" and host_lower == normalized_value.lower():
+                return True
+        return False
+
+    def _pet_sidecar_host_from_tls_cert() -> str | None:
+        identities = _tls_cert_identities()
+        if not identities:
+            return None
+
+        default_host = _default_pet_sidecar_host()
+        if _host_matches_cert_identity(default_host, identities):
+            return default_host
+
+        for kind, value in identities:
+            if kind == "ip" and value in {"127.0.0.1", "::1"}:
+                return value
+        for kind, value in identities:
+            if kind == "dns" and value.lower() == "localhost":
+                return value
+        for kind, value in identities:
+            if kind == "dns" and "*" not in value:
+                return value
+        for kind, value in identities:
+            if kind == "ip":
+                return value
+        return None
+
+    def _pet_sidecar_host() -> str:
+        configured_host = _configured_pet_sidecar_host()
+        if configured_host:
+            return configured_host
+        if _pet_sidecar_tls_enabled():
+            tls_host = _pet_sidecar_host_from_tls_cert()
+            if tls_host:
+                return tls_host
+        return _default_pet_sidecar_host()
 
     def _build_pet_sidecar_url(channel: str) -> str | None:
         if not pet_sidecar_channel_re.match(channel):
@@ -756,7 +839,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return None
         host = _pet_sidecar_host()
         netloc = f"[{host}]:{port}" if ":" in host and not host.startswith("[") else f"{host}:{port}"
-        scheme = "wss" if str(config.ssl_certfile or "").strip() and str(config.ssl_keyfile or "").strip() else "ws"
+        scheme = "wss" if _pet_sidecar_tls_enabled() else "ws"
         from urllib.parse import urlencode
         return f"{scheme}://{netloc}/ws/pet-events-pub?{urlencode({'token': pet_sidecar_secret, 'channel': channel})}"
 
@@ -789,7 +872,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         local cert; otherwise setting SSL_CERT_FILE to only the self-signed cert
         would break Hermes' outbound HTTPS calls.
         """
-        if not (str(config.ssl_certfile or "").strip() and str(config.ssl_keyfile or "").strip()):
+        if not _pet_sidecar_tls_enabled():
             return
 
         cert_path = Path(str(config.ssl_certfile)).expanduser()
