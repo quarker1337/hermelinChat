@@ -276,7 +276,10 @@ class PetOverlayTests(unittest.TestCase):
             )
 
             decoded_output = ""
-            decoded_cert = {"subjectAltName": (("DNS", "chat.example.test"),)}
+            decoded_cert = {
+                "subjectAltName": (("DNS", "chat.example.test"),),
+                "subject": ((("commonName", "localhost"),),),
+            }
             with mock.patch("ssl._ssl._test_decode_cert", return_value=decoded_cert):
                 with TestClient(create_app(config)) as client:
                     with client.websocket_connect("/ws/pty?cols=80&rows=20") as ws:
@@ -291,6 +294,7 @@ class PetOverlayTests(unittest.TestCase):
                                 break
 
             self.assertIn("wss://chat.example.test:32125/ws/pet-events-pub", decoded_output)
+            self.assertNotIn("wss://localhost:32125/ws/pet-events-pub", decoded_output)
 
     def test_pty_tui_tls_sidecar_keeps_host_matched_by_wildcard_cert(self):
         with tempfile.TemporaryDirectory() as tmpdir:

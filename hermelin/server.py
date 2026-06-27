@@ -767,7 +767,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return []
 
         identities: list[tuple[str, str]] = []
-        for kind, value in decoded.get("subjectAltName", ()) or ():
+        subject_alt_names = decoded.get("subjectAltName", ()) or ()
+        for kind, value in subject_alt_names:
             normalized_kind = str(kind or "").strip().lower()
             normalized_value = str(value or "").strip()
             if not normalized_value:
@@ -776,6 +777,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 identities.append(("dns", normalized_value))
             elif normalized_kind == "ip address":
                 identities.append(("ip", normalized_value.strip("[]")))
+
+        if subject_alt_names:
+            return identities
 
         for rdn in decoded.get("subject", ()) or ():
             for key, value in rdn:
