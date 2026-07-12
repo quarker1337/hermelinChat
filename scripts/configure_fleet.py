@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
 FLEET_KEYS = {
@@ -27,9 +28,12 @@ FLEET_KEYS = {
 }
 SHARED_OVERLAY = ipaddress.ip_network("100.64.0.0/10")
 NODE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9._~-]{1,8192}$")
+IMMUTABLE_GIT_REF_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
+MAX_TOKEN_BYTES = 8192
 MAX_JOIN_SCRIPT_BYTES = 1024 * 1024
 DEFAULT_FLEET_REPOSITORY = "git@github.com:quarker1337/hermelinfleet.git"
-DEFAULT_FLEET_REF = "feat/hermelinchat-bridge-runtimes"
+DEFAULT_FLEET_REF = "4b8d4de8ace133f0982347d5b11c1cb3e1e3e617"
 
 
 class NoRedirectHandler(HTTPRedirectHandler):
@@ -43,9 +47,28 @@ def fail(message: str) -> "NoReturn":
 
 def safe_external_url(raw: str, *, allow_insecure_http: bool = False) -> str:
     value = str(raw or "").strip().rstrip("/")
-    parsed = urlparse(value)
-    if parsed.username or parsed.password or not parsed.hostname or parsed.query or parsed.fragment:
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
         fail("unsafe Fleet URL")
+    parsed = urlparse(value)
+    try:
+        parsed.port
+    except ValueError:
+        fail("unsafe Fleet URL: invalid port")
+    if (
+        parsed.username
+        or parsed.password
+        or not parsed.hostname
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        fail("unsafe Fleet URL")
+    host_value = parsed.hostname
+    try:
+        ipaddress.ip_address(host_value)
+    except ValueError:
+        if host_value != "localhost" and not re.fullmatch(r"[A-Za-z0-9.-]+", host_value):
+            fail("unsafe Fleet URL: invalid host")
     if parsed.scheme == "https":
         return value
     if parsed.scheme != "http":
@@ -70,24 +93,59 @@ def safe_external_url(raw: str, *, allow_insecure_http: bool = False) -> str:
     return value
 
 
-def read_token_stdin() -> str:
-    value = sys.stdin.read().strip()
+def decode_token_bytes(data: bytes) -> str:
+    if not data or len(data) > MAX_TOKEN_BYTES:
+        fail("Fleet token must be between 1 byte and 8 KiB")
+    try:
+        value = data.decode("utf-8")
+    except UnicodeDecodeError:
+        fail("Fleet token must be valid UTF-8")
+    if value.endswith("\n"):
+        value = value[:-1]
+        if value.endswith("\r"):
+            value = value[:-1]
     validate_token(value)
     return value
+
+
+def read_token_stdin() -> str:
+    return decode_token_bytes(sys.stdin.buffer.read(MAX_TOKEN_BYTES + 1))
 
 
 def read_token_file(path: str, *, require_private: bool = False) -> str:
     token_path = Path(path).expanduser()
-    if require_private and token_path.stat().st_mode & 0o077:
-        fail("Fleet enrollment token file must not be accessible by group or other users")
-    value = token_path.read_text(encoding="utf-8").strip()
-    validate_token(value)
-    return value
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(token_path, flags)
+    except OSError:
+        fail("could not safely open Fleet enrollment token file")
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            fail("Fleet enrollment token must be a regular file")
+        if require_private and info.st_uid != os.geteuid():
+            fail("Fleet enrollment token file must be owned by the current user")
+        if require_private and info.st_mode & 0o077:
+            fail("Fleet enrollment token file must not be accessible by group or other users")
+        if info.st_size <= 0 or info.st_size > MAX_TOKEN_BYTES:
+            fail("Fleet enrollment token file must be between 1 byte and 8 KiB")
+        chunks: list[bytes] = []
+        total = 0
+        while total <= MAX_TOKEN_BYTES:
+            chunk = os.read(fd, min(4096, MAX_TOKEN_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        data = b"".join(chunks)
+    finally:
+        os.close(fd)
+    return decode_token_bytes(data)
 
 
 def validate_token(value: str) -> None:
-    if not value or any(ch.isspace() for ch in value) or "\x00" in value:
-        fail("Fleet token must be a non-empty single-line value")
+    if not TOKEN_PATTERN.fullmatch(value):
+        fail("Fleet token contains invalid characters or length")
 
 
 def read_env_value(path: Path, key: str) -> str:
@@ -159,33 +217,63 @@ def resolve_fleet_source(source: str, repository: str, ref: str) -> str:
     )
     if not safe_url and not scp_style_ssh:
         fail("automatic Fleet source requires a credential-free HTTPS, SSH, or file:// repository URL")
-    if not ref or ref.startswith("-") or any(ch.isspace() for ch in ref):
+    if (
+        not re.fullmatch(r"[A-Za-z0-9._/-]{1,200}", ref)
+        or ref.startswith(("-", ".", "/"))
+        or ".." in ref
+        or "@{" in ref
+    ):
         fail("unsafe Fleet repository ref")
     destination = Path.home() / ".local" / "share" / "hermelinChat" / "hermelinfleet-source"
-    if destination.exists():
-        if (destination / ".git").is_dir() and (destination / "scripts" / "install.sh").is_file():
-            return str(destination.resolve())
-        fail(f"automatic Fleet source path already exists but is not a checkout: {destination}")
+    clone_env = {key: value for key, value in os.environ.items() if not key.startswith("FLEET_")}
+    clone_env["GIT_TERMINAL_PROMPT"] = "0"
+
+    def run_git(arguments: list[str], action: str) -> str:
+        result = subprocess.run(
+            ["git", *arguments],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            env=clone_env,
+        )
+        if result.returncode != 0:
+            diagnostics = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+            detail = diagnostics[-1][:300] if diagnostics else f"git exited with status {result.returncode}"
+            fail(f"could not {action} the compatible HermelinFleet source: {detail}")
+        return result.stdout.strip()
+
+    if destination.exists() or destination.is_symlink():
+        if destination.is_symlink() or not (destination / ".git").is_dir() or not (destination / "scripts" / "install.sh").is_file():
+            fail(f"automatic Fleet source path already exists but is not a checkout: {destination}")
+        origin = run_git(["-C", str(destination), "remote", "get-url", "origin"], "verify")
+        head = run_git(["-C", str(destination), "rev-parse", "HEAD"], "verify")
+        if origin != repository:
+            fail("existing automatic Fleet source has an unexpected origin")
+        if IMMUTABLE_GIT_REF_PATTERN.fullmatch(ref) and head.lower() != ref.lower():
+            fail("existing automatic Fleet source does not match the pinned revision")
+        return str(destination.resolve())
+
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         destination.parent.chmod(0o700)
     except OSError:
         pass
-    clone_env = os.environ.copy()
-    clone_env["GIT_TERMINAL_PROMPT"] = "0"
-    result = subprocess.run(
-        ["git", "clone", "--depth", "1", "--branch", ref, "--", repository, str(destination)],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-        env=clone_env,
-    )
-    if result.returncode != 0:
-        shutil.rmtree(destination, ignore_errors=True)
-        diagnostics = [line.strip() for line in result.stderr.splitlines() if line.strip()]
-        detail = diagnostics[-1][:300] if diagnostics else f"git exited with status {result.returncode}"
-        fail(f"could not clone the compatible HermelinFleet source: {detail}")
+    staging = Path(tempfile.mkdtemp(prefix=".hermelinfleet-source.", dir=destination.parent))
+    try:
+        run_git(["init", "--quiet", str(staging)], "initialize")
+        run_git(["-C", str(staging), "remote", "add", "origin", repository], "configure")
+        run_git(["-C", str(staging), "fetch", "--depth", "1", "origin", ref], "fetch")
+        run_git(["-C", str(staging), "checkout", "--quiet", "--detach", "FETCH_HEAD"], "check out")
+        head = run_git(["-C", str(staging), "rev-parse", "HEAD"], "verify")
+        if IMMUTABLE_GIT_REF_PATTERN.fullmatch(ref) and head.lower() != ref.lower():
+            fail("fetched HermelinFleet source does not match the pinned revision")
+        if not (staging / "scripts" / "install.sh").is_file():
+            fail("fetched HermelinFleet source is missing its installer")
+        os.replace(staging, destination)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
     return str(destination.resolve())
 
 
@@ -213,12 +301,21 @@ def install_local(source: str, *, manager_profile: str = "local", manager_host: 
         if not manager_host:
             fail("overlay manager profile requires --manager-host")
         install_args.extend(["--public-host", manager_host])
+    install_env = {key: value for key, value in os.environ.items() if not key.startswith("FLEET_")}
+    install_env.update(
+        {
+            "FLEET_PATCH_HERMES": "1",
+            "FLEET_REMOTE_RUNTIME_BACKEND": "tmux",
+            "FLEET_REMOTE_RUNTIME_EXEC_MODE": "trusted",
+        }
+    )
     result = subprocess.run(
         install_args,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        env=install_env,
     )
     if result.returncode != 0:
         if result.stderr:
@@ -248,7 +345,7 @@ def install_remote_node(url: str, token: str, node_id: str) -> None:
         headers={"Authorization": f"Bearer {token}", "X-Fleet-Node-ID": node_id},
         method="GET",
     )
-    opener = build_opener(NoRedirectHandler())
+    opener = build_opener(ProxyHandler({}), NoRedirectHandler())
     try:
         with opener.open(request, timeout=15) as response:
             content_type = response.headers.get_content_type()
@@ -275,8 +372,7 @@ def install_remote_node(url: str, token: str, node_id: str) -> None:
             handle.write(script)
             handle.flush()
             os.fsync(handle.fileno())
-        env = os.environ.copy()
-        env.pop("FLEET_ENROLLMENT_TOKEN", None)
+        env = {key: value for key, value in os.environ.items() if not key.startswith("FLEET_")}
         env.update(
             {
                 "FLEET_NODE_ID": node_id,
@@ -285,7 +381,11 @@ def install_remote_node(url: str, token: str, node_id: str) -> None:
                 "FLEET_REMOTE_RUNTIME_EXEC_MODE": "trusted",
             }
         )
-        result = subprocess.run(["/bin/sh", temp_name], env=env, check=False)
+        previous_umask = os.umask(0o077)
+        try:
+            result = subprocess.run(["/bin/sh", temp_name], env=env, check=False)
+        finally:
+            os.umask(previous_umask)
         if result.returncode != 0:
             fail(f"Fleet node installer failed with status {result.returncode}")
     finally:

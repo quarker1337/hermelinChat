@@ -34,6 +34,7 @@ def test_main_installer_exposes_fleet_modes_and_local_service_dependency() -> No
     script = INSTALLER.read_text(encoding="utf-8")
     assert 'FLEET_ROLE="standalone"' in script  # -y default
     assert 'FLEET_REPOSITORY="git@github.com:quarker1337/hermelinfleet.git"' in script
+    assert 'FLEET_REF="4b8d4de8ace133f0982347d5b11c1cb3e1e3e617"' in script
     assert "Choose this HermelinChat host's role" in script
     assert "New independent FleetManager" in script
     assert "Join a remote FleetManager" in script
@@ -112,7 +113,19 @@ def test_external_mode_reads_token_from_stdin_without_printing_it(tmp_path: Path
     assert secret not in result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("url", ["http://fleet.example.test", "ftp://127.0.0.1:8080", "http://169.254.169.254"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://fleet.example.test",
+        "ftp://127.0.0.1:8080",
+        "http://169.254.169.254",
+        "https://fleet.example.test/unexpected-path",
+        "https://user@fleet.example.test",
+        "https://fleet.example.test?token=bad",
+        "https://fleet.example.test:invalid",
+        "https://fleet.example.test;touch-bad",
+    ],
+)
 def test_external_mode_rejects_unsafe_url(tmp_path: Path, url: str) -> None:
     env_file = tmp_path / ".hermelin.env"
     env_file.write_text("HERMELIN_PORT=3000\n", encoding="utf-8")
@@ -151,7 +164,7 @@ def test_manager_clone_failure_reports_git_diagnostic_without_prompting(tmp_path
     )
 
     assert result.returncode != 0
-    assert "could not clone the compatible HermelinFleet source:" in result.stderr
+    assert "the compatible HermelinFleet source:" in result.stderr
     assert "terminal prompts disabled" not in result.stderr
 
 
@@ -235,6 +248,7 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
         check=True,
         stdout=subprocess.DEVNULL,
     )
+    fleet_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
     env_file = tmp_path / ".hermelin.env"
     env_file.write_text("HERMELIN_PORT=3000\n", encoding="utf-8")
 
@@ -247,7 +261,7 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
         "--fleet-repository",
         source.as_uri(),
         "--fleet-ref",
-        "manager-test",
+        fleet_commit,
         "--manager-profile",
         "overlay",
         "--manager-host",
@@ -258,6 +272,7 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
     assert result.returncode == 0, result.stderr
     cloned_source = home / ".local" / "share" / "hermelinChat" / "hermelinfleet-source"
     assert (cloned_source / ".git").is_dir()
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=cloned_source, text=True).strip() == fleet_commit
     assert (home / "fleet-install.args").read_text(encoding="utf-8").strip() == (
         f"--mode combined --source {cloned_source} --profile overlay --public-host 192.168.50.10"
     )
@@ -269,14 +284,86 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
     assert "local-test-secret" not in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("kind", ["public-mode", "symlink", "directory", "oversized"])
+def test_node_role_rejects_unsafe_enrollment_token_files_without_changing_env(tmp_path: Path, kind: str) -> None:
+    env_file = tmp_path / ".hermelin.env"
+    original = "HERMELIN_PORT=3000\nHERMELIN_FLEET_MODE=external\n"
+    env_file.write_text(original, encoding="utf-8")
+    token_path = tmp_path / "enrollment.token"
+    if kind == "public-mode":
+        token_path.write_text("private-token\n", encoding="utf-8")
+        token_path.chmod(0o644)
+    elif kind == "symlink":
+        target = tmp_path / "real.token"
+        target.write_text("private-token\n", encoding="utf-8")
+        target.chmod(0o600)
+        token_path.symlink_to(target)
+    elif kind == "directory":
+        token_path.mkdir()
+    else:
+        token_path.write_text("a" * 9000, encoding="utf-8")
+        token_path.chmod(0o600)
+
+    result = run_helper(
+        tmp_path,
+        "--env-file",
+        str(env_file),
+        "--mode",
+        "node",
+        "--url",
+        "http://127.0.0.1:9",
+        "--token-file",
+        str(token_path),
+        "--node-id",
+        "safe-node",
+    )
+
+    expected_error = {
+        "public-mode": "must not be accessible",
+        "symlink": "could not safely open",
+        "directory": "must be a regular file",
+        "oversized": "between 1 byte and 8 KiB",
+    }[kind]
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert env_file.read_text(encoding="utf-8") == original
+
+
+def test_node_role_rejects_shell_syntax_in_stdin_token_without_changing_env(tmp_path: Path) -> None:
+    env_file = tmp_path / ".hermelin.env"
+    original = "HERMELIN_PORT=3000\n"
+    env_file.write_text(original, encoding="utf-8")
+    marker = tmp_path / "must-not-exist"
+    result = run_helper(
+        tmp_path,
+        "--env-file",
+        str(env_file),
+        "--mode",
+        "node",
+        "--url",
+        "http://127.0.0.1:9",
+        "--token-stdin",
+        "--node-id",
+        "safe-node",
+        stdin=f"$(touch${{IFS}}{marker})",
+    )
+
+    assert result.returncode != 0
+    assert env_file.read_text(encoding="utf-8") == original
+    assert not marker.exists()
+
+
 def test_node_role_redeems_header_token_and_runs_join_script_without_configuring_cockpit(tmp_path: Path) -> None:
     captured: dict[str, str] = {}
     join_script = b"""#!/bin/sh
 set -eu
-printf '%s|%s|%s|%s\n' \
+printf '%s|%s|%s|%s|%s|%s\n' \
   "$FLEET_NODE_ID" "$FLEET_PATCH_HERMES" \
   "$FLEET_REMOTE_RUNTIME_BACKEND" "$FLEET_REMOTE_RUNTIME_EXEC_MODE" \
+  "${FLEET_ADMIN_TOKEN-unset}" "${FLEET_ENROLLMENT_TOKEN-unset}" \
   > "$HOME/node-role-result"
+: > "$HOME/node-child-default-mode"
+stat -c '%a' "$HOME/node-child-default-mode" > "$HOME/node-child-default-mode-result"
 stat -c '%a' "$0" > "$HOME/node-role-script-mode"
 """
 
@@ -316,6 +403,12 @@ stat -c '%a' "$0" > "$HOME/node-role-script-mode"
             str(token_file),
             "--node-id",
             "remote-test-node",
+            env={
+                "FLEET_ADMIN_TOKEN": "must-not-reach-child",
+                "FLEET_ENROLLMENT_TOKEN": "must-not-reach-child",
+                "HTTP_PROXY": "http://127.0.0.1:9",
+                "NO_PROXY": "",
+            },
         )
     finally:
         server.shutdown()
@@ -329,8 +422,9 @@ stat -c '%a' "$0" > "$HOME/node-role-script-mode"
         "node_id": "remote-test-node",
     }
     home = tmp_path / "home"
-    assert (home / "node-role-result").read_text(encoding="utf-8").strip() == "remote-test-node|1|tmux|trusted"
+    assert (home / "node-role-result").read_text(encoding="utf-8").strip() == "remote-test-node|1|tmux|trusted|unset|unset"
     assert (home / "node-role-script-mode").read_text(encoding="utf-8").strip() == "700"
+    assert (home / "node-child-default-mode-result").read_text(encoding="utf-8").strip() == "600"
     text = env_file.read_text(encoding="utf-8")
     assert "HERMELIN_FLEET_MODE=off" in text
     assert "HERMELIN_FLEET_SERVICE_TOKEN" not in text

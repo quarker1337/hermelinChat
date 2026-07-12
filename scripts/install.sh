@@ -32,7 +32,7 @@ FLEET_ENROLLMENT_TOKEN_FILE=""
 FLEET_NODE_ID=""
 FLEET_SOURCE=""
 FLEET_REPOSITORY="git@github.com:quarker1337/hermelinfleet.git"
-FLEET_REF="feat/hermelinchat-bridge-runtimes"
+FLEET_REF="4b8d4de8ace133f0982347d5b11c1cb3e1e3e617"
 FLEET_MANAGER_PROFILE="local"
 FLEET_MANAGER_PROFILE_SET=0
 FLEET_MANAGER_HOST=""
@@ -477,6 +477,7 @@ elif [[ "$FLEET_ROLE" == "node" ]]; then
       echo "ERROR: noninteractive node role requires --fleet-enrollment-token-file" >&2
       exit 1
     fi
+    echo "WARNING: joining grants the FleetManager trusted tmux command execution as user $USER on this host."
     echo "On the FleetManager, run: fleet-enroll $FLEET_NODE_ID"
     read -r -s -p "Paste the fresh five-minute enrollment token: " FLEET_ENROLLMENT_TOKEN_STDIN_VALUE
     echo

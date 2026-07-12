@@ -237,9 +237,9 @@ Some artifacts are sandboxed iframes. More complex ones spawn their own HTTP ser
 
 The interactive installer asks one role question:
 
-1. **Local HermelinChat only** (default) — no Fleet processes, ports, or credentials.
-2. **New independent FleetManager** — installs its own Fleet central, local Fleet node, database, credentials, and HermelinChat cockpit. If no `--fleet-source` is supplied, the compatible Fleet ref is cloned automatically into `~/.local/share/hermelinChat/hermelinfleet-source`. The default private-repository clone uses GitHub SSH authentication; use `--fleet-source` for an offline/pre-copied checkout or `--fleet-repository` to override the source URL.
-3. **Join a remote FleetManager** — enrolls this machine as a managed Fleet node using a five-minute node-bound token. It does not copy the manager's admin/service credential and leaves this machine's local Fleet cockpit disabled.
+1. **Local HermelinChat only** (default) — configures no Fleet integration. It does not uninstall Fleet services that were installed previously.
+2. **New independent FleetManager** — installs its own Fleet central, local Fleet node, database, credentials, and HermelinChat cockpit. If no `--fleet-source` is supplied, the installer fetches the exact compatible Fleet commit into `~/.local/share/hermelinChat/hermelinfleet-source`. The default private-repository fetch uses GitHub SSH authentication; use `--fleet-source` for an offline/pre-copied checkout or `--fleet-repository` to override the source URL.
+3. **Join a remote FleetManager** — enrolls this machine as a managed Fleet node using a five-minute node-bound token. It does not copy the manager's admin/service credential and leaves this machine's local Fleet cockpit disabled. Joining grants that manager trusted tmux command execution as the installing user on this host.
 
 ```bash
 ./scripts/install.sh
