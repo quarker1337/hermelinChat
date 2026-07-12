@@ -803,11 +803,17 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         )
         fleet_http_client = None
         if fleet_settings.available:
+            fleet_ca_file = getattr(config, "fleet_ca_file", None)
+            fleet_verify: bool | ssl.SSLContext = True
+            if fleet_ca_file is not None:
+                fleet_verify = ssl.create_default_context(cafile=str(fleet_ca_file))
             fleet_http_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(
                     max(1.0, min(float(getattr(config, "fleet_timeout_seconds", 10.0) or 10.0), 120.0))
                 ),
                 follow_redirects=False,
+                trust_env=False,
+                verify=fleet_verify,
             )
             app.state.fleet_http_client = fleet_http_client
         app.state.fleet_settings = fleet_settings

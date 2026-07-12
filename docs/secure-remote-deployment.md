@@ -21,8 +21,8 @@ Do not expose these ports directly to the public internet:
 ## Installer roles
 
 - `--fleet-role standalone` is the default and installs no Fleet components.
-- `--fleet-role manager` installs an independent central, local node, and HermelinChat cockpit. `--fleet-manager-profile local` is loopback-only; `overlay` requires an explicit private LAN/Tailscale IPv4 and generates private-CA NATS TLS material. The overlay profile's NATS traffic is TLS-protected, but its central API remains HTTP on that private address: prefer Tailscale/VPN transport, or use only a LAN you trust against interception during enrollment.
-- `--fleet-role node` enrolls this host with a five-minute node-bound token and does not copy a remote manager's service/admin credentials into HermelinChat. It explicitly grants the manager trusted tmux command execution as the installing user.
+- `--fleet-role manager` installs an independent central, local node, and HermelinChat cockpit. `--fleet-manager-profile local` is loopback-only; `overlay` requires an explicit private LAN/Tailscale IPv4 and generates one private CA plus an exact IP-SAN server identity for both HTTPS central traffic and TLS 1.3 NATS.
+- `--fleet-role node` enrolls this host from a protected mode-0600 bundle carrying the exact HTTPS manager URL, node ID, five-minute one-use token, and public CA. It does not copy a remote manager's service/admin credentials into HermelinChat and explicitly grants the manager trusted tmux command execution as the installing user.
 - Legacy `--fleet-mode external` is cockpit-only. Use only a scoped HermelinChat service credential, never the dashboard administrator token.
 
 ## HermelinChat requirements
@@ -34,6 +34,8 @@ Do not expose these ports directly to the public internet:
 - Use Secure cookies whenever the browser endpoint is HTTPS.
 - Trust forwarded headers only from the exact reverse-proxy address.
 - Keep `.hermelin.env` mode 0600.
+- Require HTTPS for every non-loopback Fleet bridge/enrollment URL. For a managed overlay, trust the generated private CA through `HERMELIN_FLEET_CA_FILE`; loopback HTTP is the only production exception.
+- Prefer `fleet-enroll --bundle <node-id> <file>` for node enrollment. Transfer the resulting mode-0600 file over an authenticated secure channel; it binds the exact manager URL, node ID, one-time token, and public CA.
 - Do not configure HermelinChat with Fleet's dashboard admin credential; use `HERMELIN_FLEET_SERVICE_TOKEN` or, for reloadable rotation, a mode-0600 `HERMELIN_FLEET_SERVICE_TOKEN_FILE` containing exactly one token.
 
 ## Unsupported configurations

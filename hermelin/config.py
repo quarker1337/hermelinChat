@@ -116,6 +116,9 @@ class HermelinConfig:
         default_factory=lambda: Path(value).expanduser() if (value := os.getenv("HERMELIN_FLEET_SERVICE_TOKEN_FILE", "").strip()) else None,
         repr=False,
     )
+    fleet_ca_file: Path | None = field(
+        default_factory=lambda: Path(value).expanduser() if (value := os.getenv("HERMELIN_FLEET_CA_FILE", "").strip()) else None
+    )
     # Parsed only so older configuration files remain loadable. Administrator
     # identity is never used by the Fleet bridge; configure a scoped service token.
     fleet_admin_token: str = field(
@@ -125,8 +128,8 @@ class HermelinConfig:
     fleet_timeout_seconds: float = field(
         default_factory=lambda: float(os.getenv("HERMELIN_FLEET_TIMEOUT_SECONDS", "10") or "10")
     )
-    # Development escape hatch for a public plain-HTTP Fleet central. Private,
-    # loopback, and overlay HTTP hosts remain allowed without this override.
+    # Development escape hatch for non-loopback plain-HTTP Fleet central.
+    # Production non-loopback managers must use HTTPS.
     fleet_allow_insecure_http: bool = field(
         default_factory=lambda: _env_bool("HERMELIN_FLEET_ALLOW_INSECURE_HTTP", "0")
         or _env_bool("HERMELIN_FLEET_DEV_ALLOW_PUBLIC_HTTP", "0")

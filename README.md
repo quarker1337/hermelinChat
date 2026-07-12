@@ -239,7 +239,7 @@ The interactive installer asks one role question:
 
 1. **Local HermelinChat only** (default) — configures no Fleet integration. It does not uninstall Fleet services that were installed previously.
 2. **New independent FleetManager** — installs its own Fleet central, local Fleet node, database, credentials, and HermelinChat cockpit. If no `--fleet-source` is supplied, the installer fetches the exact compatible Fleet commit into `~/.local/share/hermelinChat/hermelinfleet-source`. The default private-repository fetch uses GitHub SSH authentication; use `--fleet-source` for an offline/pre-copied checkout or `--fleet-repository` to override the source URL.
-3. **Join a remote FleetManager** — enrolls this machine as a managed Fleet node using a five-minute node-bound token. It does not copy the manager's admin/service credential and leaves this machine's local Fleet cockpit disabled. Joining grants that manager trusted tmux command execution as the installing user on this host.
+3. **Join a remote FleetManager** — enrolls this machine from a protected, five-minute node-bound bundle containing the exact HTTPS manager URL, public CA, and one-time token. It does not copy the manager's admin/service credential and leaves this machine's local Fleet cockpit disabled. Joining grants that manager trusted tmux command execution as the installing user on this host.
 
 ```bash
 ./scripts/install.sh
@@ -260,20 +260,19 @@ Scriptable equivalents:
   --fleet-manager-host 192.168.1.10 \
   --yes
 
-# Join a remote manager without putting the one-time token in argv
-umask 077
-printf '%s\n' 'PASTE-FRESH-TOKEN' > /tmp/fleet-enrollment.token
+# On the manager, create one protected enrollment bundle
+fleet-enroll --bundle joining-host ./joining-host.fleet-enrollment
+
+# Securely copy that mode-0600 file to the joining host, then run there
 ./scripts/install.sh --user-service --fleet-role node \
-  --fleet-url http://192.168.1.10:8080 \
-  --fleet-node-id "$(hostname -s)" \
-  --fleet-enrollment-token-file /tmp/fleet-enrollment.token \
+  --fleet-enrollment-bundle-file ./joining-host.fleet-enrollment \
   --yes
-rm -f /tmp/fleet-enrollment.token
+rm -f ./joining-host.fleet-enrollment
 ```
 
-For an interactive node join, choose role 3. The installer prints the exact `fleet-enroll <node-id>` command to run on the manager, then reads the fresh token without echoing it.
+For an interactive node join, choose role 3. The installer prints the exact `fleet-enroll --bundle` command, then asks for the securely copied bundle path. The bundle binds the node ID, exact HTTPS manager URL, five-minute one-use token, and public manager CA in one mode-0600 file.
 
-An overlay manager generates a private CA and IP-SAN server certificate for TLS 1.3 NATS transport. Its HTTP enrollment endpoint remains trusted-LAN/overlay-only; never port-forward ports 8080 or 4222 to the public internet.
+An overlay manager generates one private CA and exact IP-SAN server identity for both its HTTPS API/enrollment/dashboard path and TLS 1.3 NATS transport. Non-loopback plain HTTP is rejected unless the explicit development override is enabled; never port-forward ports 8080 or 4222 to the public internet.
 
 Legacy `--fleet-mode off|local|external` automation remains supported. `external` is an advanced cockpit-only bridge and requires a scoped service credential; it is not the normal managed-node join path.
 
@@ -285,9 +284,12 @@ hermelinChat can sit next to HermelinFleet without sharing internals. Configure 
 
 ```dotenv
 HERMELIN_FLEET_MODE=external
-HERMELIN_FLEET_URL=http://127.0.0.1:8080
+HERMELIN_FLEET_URL=https://192.168.1.10:8080
 HERMELIN_FLEET_SERVICE_TOKEN=[REDACTED]
+HERMELIN_FLEET_CA_FILE=/home/you/.config/hermelinfleet/tls/ca.crt
 ```
+
+Loopback-only managers may continue to use `http://127.0.0.1:8080` without a CA file. Non-loopback HTTP is rejected unless the explicit development-only `HERMELIN_FLEET_ALLOW_INSECURE_HTTP=1` override is set.
 
 The browser never receives the scoped service credential. It calls hermelinChat's same-origin `/api/fleet/*` routes, and hermelinChat forwards to Fleet's versioned `/api/v1/*` bridge API server-side. The service credential cannot log into Fleet's dashboard, access legacy admin APIs, or request secret-bearing metadata.
 

@@ -27,15 +27,6 @@ FLEET_UNAVAILABLE_PAYLOAD = {
     "detail": "fleet integration is not available",
 }
 _VALID_FLEET_MODES = {"off", "external", "local"}
-_OVERLAY_OR_PRIVATE_HOST_SUFFIXES = (
-    ".localhost",
-    ".local",
-    ".lan",
-    ".internal",
-    ".home.arpa",
-    ".ts.net",
-)
-_TAILSCALE_IPV4 = ipaddress.ip_network("100.64.0.0/10")
 
 
 @dataclass(frozen=True)
@@ -91,28 +82,6 @@ def fleet_bridge_token(config: object) -> str:
     return str(getattr(config, "fleet_service_token", "") or "").strip()
 
 
-def _is_loopback_private_or_overlay_host(hostname: str) -> bool:
-    host = str(hostname or "").strip().rstrip(".").lower()
-    if not host:
-        return False
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        address = None
-    if address is not None:
-        return bool(
-            address.is_loopback
-            or address.is_private
-            or address.is_link_local
-            or (isinstance(address, ipaddress.IPv4Address) and address in _TAILSCALE_IPV4)
-        )
-    if host == "localhost" or host.endswith(_OVERLAY_OR_PRIVATE_HOST_SUFFIXES):
-        return True
-    # Single-label names are commonly private DNS/MagicDNS names. This check is
-    # purely syntactic and never performs DNS resolution.
-    return "." not in host
-
-
 def _is_loopback_host(hostname: str) -> bool:
     host = str(hostname or "").strip().rstrip(".").lower()
     if host == "localhost" or host.endswith(".localhost"):
@@ -126,9 +95,8 @@ def _is_loopback_host(hostname: str) -> bool:
 def normalize_fleet_bridge_url(raw: object, *, allow_insecure_public: bool = False) -> str:
     """Return a safe Fleet bridge base URL without a trailing slash.
 
-    HTTPS is accepted for any host. Plain HTTP is restricted to syntactically
-    local/private/overlay hosts unless the explicit development override is on.
-    The validation deliberately performs no DNS lookup.
+    HTTPS is accepted for any host. Plain HTTP is restricted to loopback unless
+    the explicit development override is on. Validation performs no DNS lookup.
     """
     text = str(raw or "").strip().rstrip("/")
     if not text:
@@ -146,7 +114,7 @@ def normalize_fleet_bridge_url(raw: object, *, allow_insecure_public: bool = Fal
     if not hostname:
         return ""
     if parsed.scheme == "http" and not allow_insecure_public:
-        if not _is_loopback_private_or_overlay_host(hostname):
+        if not _is_loopback_host(hostname):
             return ""
     return text
 

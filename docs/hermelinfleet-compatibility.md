@@ -43,4 +43,4 @@ Remote tmux support additionally requires:
 
 ## Security boundary
 
-The supported first remote deployment is loopback or an encrypted private overlay. Direct public exposure of Fleet HTTP, NATS, or Hermes dashboard ports is unsupported until native TLS, scoped identities, per-node authorization, enrollment, and replay protection are enabled.
+The supported remote deployment is loopback or an encrypted private overlay. Overlay central uses HTTPS, NATS uses TLS 1.3, enrollment is node-bound and one-use, and bridge credentials remain server-side. Direct public exposure of Fleet HTTPS, NATS, or Hermes dashboard ports is still unsupported; keep them firewall-restricted to authenticated overlay peers.

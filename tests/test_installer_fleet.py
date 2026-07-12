@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import os
+import ssl
 import stat
 import subprocess
 import sys
@@ -28,6 +30,7 @@ def test_main_installer_exposes_fleet_modes_and_local_service_dependency() -> No
     assert "--fleet-role ROLE" in help_result.stdout
     assert "--fleet-mode MODE" in help_result.stdout  # legacy automation remains supported
     assert "--fleet-enrollment-token-file" in help_result.stdout
+    assert "--fleet-enrollment-bundle-file" in help_result.stdout
     assert "--fleet-manager-profile" in help_result.stdout
     assert "--fleet-manager-host" in help_result.stdout
     assert "--fleet-token-file" in help_result.stdout
@@ -111,6 +114,33 @@ def test_external_mode_reads_token_from_stdin_without_printing_it(tmp_path: Path
     assert f"HERMELIN_FLEET_SERVICE_TOKEN={secret}" in text
     assert "HERMELIN_FLEET_ADMIN_TOKEN" not in text
     assert secret not in result.stdout + result.stderr
+
+
+def test_external_mode_rejects_symlink_service_token_without_changing_env(tmp_path: Path) -> None:
+    env_file = tmp_path / ".hermelin.env"
+    original = "HERMELIN_PORT=3000\n"
+    env_file.write_text(original, encoding="utf-8")
+    target = tmp_path / "real-service.token"
+    target.write_text("external-test-secret\n", encoding="utf-8")
+    token_link = tmp_path / "service.token"
+    token_link.symlink_to(target)
+
+    result = run_helper(
+        tmp_path,
+        "--env-file",
+        str(env_file),
+        "--mode",
+        "external",
+        "--url",
+        "https://fleet.example.test",
+        "--token-file",
+        str(token_link),
+    )
+
+    assert result.returncode != 0
+    assert "could not safely open Fleet token file" in result.stderr
+    assert env_file.read_text(encoding="utf-8") == original
+    assert "external-test-secret" not in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
@@ -229,6 +259,18 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
         (ROOT / "contracts" / "hermelinfleet-api-v1.json").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
+    ca_key = tmp_path / "manager-ca.key"
+    ca_cert = tmp_path / "manager-ca.crt"
+    subprocess.run(
+        [
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-subj", "/CN=Manager Test CA", "-addext", "basicConstraints=critical,CA:TRUE",
+            "-keyout", str(ca_key), "-out", str(ca_cert), "-days", "1",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     installer = scripts / "install.sh"
     installer.write_text(
         "#!/usr/bin/env sh\n"
@@ -236,6 +278,8 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
         "printf '%s\\n' \"$*\" > \"$HOME/fleet-install.args\"\n"
         "mkdir -p \"$HOME/.config/hermelinfleet\"\n"
         "printf 'FLEET_HERMELIN_TOKEN=local-test-secret\\n' > \"$HOME/.config/hermelinfleet/central.env\"\n"
+        "printf 'FLEET_PUBLIC_HTTP_URL=https://192.168.50.10:8080\\n' >> \"$HOME/.config/hermelinfleet/central.env\"\n"
+        f"printf 'FLEET_HTTP_ROOT_CA={ca_cert}\\n' >> \"$HOME/.config/hermelinfleet/central.env\"\n"
         "chmod 600 \"$HOME/.config/hermelinfleet/central.env\"\n",
         encoding="utf-8",
     )
@@ -278,7 +322,8 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
     )
     text = env_file.read_text(encoding="utf-8")
     assert "HERMELIN_FLEET_MODE=external" in text
-    assert "HERMELIN_FLEET_URL=http://192.168.50.10:8080" in text
+    assert "HERMELIN_FLEET_URL=https://192.168.50.10:8080" in text
+    assert f"HERMELIN_FLEET_CA_FILE={ca_cert}" in text
     assert "HERMELIN_FLEET_SERVICE_TOKEN=local-test-secret" in text
     assert "HERMELIN_FLEET_ADMIN_TOKEN" not in text
     assert "local-test-secret" not in result.stdout + result.stderr
@@ -322,7 +367,7 @@ def test_node_role_rejects_unsafe_enrollment_token_files_without_changing_env(tm
         "public-mode": "must not be accessible",
         "symlink": "could not safely open",
         "directory": "must be a regular file",
-        "oversized": "between 1 byte and 8 KiB",
+        "oversized": "has an invalid size",
     }[kind]
     assert result.returncode != 0
     assert expected_error in result.stderr
@@ -381,13 +426,49 @@ stat -c '%a' "$0" > "$HOME/node-role-script-mode"
         def log_message(self, format: str, *args: object) -> None:  # noqa: A002
             del format, args
 
+    ca_key = tmp_path / "ca.key"
+    ca_cert = tmp_path / "ca.crt"
+    server_key = tmp_path / "server.key"
+    server_csr = tmp_path / "server.csr"
+    server_cert = tmp_path / "server.crt"
+    server_ext = tmp_path / "server.ext"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=Fleet Test CA", "-addext", "basicConstraints=critical,CA:TRUE", "-keyout", str(ca_key), "-out", str(ca_cert), "-days", "1"],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["openssl", "req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=127.0.0.1", "-keyout", str(server_key), "-out", str(server_csr)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    server_ext.write_text("subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n", encoding="utf-8")
+    subprocess.run(
+        ["openssl", "x509", "-req", "-in", str(server_csr), "-CA", str(ca_cert), "-CAkey", str(ca_key), "-set_serial", "1", "-days", "1", "-sha256", "-extfile", str(server_ext), "-out", str(server_cert)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
     server = ThreadingHTTPServer(("127.0.0.1", 0), JoinHandler)
+    tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls_context.load_cert_chain(server_cert, server_key)
+    server.socket = tls_context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     token = "five-minute-node-enrollment-token"
-    token_file = tmp_path / "enrollment.token"
-    token_file.write_text(token + "\n", encoding="utf-8")
-    token_file.chmod(0o600)
+    bundle_file = tmp_path / "node.fleet-enrollment"
+    bundle_file.write_text(
+        "HERMELINFLEET_ENROLLMENT_V1\n"
+        "node_id=remote-test-node\n"
+        f"central_url=https://127.0.0.1:{server.server_port}\n"
+        f"token={token}\n"
+        f"ca_base64={base64.b64encode(ca_cert.read_bytes()).decode('ascii')}\n",
+        encoding="utf-8",
+    )
+    bundle_file.chmod(0o600)
     env_file = tmp_path / ".hermelin.env"
     env_file.write_text("HERMELIN_PORT=3000\n", encoding="utf-8")
     try:
@@ -397,12 +478,8 @@ stat -c '%a' "$0" > "$HOME/node-role-script-mode"
             str(env_file),
             "--mode",
             "node",
-            "--url",
-            f"http://127.0.0.1:{server.server_port}",
-            "--token-file",
-            str(token_file),
-            "--node-id",
-            "remote-test-node",
+            "--enrollment-bundle-file",
+            str(bundle_file),
             env={
                 "FLEET_ADMIN_TOKEN": "must-not-reach-child",
                 "FLEET_ENROLLMENT_TOKEN": "must-not-reach-child",

@@ -94,7 +94,7 @@ def _config(tmpdir: str, **overrides) -> HermelinConfig:
         spawn_cwd=tmp / "cwd",
         allowed_ips="*",
         fleet_mode="external",
-        fleet_bridge_url="http://fleet.local:19081",
+        fleet_bridge_url="https://fleet.local:19081",
         fleet_service_token="fleet-secret",
         fleet_admin_token="",
     )
@@ -198,17 +198,20 @@ class FleetProxyTests(unittest.TestCase):
         self.assertTrue(allowed.available)
         self.assertEqual(allowed.base_url, "http://fleet.example")
 
-    def test_external_plain_http_accepts_private_and_overlay_hosts(self):
+    def test_external_plain_http_accepts_only_loopback_without_override(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            urls = (
-                "http://127.0.0.1:8080",
+            loopback = resolve_fleet_settings(
+                _config(tmpdir, fleet_bridge_url="http://127.0.0.1:8080")
+            )
+            non_loopback_urls = (
                 "http://10.20.30.40:8080",
                 "http://100.100.20.30:8080",
                 "http://central.tailnet.ts.net:8080",
             )
-            settings = [resolve_fleet_settings(_config(tmpdir, fleet_bridge_url=url)) for url in urls]
+            blocked = [resolve_fleet_settings(_config(tmpdir, fleet_bridge_url=url)) for url in non_loopback_urls]
 
-        self.assertTrue(all(item.available for item in settings))
+        self.assertTrue(loopback.available)
+        self.assertTrue(all(not item.available for item in blocked))
 
     def test_off_mode_has_no_fleet_client_and_all_http_routes_are_inert(self):
         cases = (
@@ -340,12 +343,12 @@ class FleetProxyTests(unittest.TestCase):
         self.assertEqual(response.json()["agents"], 2)
         self.assertEqual(len(fake.calls), 1)
         self.assertEqual(fake.calls[0]["method"], "GET")
-        self.assertEqual(fake.calls[0]["url"], "http://fleet.local:19081/api/v1/status")
+        self.assertEqual(fake.calls[0]["url"], "https://fleet.local:19081/api/v1/status")
         self.assertEqual(fake.calls[0]["headers"].get("Authorization"), "Bearer fleet-secret")
 
     def test_transport_errors_do_not_reveal_hidden_fleet_url(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            app = create_app(_config(tmpdir, fleet_bridge_url="http://hidden-fleet.internal:19081"))
+            app = create_app(_config(tmpdir, fleet_bridge_url="https://hidden-fleet.internal:19081"))
             with TestClient(app) as client:
                 app.state.fleet_http_client = FailingFleetHTTPClient()
                 response = client.get("/api/fleet/status")
@@ -476,7 +479,7 @@ class FleetProxyTests(unittest.TestCase):
         self.assertEqual(len(fake.calls), 1)
         call = fake.calls[0]
         self.assertEqual(call["method"], "POST")
-        self.assertEqual(call["url"], "http://fleet.local:19081/api/v1/agents/agent%201/inject")
+        self.assertEqual(call["url"], "https://fleet.local:19081/api/v1/agents/agent%201/inject")
         self.assertEqual(call["headers"].get("Authorization"), "Bearer server-token")
         self.assertEqual(call["json"], {"message": "Continue", "session_id": "sess-live"})
         self.assertNotIn("server-token", response.text)
@@ -501,7 +504,7 @@ class FleetProxyTests(unittest.TestCase):
         self.assertEqual(len(fake.calls), 1)
         call = fake.calls[0]
         self.assertEqual(call["method"], "POST")
-        self.assertEqual(call["url"], "http://fleet.local:19081/api/v1/nodes/node-a/runtimes")
+        self.assertEqual(call["url"], "https://fleet.local:19081/api/v1/nodes/node-a/runtimes")
         self.assertEqual(call["headers"].get("Authorization"), "Bearer server-token")
         self.assertEqual(call["json"]["skin"], "nous")
         self.assertEqual(call["json"]["ui_theme"], "nous")

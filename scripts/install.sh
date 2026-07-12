@@ -29,6 +29,8 @@ FLEET_MODE=""
 FLEET_URL=""
 FLEET_TOKEN_FILE=""
 FLEET_ENROLLMENT_TOKEN_FILE=""
+FLEET_ENROLLMENT_BUNDLE_FILE=""
+FLEET_CA_FILE=""
 FLEET_NODE_ID=""
 FLEET_SOURCE=""
 FLEET_REPOSITORY="git@github.com:quarker1337/hermelinfleet.git"
@@ -72,7 +74,10 @@ Options:
   --fleet-mode MODE      Legacy: off, external, or local
   --fleet-url URL        Existing Fleet central URL for node/external mode
   --fleet-enrollment-token-file P
-                         Read a five-minute node enrollment token from a mode-0600 file
+                         Legacy: read a five-minute node enrollment token from a mode-0600 file
+  --fleet-enrollment-bundle-file P
+                         Preferred: protected manager URL + node ID + token + CA bundle
+  --fleet-ca-file P      CA certificate for raw-token HTTPS enrollment/external cockpit
   --fleet-node-id ID     Node identity (default: hostname -s)
   --fleet-token-file P   Legacy external-cockpit service credential file
   --fleet-source DIR     Existing HermelinFleet checkout for manager mode
@@ -183,6 +188,16 @@ while [[ $# -gt 0 ]]; do
     --fleet-enrollment-token-file)
       FLEET_ENROLLMENT_TOKEN_FILE="${2:-}"
       [[ -n "$FLEET_ENROLLMENT_TOKEN_FILE" ]] || { echo "ERROR: --fleet-enrollment-token-file requires a path" >&2; exit 1; }
+      shift 2
+      ;;
+    --fleet-enrollment-bundle-file)
+      FLEET_ENROLLMENT_BUNDLE_FILE="${2:-}"
+      [[ -n "$FLEET_ENROLLMENT_BUNDLE_FILE" ]] || { echo "ERROR: --fleet-enrollment-bundle-file requires a path" >&2; exit 1; }
+      shift 2
+      ;;
+    --fleet-ca-file)
+      FLEET_CA_FILE="${2:-}"
+      [[ -n "$FLEET_CA_FILE" ]] || { echo "ERROR: --fleet-ca-file requires a path" >&2; exit 1; }
       shift 2
       ;;
     --fleet-node-id)
@@ -465,29 +480,47 @@ if [[ "$FLEET_ROLE" == "manager" ]]; then
     [[ -n "$FLEET_MANAGER_HOST" ]] || { echo "ERROR: overlay manager requires a private IPv4 address" >&2; exit 1; }
   fi
 elif [[ "$FLEET_ROLE" == "node" ]]; then
-  if [[ -z "$FLEET_URL" && "$YES" -eq 0 ]]; then
-    read -r -p "Remote FleetManager URL (for example http://192.168.1.10:8080): " FLEET_URL
-  fi
-  [[ -n "$FLEET_URL" ]] || { echo "ERROR: node role requires --fleet-url" >&2; exit 1; }
-  if [[ -z "$FLEET_NODE_ID" ]]; then
-    FLEET_NODE_ID="$(hostname -s 2>/dev/null || hostname)"
-  fi
-  if [[ -z "$FLEET_ENROLLMENT_TOKEN_FILE" ]]; then
+  echo "WARNING: joining grants the FleetManager trusted tmux command execution as user $USER on this host."
+  if [[ -z "$FLEET_ENROLLMENT_BUNDLE_FILE" && -z "$FLEET_ENROLLMENT_TOKEN_FILE" ]]; then
     if [[ "$YES" -eq 1 ]]; then
-      echo "ERROR: noninteractive node role requires --fleet-enrollment-token-file" >&2
+      echo "ERROR: noninteractive node role requires --fleet-enrollment-bundle-file (preferred) or --fleet-enrollment-token-file" >&2
       exit 1
     fi
-    echo "WARNING: joining grants the FleetManager trusted tmux command execution as user $USER on this host."
-    echo "On the FleetManager, run: fleet-enroll $FLEET_NODE_ID"
-    read -r -s -p "Paste the fresh five-minute enrollment token: " FLEET_ENROLLMENT_TOKEN_STDIN_VALUE
-    echo
-    [[ -n "$FLEET_ENROLLMENT_TOKEN_STDIN_VALUE" ]] || { echo "ERROR: Fleet enrollment token cannot be empty" >&2; exit 1; }
+    suggested_node_id="${FLEET_NODE_ID:-$(hostname -s 2>/dev/null || hostname)}"
+    echo "On the FleetManager, run: fleet-enroll --bundle $suggested_node_id ./$suggested_node_id.fleet-enrollment"
+    echo "Securely copy that mode-0600 bundle to this host."
+    read -r -p "Enrollment bundle path (leave blank for legacy raw-token setup): " FLEET_ENROLLMENT_BUNDLE_FILE
+  fi
+  if [[ -n "$FLEET_ENROLLMENT_BUNDLE_FILE" ]]; then
+    if [[ -n "$FLEET_ENROLLMENT_TOKEN_FILE" || -n "$FLEET_URL" || -n "$FLEET_NODE_ID" || -n "$FLEET_CA_FILE" ]]; then
+      echo "ERROR: --fleet-enrollment-bundle-file cannot be combined with raw Fleet URL, node ID, token, or CA options" >&2
+      exit 1
+    fi
+  else
+    if [[ -z "$FLEET_URL" && "$YES" -eq 0 ]]; then
+      read -r -p "Remote FleetManager HTTPS URL: " FLEET_URL
+    fi
+    [[ -n "$FLEET_URL" ]] || { echo "ERROR: raw-token node role requires --fleet-url" >&2; exit 1; }
+    if [[ -z "$FLEET_NODE_ID" ]]; then
+      FLEET_NODE_ID="$(hostname -s 2>/dev/null || hostname)"
+    fi
+    if [[ -z "$FLEET_ENROLLMENT_TOKEN_FILE" ]]; then
+      read -r -s -p "Paste the fresh five-minute enrollment token: " FLEET_ENROLLMENT_TOKEN_STDIN_VALUE
+      echo
+      [[ -n "$FLEET_ENROLLMENT_TOKEN_STDIN_VALUE" ]] || { echo "ERROR: Fleet enrollment token cannot be empty" >&2; exit 1; }
+    fi
+    if [[ -z "$FLEET_CA_FILE" && "$FLEET_URL" == https://* && "$YES" -eq 0 ]]; then
+      read -r -p "Private manager CA certificate path (leave blank for a public CA): " FLEET_CA_FILE
+    fi
   fi
 elif [[ "$FLEET_ROLE" == "external" ]]; then
   if [[ -z "$FLEET_URL" && "$YES" -eq 0 ]]; then
-    read -r -p "HermelinFleet central URL (HTTPS or private/loopback HTTP): " FLEET_URL
+    read -r -p "HermelinFleet central URL (HTTPS or loopback HTTP): " FLEET_URL
   fi
   [[ -n "$FLEET_URL" ]] || { echo "ERROR: external Fleet mode requires --fleet-url" >&2; exit 1; }
+  if [[ -z "$FLEET_CA_FILE" && "$FLEET_URL" == https://* && "$YES" -eq 0 ]]; then
+    read -r -p "Private manager CA certificate path (leave blank for a public CA): " FLEET_CA_FILE
+  fi
   if [[ -z "$FLEET_TOKEN_FILE" ]]; then
     if [[ "$YES" -eq 1 ]]; then
       echo "ERROR: noninteractive external Fleet mode requires --fleet-token-file" >&2
@@ -517,8 +550,14 @@ fi
 
 echo "  - build backend + frontend: yes (via ./scripts/update.sh)"
 echo "  - HermelinFleet role: $FLEET_ROLE"
-if [[ "$FLEET_ROLE" == "external" || "$FLEET_ROLE" == "node" ]]; then
+if [[ "$FLEET_ROLE" == "external" ]]; then
   echo "    endpoint: $FLEET_URL"
+elif [[ "$FLEET_ROLE" == "node" ]]; then
+  if [[ -n "$FLEET_ENROLLMENT_BUNDLE_FILE" ]]; then
+    echo "    enrollment bundle: $FLEET_ENROLLMENT_BUNDLE_FILE"
+  else
+    echo "    endpoint: $FLEET_URL"
+  fi
 elif [[ "$FLEET_ROLE" == "manager" ]]; then
   if [[ -n "$FLEET_SOURCE" ]]; then
     echo "    source: $FLEET_SOURCE"
@@ -632,6 +671,9 @@ case "$FLEET_MODE" in
     ;;
   external)
     FLEET_CONFIG_ARGS+=(--url "$FLEET_URL")
+    if [[ -n "$FLEET_CA_FILE" ]]; then
+      FLEET_CONFIG_ARGS+=(--ca-file "$FLEET_CA_FILE")
+    fi
     if [[ -n "$FLEET_TOKEN_FILE" ]]; then
       python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --token-file "$FLEET_TOKEN_FILE"
     else
@@ -640,11 +682,18 @@ case "$FLEET_MODE" in
     FLEET_TOKEN_STDIN_VALUE=""
     ;;
   node)
-    FLEET_CONFIG_ARGS+=(--url "$FLEET_URL" --node-id "$FLEET_NODE_ID")
-    if [[ -n "$FLEET_ENROLLMENT_TOKEN_FILE" ]]; then
-      python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --token-file "$FLEET_ENROLLMENT_TOKEN_FILE"
+    if [[ -n "$FLEET_ENROLLMENT_BUNDLE_FILE" ]]; then
+      python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --enrollment-bundle-file "$FLEET_ENROLLMENT_BUNDLE_FILE"
     else
-      printf '%s' "$FLEET_ENROLLMENT_TOKEN_STDIN_VALUE" | python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --token-stdin
+      FLEET_CONFIG_ARGS+=(--url "$FLEET_URL" --node-id "$FLEET_NODE_ID")
+      if [[ -n "$FLEET_CA_FILE" ]]; then
+        FLEET_CONFIG_ARGS+=(--ca-file "$FLEET_CA_FILE")
+      fi
+      if [[ -n "$FLEET_ENROLLMENT_TOKEN_FILE" ]]; then
+        python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --token-file "$FLEET_ENROLLMENT_TOKEN_FILE"
+      else
+        printf '%s' "$FLEET_ENROLLMENT_TOKEN_STDIN_VALUE" | python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --token-stdin
+      fi
     fi
     FLEET_ENROLLMENT_TOKEN_STDIN_VALUE=""
     ;;
