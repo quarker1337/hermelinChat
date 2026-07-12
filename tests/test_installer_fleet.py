@@ -33,6 +33,7 @@ def test_main_installer_exposes_fleet_modes_and_local_service_dependency() -> No
     assert "--fleet-token-file" in help_result.stdout
     script = INSTALLER.read_text(encoding="utf-8")
     assert 'FLEET_ROLE="standalone"' in script  # -y default
+    assert 'FLEET_REPOSITORY="git@github.com:quarker1337/hermelinfleet.git"' in script
     assert "Choose this HermelinChat host's role" in script
     assert "New independent FleetManager" in script
     assert "Join a remote FleetManager" in script
@@ -131,6 +132,49 @@ def test_external_mode_rejects_unsafe_url(tmp_path: Path, url: str) -> None:
     assert result.returncode != 0
     assert "unsafe Fleet URL" in result.stderr
     assert "secret" not in result.stdout + result.stderr
+
+
+def test_manager_clone_failure_reports_git_diagnostic_without_prompting(tmp_path: Path) -> None:
+    env_file = tmp_path / ".hermelin.env"
+    env_file.write_text("HERMELIN_PORT=3000\n", encoding="utf-8")
+
+    result = run_helper(
+        tmp_path,
+        "--env-file",
+        str(env_file),
+        "--mode",
+        "local",
+        "--fleet-repository",
+        "file:///definitely/missing/hermelinfleet.git",
+        "--fleet-ref",
+        "missing-ref",
+    )
+
+    assert result.returncode != 0
+    assert "could not clone the compatible HermelinFleet source:" in result.stderr
+    assert "terminal prompts disabled" not in result.stderr
+
+
+def test_manager_clone_rejects_embedded_repository_credentials(tmp_path: Path) -> None:
+    env_file = tmp_path / ".hermelin.env"
+    env_file.write_text("HERMELIN_PORT=3000\n", encoding="utf-8")
+    repository = "https://user:do-not-print@example.test/fleet.git"
+
+    result = run_helper(
+        tmp_path,
+        "--env-file",
+        str(env_file),
+        "--mode",
+        "local",
+        "--fleet-repository",
+        repository,
+        "--fleet-ref",
+        "main",
+    )
+
+    assert result.returncode != 0
+    assert "credential-free HTTPS, SSH, or file://" in result.stderr
+    assert "do-not-print" not in result.stdout + result.stderr
 
 
 def test_local_mode_rejects_mismatched_fleet_contract_before_install(tmp_path: Path) -> None:

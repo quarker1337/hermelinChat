@@ -28,7 +28,7 @@ FLEET_KEYS = {
 SHARED_OVERLAY = ipaddress.ip_network("100.64.0.0/10")
 NODE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_JOIN_SCRIPT_BYTES = 1024 * 1024
-DEFAULT_FLEET_REPOSITORY = "https://github.com/quarker1337/hermelinfleet.git"
+DEFAULT_FLEET_REPOSITORY = "git@github.com:quarker1337/hermelinfleet.git"
 DEFAULT_FLEET_REF = "feat/hermelinchat-bridge-runtimes"
 
 
@@ -144,8 +144,21 @@ def resolve_fleet_source(source: str, repository: str, ref: str) -> str:
     if source:
         return str(Path(source).expanduser().resolve())
     parsed = urlparse(repository)
-    if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.scheme not in {"https", "file"}:
-        fail("automatic Fleet source requires a credential-free HTTPS or file:// repository URL")
+    scp_style_ssh = re.fullmatch(r"[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._/-]+", repository)
+    safe_url = (
+        parsed.scheme in {"https", "file"}
+        and not parsed.username
+        and not parsed.password
+        and not parsed.query
+        and not parsed.fragment
+    ) or (
+        parsed.scheme == "ssh"
+        and not parsed.password
+        and not parsed.query
+        and not parsed.fragment
+    )
+    if not safe_url and not scp_style_ssh:
+        fail("automatic Fleet source requires a credential-free HTTPS, SSH, or file:// repository URL")
     if not ref or ref.startswith("-") or any(ch.isspace() for ch in ref):
         fail("unsafe Fleet repository ref")
     destination = Path.home() / ".local" / "share" / "hermelinChat" / "hermelinfleet-source"
@@ -158,16 +171,21 @@ def resolve_fleet_source(source: str, repository: str, ref: str) -> str:
         destination.parent.chmod(0o700)
     except OSError:
         pass
+    clone_env = os.environ.copy()
+    clone_env["GIT_TERMINAL_PROMPT"] = "0"
     result = subprocess.run(
         ["git", "clone", "--depth", "1", "--branch", ref, "--", repository, str(destination)],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        env=clone_env,
     )
     if result.returncode != 0:
         shutil.rmtree(destination, ignore_errors=True)
-        fail("could not clone the compatible HermelinFleet source")
+        diagnostics = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+        detail = diagnostics[-1][:300] if diagnostics else f"git exited with status {result.returncode}"
+        fail(f"could not clone the compatible HermelinFleet source: {detail}")
     return str(destination.resolve())
 
 
