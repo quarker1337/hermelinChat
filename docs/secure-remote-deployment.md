@@ -34,7 +34,7 @@ Do not expose these ports directly to the public internet:
 - Use Secure cookies whenever the browser endpoint is HTTPS.
 - Trust forwarded headers only from the exact reverse-proxy address.
 - Keep `.hermelin.env` mode 0600.
-- Require HTTPS for every non-loopback Fleet bridge/enrollment URL. For a managed overlay, trust the generated private CA through `HERMELIN_FLEET_CA_FILE`; loopback HTTP is the only production exception.
+- Require HTTPS/WSS for every non-loopback Fleet bridge, enrollment, and runtime-attach URL. For a managed overlay, trust the generated private CA through `HERMELIN_FLEET_CA_FILE`; HermelinChat loads that owner-controlled, non-writable trust anchor into both HTTP and WebSocket clients. Loopback HTTP/WS is the only production exception.
 - Prefer `fleet-enroll --bundle <node-id> <file>` for node enrollment. Transfer the resulting mode-0600 file over an authenticated secure channel; it binds the exact manager URL, node ID, one-time token, and public CA.
 - Do not configure HermelinChat with Fleet's dashboard admin credential; use `HERMELIN_FLEET_SERVICE_TOKEN` or, for reloadable rotation, a mode-0600 `HERMELIN_FLEET_SERVICE_TOKEN_FILE` containing exactly one token.
 

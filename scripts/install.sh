@@ -34,7 +34,7 @@ FLEET_CA_FILE=""
 FLEET_NODE_ID=""
 FLEET_SOURCE=""
 FLEET_REPOSITORY="git@github.com:quarker1337/hermelinfleet.git"
-FLEET_REF="4b8d4de8ace133f0982347d5b11c1cb3e1e3e617"
+FLEET_REF="9fe333b39741de935086b16f529ddcb8632a29a7"
 FLEET_MANAGER_PROFILE="local"
 FLEET_MANAGER_PROFILE_SET=0
 FLEET_MANAGER_HOST=""
@@ -437,6 +437,10 @@ if [[ -z "$FLEET_ROLE" && -n "$FLEET_MODE" ]]; then
   esac
 fi
 
+if [[ -z "$FLEET_ROLE" && -z "$FLEET_MODE" && -n "$FLEET_ENROLLMENT_BUNDLE_FILE" ]]; then
+  FLEET_ROLE="node"
+fi
+
 if [[ -z "$FLEET_ROLE" ]]; then
   if [[ "$YES" -eq 1 ]]; then
     FLEET_ROLE="standalone"
@@ -462,6 +466,11 @@ case "$FLEET_ROLE" in
   *) echo "ERROR: unsupported Fleet role: $FLEET_ROLE" >&2; exit 1 ;;
 esac
 
+if [[ -n "$FLEET_ENROLLMENT_BUNDLE_FILE" && "$FLEET_ROLE" != "node" ]]; then
+  echo "ERROR: --fleet-enrollment-bundle-file is only valid for the node role" >&2
+  exit 1
+fi
+
 if [[ "$FLEET_ROLE" == "manager" ]]; then
   if [[ "$FLEET_MANAGER_PROFILE_SET" -eq 0 && "$YES" -eq 0 ]]; then
     read -r -p "Allow other LAN/Tailscale machines to join this manager? [y/N] " _fleet_overlay
@@ -480,7 +489,7 @@ if [[ "$FLEET_ROLE" == "manager" ]]; then
     [[ -n "$FLEET_MANAGER_HOST" ]] || { echo "ERROR: overlay manager requires a private IPv4 address" >&2; exit 1; }
   fi
 elif [[ "$FLEET_ROLE" == "node" ]]; then
-  echo "WARNING: joining grants the FleetManager trusted tmux command execution as user $USER on this host."
+  echo "WARNING: joining grants the FleetManager trusted tmux command execution as user $DEFAULT_USER on this host."
   if [[ -z "$FLEET_ENROLLMENT_BUNDLE_FILE" && -z "$FLEET_ENROLLMENT_TOKEN_FILE" ]]; then
     if [[ "$YES" -eq 1 ]]; then
       echo "ERROR: noninteractive node role requires --fleet-enrollment-bundle-file (preferred) or --fleet-enrollment-token-file" >&2

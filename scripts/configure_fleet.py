@@ -33,13 +33,14 @@ FLEET_KEYS = {
 }
 NODE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9._~-]{1,8192}$")
+SAFE_ENV_PATH_PATTERN = re.compile(r"^/[A-Za-z0-9._/+~-]+$")
 IMMUTABLE_GIT_REF_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 MAX_TOKEN_BYTES = 8192
 MAX_BUNDLE_BYTES = 128 * 1024
 MAX_CA_BYTES = 64 * 1024
 MAX_JOIN_SCRIPT_BYTES = 1024 * 1024
 DEFAULT_FLEET_REPOSITORY = "git@github.com:quarker1337/hermelinfleet.git"
-DEFAULT_FLEET_REF = "f47da678b24ea6240a2785d3a585f23981e1a187"
+DEFAULT_FLEET_REF = "9fe333b39741de935086b16f529ddcb8632a29a7"
 
 
 @dataclass(frozen=True)
@@ -191,10 +192,31 @@ def read_ca_file(path: str) -> str:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > MAX_CA_BYTES:
             fail("Fleet CA certificate must be a regular file no larger than 64 KiB")
-        data = os.read(fd, MAX_CA_BYTES + 1)
+        if info.st_uid not in {0, os.geteuid()} or info.st_mode & 0o022:
+            fail("Fleet CA certificate must be owner-controlled and not group/world-writable")
+        chunks: list[bytes] = []
+        remaining = MAX_CA_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(4096, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
     finally:
         os.close(fd)
     return validate_ca_pem(data)
+
+
+def safe_persisted_ca_path(path: str) -> str:
+    try:
+        resolved = Path(path).expanduser().resolve(strict=True)
+    except OSError:
+        fail("could not resolve Fleet CA certificate path")
+    text = str(resolved)
+    if not SAFE_ENV_PATH_PATTERN.fullmatch(text):
+        fail("Fleet CA certificate path contains characters unsafe for the environment file")
+    return text
 
 
 def read_enrollment_bundle(path: str) -> EnrollmentMaterial:
@@ -422,7 +444,7 @@ def install_local(source: str, *, manager_profile: str = "local", manager_host: 
         if not ca_file:
             fail("HermelinFleet overlay installer did not publish its HTTP root CA")
         read_ca_file(ca_file)
-        return url, token, "external", str(Path(ca_file).expanduser().resolve())
+        return url, token, "external", safe_persisted_ca_path(ca_file)
     return url, token, "local", ""
 
 
@@ -528,7 +550,7 @@ def main() -> None:
         ca_file = ""
         if args.ca_file:
             read_ca_file(args.ca_file)
-            ca_file = str(Path(args.ca_file).expanduser().resolve())
+            ca_file = safe_persisted_ca_path(args.ca_file)
         update_env_file(
             env_file,
             {

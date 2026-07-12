@@ -15,6 +15,7 @@ import shlex
 import shutil
 import signal
 import ssl
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -25,6 +26,34 @@ import yaml
 logger = logging.getLogger("hermelin")
 
 _FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES = 64 << 10
+_FLEET_CA_MAX_BYTES = 64 << 10
+
+
+def _fleet_ssl_context(ca_file: Path | None) -> ssl.SSLContext:
+    if ca_file is None:
+        return ssl.create_default_context()
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(Path(ca_file).expanduser(), flags)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > _FLEET_CA_MAX_BYTES:
+            raise ValueError("Fleet CA certificate must be a bounded regular file")
+        if info.st_uid not in {0, os.geteuid()} or info.st_mode & 0o022:
+            raise PermissionError("Fleet CA certificate must be owner-controlled and not group/world-writable")
+        chunks: list[bytes] = []
+        remaining = _FLEET_CA_MAX_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(4096, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    finally:
+        os.close(fd)
+    payload = b"".join(chunks)
+    if not payload or len(payload) > _FLEET_CA_MAX_BYTES:
+        raise ValueError("Fleet CA certificate has an invalid size")
+    return ssl.create_default_context(cadata=payload.decode("ascii"))
 
 
 def _fleet_runtime_attach_frame_size(message: bytes | str) -> int:
@@ -802,11 +831,12 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             follow_redirects=False,
         )
         fleet_http_client = None
+        fleet_ssl_context: ssl.SSLContext | None = None
         if fleet_settings.available:
             fleet_ca_file = getattr(config, "fleet_ca_file", None)
-            fleet_verify: bool | ssl.SSLContext = True
-            if fleet_ca_file is not None:
-                fleet_verify = ssl.create_default_context(cafile=str(fleet_ca_file))
+            if fleet_settings.base_url.startswith("https://") or fleet_ca_file is not None:
+                fleet_ssl_context = _fleet_ssl_context(fleet_ca_file)
+            fleet_verify: bool | ssl.SSLContext = fleet_ssl_context or True
             fleet_http_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(
                     max(1.0, min(float(getattr(config, "fleet_timeout_seconds", 10.0) or 10.0), 120.0))
@@ -816,6 +846,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 verify=fleet_verify,
             )
             app.state.fleet_http_client = fleet_http_client
+        app.state.fleet_ssl_context = fleet_ssl_context
         app.state.fleet_settings = fleet_settings
         app.state.hermes_dashboard_manager = dashboard_manager
         app.state.pet_event_channels = {}
@@ -3852,6 +3883,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 max_size=_FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES,
                 max_queue=4,
                 proxy=None,
+                ssl=getattr(app.state, "fleet_ssl_context", None) if ws_scheme == "wss" else None,
             ) as upstream:
                 async def _upstream_to_browser() -> None:
                     async for message in upstream:

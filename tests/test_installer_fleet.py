@@ -37,7 +37,10 @@ def test_main_installer_exposes_fleet_modes_and_local_service_dependency() -> No
     script = INSTALLER.read_text(encoding="utf-8")
     assert 'FLEET_ROLE="standalone"' in script  # -y default
     assert 'FLEET_REPOSITORY="git@github.com:quarker1337/hermelinfleet.git"' in script
-    assert 'FLEET_REF="4b8d4de8ace133f0982347d5b11c1cb3e1e3e617"' in script
+    assert 'FLEET_REF="9fe333b39741de935086b16f529ddcb8632a29a7"' in script
+    assert '&& -n "$FLEET_ENROLLMENT_BUNDLE_FILE" ]]; then\n  FLEET_ROLE="node"' in script
+    assert '--fleet-enrollment-bundle-file is only valid for the node role' in script
+    assert 'as user $DEFAULT_USER on this host' in script
     assert "Choose this HermelinChat host's role" in script
     assert "New independent FleetManager" in script
     assert "Join a remote FleetManager" in script
@@ -141,6 +144,65 @@ def test_external_mode_rejects_symlink_service_token_without_changing_env(tmp_pa
     assert "could not safely open Fleet token file" in result.stderr
     assert env_file.read_text(encoding="utf-8") == original
     assert "external-test-secret" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_error"),
+    [
+        ("world-writable", "owner-controlled"),
+        ("shell-unsafe-path", "unsafe for the environment file"),
+    ],
+)
+def test_external_mode_rejects_unsafe_ca_persistence(
+    tmp_path: Path, kind: str, expected_error: str
+) -> None:
+    env_file = tmp_path / ".hermelin.env"
+    original = "HERMELIN_PORT=3000\n"
+    env_file.write_text(original, encoding="utf-8")
+    ca_file = tmp_path / ("ca with space.crt" if kind == "shell-unsafe-path" else "ca.crt")
+    ca_key = tmp_path / "ca.key"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=Fleet Test CA",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+            "-keyout",
+            str(ca_key),
+            "-out",
+            str(ca_file),
+            "-days",
+            "1",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    ca_file.chmod(0o666 if kind == "world-writable" else 0o644)
+
+    result = run_helper(
+        tmp_path,
+        "--env-file",
+        str(env_file),
+        "--mode",
+        "external",
+        "--url",
+        "https://fleet.example.test",
+        "--token-stdin",
+        "--ca-file",
+        str(ca_file),
+        stdin="external-test-secret",
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert env_file.read_text(encoding="utf-8") == original
 
 
 @pytest.mark.parametrize(
@@ -271,6 +333,7 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    ca_cert.chmod(0o644)
     installer = scripts / "install.sh"
     installer.write_text(
         "#!/usr/bin/env sh\n"
@@ -396,6 +459,79 @@ def test_node_role_rejects_shell_syntax_in_stdin_token_without_changing_env(tmp_
     assert result.returncode != 0
     assert env_file.read_text(encoding="utf-8") == original
     assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_error"),
+    [
+        ("public-mode", "must not be accessible"),
+        ("symlink", "could not safely open"),
+        ("oversized", "invalid size"),
+        ("invalid-utf8", "valid UTF-8"),
+        ("malformed-field", "malformed field"),
+        ("duplicate-field", "unexpected or duplicate"),
+        ("unknown-field", "unexpected or duplicate"),
+        ("missing-field", "incomplete"),
+        ("invalid-base64", "invalid CA encoding"),
+        ("invalid-pem", "not a valid PEM"),
+        ("insecure-url", "non-loopback HTTP requires https"),
+    ],
+)
+def test_node_role_rejects_malformed_or_unsafe_enrollment_bundle(
+    tmp_path: Path, kind: str, expected_error: str
+) -> None:
+    env_file = tmp_path / ".hermelin.env"
+    original = "HERMELIN_PORT=3000\n"
+    env_file.write_text(original, encoding="utf-8")
+    bundle = tmp_path / "node.fleet-enrollment"
+    fields = [
+        "HERMELINFLEET_ENROLLMENT_V1",
+        "node_id=safe-node",
+        "central_url=https://fleet.example.test:8080",
+        "token=five-minute-token",
+        "ca_base64=",
+    ]
+    if kind == "symlink":
+        target = tmp_path / "real.fleet-enrollment"
+        target.write_text("\n".join(fields) + "\n", encoding="utf-8")
+        target.chmod(0o600)
+        bundle.symlink_to(target)
+    elif kind == "oversized":
+        bundle.write_bytes(b"x" * (128 * 1024 + 1))
+    elif kind == "invalid-utf8":
+        bundle.write_bytes(b"HERMELINFLEET_ENROLLMENT_V1\n\xff")
+    else:
+        if kind == "malformed-field":
+            fields.append("malformed")
+        elif kind == "duplicate-field":
+            fields.append("token=duplicate")
+        elif kind == "unknown-field":
+            fields.append("unexpected=value")
+        elif kind == "missing-field":
+            fields = [field for field in fields if not field.startswith("token=")]
+        elif kind == "invalid-base64":
+            fields[-1] = "ca_base64=%%%"
+        elif kind == "invalid-pem":
+            fields[-1] = f"ca_base64={base64.b64encode(b'not a certificate').decode('ascii')}"
+        elif kind == "insecure-url":
+            fields[2] = "central_url=http://10.0.0.9:8080"
+        bundle.write_text("\n".join(fields) + "\n", encoding="utf-8")
+    if kind != "symlink":
+        bundle.chmod(0o644 if kind == "public-mode" else 0o600)
+
+    result = run_helper(
+        tmp_path,
+        "--env-file",
+        str(env_file),
+        "--mode",
+        "node",
+        "--enrollment-bundle-file",
+        str(bundle),
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert env_file.read_text(encoding="utf-8") == original
 
 
 def test_node_role_redeems_header_token_and_runs_join_script_without_configuring_cockpit(tmp_path: Path) -> None:

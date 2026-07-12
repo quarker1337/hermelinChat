@@ -1,4 +1,7 @@
+import asyncio
 import os
+import ssl
+import subprocess
 import tempfile
 import unittest
 import warnings
@@ -6,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
+import websockets
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -20,6 +24,7 @@ from hermelin.fleet_proxy import (
 from hermelin.server import (
     _FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES,
     _fleet_runtime_attach_frame_size,
+    _fleet_ssl_context,
     create_app,
 )
 
@@ -298,13 +303,108 @@ class FleetProxyTests(unittest.TestCase):
         self.assertEqual(ticket_call["json"]["user_id"], "hermelin-browser")
         self.assertEqual(len(ticket_call["json"]["session_id"]), 64)
         connect.assert_called_once()
+        self.assertTrue(str(connect.call_args.args[0]).startswith("wss://"))
         websocket_headers = connect.call_args.kwargs["additional_headers"]
         self.assertEqual(websocket_headers.get("Authorization"), "Bearer single-use-ticket")
         self.assertEqual(websocket_headers.get("X-Fleet-Attach-User-ID"), "hermelin-browser")
         self.assertEqual(websocket_headers.get("X-Fleet-Attach-Session-ID"), ticket_call["json"]["session_id"])
         self.assertEqual(connect.call_args.kwargs["max_size"], _FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES)
         self.assertEqual(connect.call_args.kwargs["max_queue"], 4)
+        self.assertIsInstance(connect.call_args.kwargs["ssl"], ssl.SSLContext)
+        self.assertIs(connect.call_args.kwargs["ssl"], app.state.fleet_ssl_context)
+        self.assertIsNone(connect.call_args.kwargs["proxy"])
         self.assertNotIn("service-token", str(connect.call_args))
+
+    def test_runtime_ca_context_reads_bounded_owner_controlled_regular_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ca_file = Path(tmpdir) / "fleet-ca.crt"
+            ca_key = Path(tmpdir) / "fleet-ca.key"
+            subprocess.run(
+                [
+                    "openssl",
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-subj",
+                    "/CN=Fleet Runtime Test CA",
+                    "-addext",
+                    "basicConstraints=critical,CA:TRUE",
+                    "-keyout",
+                    str(ca_key),
+                    "-out",
+                    str(ca_file),
+                    "-days",
+                    "1",
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            ca_file.chmod(0o644)
+            self.assertIsInstance(_fleet_ssl_context(ca_file), ssl.SSLContext)
+
+            ca_file.chmod(0o666)
+            with self.assertRaises(PermissionError):
+                _fleet_ssl_context(ca_file)
+
+            ca_file.chmod(0o644)
+            ca_link = Path(tmpdir) / "fleet-ca-link.crt"
+            ca_link.symlink_to(ca_file)
+            with self.assertRaises(OSError):
+                _fleet_ssl_context(ca_link)
+
+    def test_private_ca_context_completes_real_wss_handshake(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            ca_key = root / "ca.key"
+            ca_cert = root / "ca.crt"
+            server_key = root / "server.key"
+            server_csr = root / "server.csr"
+            server_cert = root / "server.crt"
+            extensions = root / "server.ext"
+            subprocess.run(
+                ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=Fleet WSS Test CA", "-addext", "basicConstraints=critical,CA:TRUE", "-keyout", str(ca_key), "-out", str(ca_cert), "-days", "1"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            subprocess.run(
+                ["openssl", "req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=127.0.0.1", "-keyout", str(server_key), "-out", str(server_csr)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            extensions.write_text("subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n", encoding="utf-8")
+            subprocess.run(
+                ["openssl", "x509", "-req", "-in", str(server_csr), "-CA", str(ca_cert), "-CAkey", str(ca_key), "-set_serial", "1", "-days", "1", "-sha256", "-extfile", str(extensions), "-out", str(server_cert)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            ca_cert.chmod(0o644)
+            server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            server_context.load_cert_chain(server_cert, server_key)
+
+            async def scenario() -> None:
+                async def handler(connection) -> None:
+                    await connection.send("ok")
+
+                server = await websockets.serve(handler, "127.0.0.1", 0, ssl=server_context)
+                try:
+                    port = server.sockets[0].getsockname()[1]
+                    async with websockets.connect(
+                        f"wss://127.0.0.1:{port}",
+                        ssl=_fleet_ssl_context(ca_cert),
+                        proxy=None,
+                    ) as connection:
+                        self.assertEqual(await connection.recv(), "ok")
+                finally:
+                    server.close()
+                    await server.wait_closed()
+
+            asyncio.run(scenario())
 
     def test_runtime_attach_frame_budget_counts_utf8_wire_bytes(self):
         limit = _FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES
