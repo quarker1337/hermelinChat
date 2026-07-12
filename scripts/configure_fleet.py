@@ -7,12 +7,16 @@ import argparse
 import ipaddress
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import NoReturn
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 FLEET_KEYS = {
@@ -22,6 +26,15 @@ FLEET_KEYS = {
     "HERMELIN_FLEET_SERVICE_TOKEN",
 }
 SHARED_OVERLAY = ipaddress.ip_network("100.64.0.0/10")
+NODE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+MAX_JOIN_SCRIPT_BYTES = 1024 * 1024
+DEFAULT_FLEET_REPOSITORY = "https://github.com/quarker1337/hermelinfleet.git"
+DEFAULT_FLEET_REF = "feat/hermelinchat-bridge-runtimes"
+
+
+class NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
 
 
 def fail(message: str) -> "NoReturn":
@@ -63,8 +76,11 @@ def read_token_stdin() -> str:
     return value
 
 
-def read_token_file(path: str) -> str:
-    value = Path(path).expanduser().read_text(encoding="utf-8").strip()
+def read_token_file(path: str, *, require_private: bool = False) -> str:
+    token_path = Path(path).expanduser()
+    if require_private and token_path.stat().st_mode & 0o077:
+        fail("Fleet enrollment token file must not be accessible by group or other users")
+    value = token_path.read_text(encoding="utf-8").strip()
     validate_token(value)
     return value
 
@@ -124,7 +140,38 @@ def update_env_file(path: Path, values: dict[str, str]) -> None:
         raise
 
 
-def install_local(source: str) -> tuple[str, str]:
+def resolve_fleet_source(source: str, repository: str, ref: str) -> str:
+    if source:
+        return str(Path(source).expanduser().resolve())
+    parsed = urlparse(repository)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.scheme not in {"https", "file"}:
+        fail("automatic Fleet source requires a credential-free HTTPS or file:// repository URL")
+    if not ref or ref.startswith("-") or any(ch.isspace() for ch in ref):
+        fail("unsafe Fleet repository ref")
+    destination = Path.home() / ".local" / "share" / "hermelinChat" / "hermelinfleet-source"
+    if destination.exists():
+        if (destination / ".git").is_dir() and (destination / "scripts" / "install.sh").is_file():
+            return str(destination.resolve())
+        fail(f"automatic Fleet source path already exists but is not a checkout: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.parent.chmod(0o700)
+    except OSError:
+        pass
+    result = subprocess.run(
+        ["git", "clone", "--depth", "1", "--branch", ref, "--", repository, str(destination)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        shutil.rmtree(destination, ignore_errors=True)
+        fail("could not clone the compatible HermelinFleet source")
+    return str(destination.resolve())
+
+
+def install_local(source: str, *, manager_profile: str = "local", manager_host: str = "") -> tuple[str, str, str]:
     source_path = Path(source).expanduser().resolve()
     expected_contract = Path(__file__).resolve().parents[1] / "contracts" / "hermelinfleet-api-v1.json"
     source_contract = source_path / "contracts" / "hermelinfleet-api-v1.json"
@@ -143,8 +190,13 @@ def install_local(source: str) -> tuple[str, str]:
         fail(f"HermelinFleet installer not found: {installer}")
     home = Path.home()
     home.mkdir(parents=True, exist_ok=True)
+    install_args = [str(installer), "--mode", "combined", "--source", str(source_path), "--profile", manager_profile]
+    if manager_profile == "overlay":
+        if not manager_host:
+            fail("overlay manager profile requires --manager-host")
+        install_args.extend(["--public-host", manager_host])
     result = subprocess.run(
-        [str(installer), "--mode", "combined", "--source", str(source_path)],
+        install_args,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -159,17 +211,85 @@ def install_local(source: str) -> tuple[str, str]:
         fail("HermelinFleet installer did not create central.env")
     token = read_env_value(central_env, "FLEET_HERMELIN_TOKEN")
     validate_token(token)
-    return "http://127.0.0.1:8080", token
+    if manager_profile == "overlay":
+        return f"http://{manager_host}:8080", token, "external"
+    return "http://127.0.0.1:8080", token, "local"
+
+
+def validate_node_id(value: str) -> str:
+    node_id = str(value or "").strip()
+    if not NODE_ID_PATTERN.fullmatch(node_id):
+        fail("Fleet node ID must be 1-64 letters, digits, underscores, or hyphens")
+    return node_id
+
+
+def install_remote_node(url: str, token: str, node_id: str) -> None:
+    endpoint = f"{url.rstrip('/')}/join.sh"
+    request = Request(
+        endpoint,
+        headers={"Authorization": f"Bearer {token}", "X-Fleet-Node-ID": node_id},
+        method="GET",
+    )
+    opener = build_opener(NoRedirectHandler())
+    try:
+        with opener.open(request, timeout=15) as response:
+            content_type = response.headers.get_content_type()
+            if content_type not in {"text/x-shellscript", "text/plain", "application/x-sh"}:
+                fail(f"Fleet join endpoint returned unexpected content type {content_type!r}")
+            script = response.read(MAX_JOIN_SCRIPT_BYTES + 1)
+    except HTTPError as exc:
+        if exc.code in {301, 302, 303, 307, 308}:
+            fail("Fleet join endpoint redirected; refusing to forward enrollment credentials")
+        if exc.code == 401:
+            fail("Fleet enrollment was rejected: token expired, used, or minted for a different node ID")
+        fail(f"Fleet join endpoint returned HTTP {exc.code}")
+    except URLError as exc:
+        fail(f"could not reach Fleet join endpoint: {exc.reason}")
+    if len(script) > MAX_JOIN_SCRIPT_BYTES:
+        fail("Fleet join script exceeds the 1 MiB safety limit")
+    if not script.startswith(b"#!"):
+        fail("Fleet join endpoint did not return an executable shell script")
+
+    fd, temp_name = tempfile.mkstemp(prefix="hermelinfleet-join-", suffix=".sh")
+    try:
+        os.fchmod(fd, 0o700)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(script)
+            handle.flush()
+            os.fsync(handle.fileno())
+        env = os.environ.copy()
+        env.pop("FLEET_ENROLLMENT_TOKEN", None)
+        env.update(
+            {
+                "FLEET_NODE_ID": node_id,
+                "FLEET_PATCH_HERMES": "1",
+                "FLEET_REMOTE_RUNTIME_BACKEND": "tmux",
+                "FLEET_REMOTE_RUNTIME_EXEC_MODE": "trusted",
+            }
+        )
+        result = subprocess.run(["/bin/sh", temp_name], env=env, check=False)
+        if result.returncode != 0:
+            fail(f"Fleet node installer failed with status {result.returncode}")
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", required=True)
-    parser.add_argument("--mode", choices=("off", "external", "local"), required=True)
+    parser.add_argument("--mode", choices=("off", "external", "local", "node"), required=True)
     parser.add_argument("--url", default="")
     parser.add_argument("--token-file", default="")
     parser.add_argument("--token-stdin", action="store_true")
+    parser.add_argument("--node-id", default="")
     parser.add_argument("--fleet-source", default="")
+    parser.add_argument("--fleet-repository", default=DEFAULT_FLEET_REPOSITORY)
+    parser.add_argument("--fleet-ref", default=DEFAULT_FLEET_REF)
+    parser.add_argument("--manager-profile", choices=("local", "overlay"), default="local")
+    parser.add_argument("--manager-host", default="")
     parser.add_argument("--allow-insecure-http", action="store_true")
     return parser.parse_args()
 
@@ -196,13 +316,26 @@ def main() -> None:
         )
         print("HermelinFleet external integration configured.")
         return
-    if not args.fleet_source:
-        fail("local mode requires --fleet-source")
-    url, token = install_local(args.fleet_source)
+    if args.mode == "node":
+        if bool(args.token_file) == bool(args.token_stdin):
+            fail("node mode requires exactly one of --token-file or --token-stdin")
+        url = safe_external_url(args.url, allow_insecure_http=args.allow_insecure_http)
+        token = read_token_file(args.token_file, require_private=True) if args.token_file else read_token_stdin()
+        node_id = validate_node_id(args.node_id)
+        install_remote_node(url, token, node_id)
+        update_env_file(env_file, {"HERMELIN_FLEET_MODE": "off"})
+        print(f"This HermelinChat host joined the remote FleetManager as node {node_id}.")
+        return
+    source = resolve_fleet_source(args.fleet_source, args.fleet_repository, args.fleet_ref)
+    url, token, bridge_mode = install_local(
+        source,
+        manager_profile=args.manager_profile,
+        manager_host=args.manager_host,
+    )
     update_env_file(
         env_file,
         {
-            "HERMELIN_FLEET_MODE": "local",
+            "HERMELIN_FLEET_MODE": bridge_mode,
             "HERMELIN_FLEET_URL": url,
             "HERMELIN_FLEET_SERVICE_TOKEN": token,
         },

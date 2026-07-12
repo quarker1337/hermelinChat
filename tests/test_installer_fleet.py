@@ -4,6 +4,8 @@ import os
 import stat
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -23,11 +25,17 @@ def test_main_installer_exposes_fleet_modes_and_local_service_dependency() -> No
         check=False,
     )
     assert help_result.returncode == 0, help_result.stderr
-    assert "--fleet-mode MODE" in help_result.stdout
+    assert "--fleet-role ROLE" in help_result.stdout
+    assert "--fleet-mode MODE" in help_result.stdout  # legacy automation remains supported
+    assert "--fleet-enrollment-token-file" in help_result.stdout
+    assert "--fleet-manager-profile" in help_result.stdout
+    assert "--fleet-manager-host" in help_result.stdout
     assert "--fleet-token-file" in help_result.stdout
     script = INSTALLER.read_text(encoding="utf-8")
-    assert 'FLEET_MODE="off"' in script  # -y default
-    assert 'read -r -p "Enable HermelinFleet' in script
+    assert 'FLEET_ROLE="standalone"' in script  # -y default
+    assert "Choose this HermelinChat host's role" in script
+    assert "New independent FleetManager" in script
+    assert "Join a remote FleetManager" in script
     assert 'FLEET_UNIT_WANTS="Wants=hermelinfleet-central.service"' in script
     assert 'python3 "$SELF_DIR/configure_fleet.py"' in script
     assert 'PRESERVE_EXISTING_ENV=1' in script
@@ -175,6 +183,14 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
         encoding="utf-8",
     )
     installer.chmod(0o755)
+    subprocess.run(["git", "init", "-b", "manager-test"], cwd=source, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "add", "."], cwd=source, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Installer Test", "-c", "user.email=installer@example.test", "commit", "-m", "fixture"],
+        cwd=source,
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
     env_file = tmp_path / ".hermelin.env"
     env_file.write_text("HERMELIN_PORT=3000\n", encoding="utf-8")
 
@@ -184,16 +200,95 @@ def test_local_mode_invokes_fleet_installer_and_imports_scoped_service_secret(tm
         str(env_file),
         "--mode",
         "local",
-        "--fleet-source",
-        str(source),
+        "--fleet-repository",
+        source.as_uri(),
+        "--fleet-ref",
+        "manager-test",
+        "--manager-profile",
+        "overlay",
+        "--manager-host",
+        "192.168.50.10",
         env={"HOME": str(home)},
     )
 
     assert result.returncode == 0, result.stderr
-    assert (home / "fleet-install.args").read_text(encoding="utf-8").strip() == f"--mode combined --source {source}"
+    cloned_source = home / ".local" / "share" / "hermelinChat" / "hermelinfleet-source"
+    assert (cloned_source / ".git").is_dir()
+    assert (home / "fleet-install.args").read_text(encoding="utf-8").strip() == (
+        f"--mode combined --source {cloned_source} --profile overlay --public-host 192.168.50.10"
+    )
     text = env_file.read_text(encoding="utf-8")
-    assert "HERMELIN_FLEET_MODE=local" in text
-    assert "HERMELIN_FLEET_URL=http://127.0.0.1:8080" in text
+    assert "HERMELIN_FLEET_MODE=external" in text
+    assert "HERMELIN_FLEET_URL=http://192.168.50.10:8080" in text
     assert "HERMELIN_FLEET_SERVICE_TOKEN=local-test-secret" in text
     assert "HERMELIN_FLEET_ADMIN_TOKEN" not in text
     assert "local-test-secret" not in result.stdout + result.stderr
+
+
+def test_node_role_redeems_header_token_and_runs_join_script_without_configuring_cockpit(tmp_path: Path) -> None:
+    captured: dict[str, str] = {}
+    join_script = b"""#!/bin/sh
+set -eu
+printf '%s|%s|%s|%s\n' \
+  "$FLEET_NODE_ID" "$FLEET_PATCH_HERMES" \
+  "$FLEET_REMOTE_RUNTIME_BACKEND" "$FLEET_REMOTE_RUNTIME_EXEC_MODE" \
+  > "$HOME/node-role-result"
+stat -c '%a' "$0" > "$HOME/node-role-script-mode"
+"""
+
+    class JoinHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            captured["path"] = self.path
+            captured["authorization"] = self.headers.get("Authorization", "")
+            captured["node_id"] = self.headers.get("X-Fleet-Node-ID", "")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/x-shellscript; charset=utf-8")
+            self.send_header("Content-Length", str(len(join_script)))
+            self.end_headers()
+            self.wfile.write(join_script)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+            del format, args
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), JoinHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    token = "five-minute-node-enrollment-token"
+    token_file = tmp_path / "enrollment.token"
+    token_file.write_text(token + "\n", encoding="utf-8")
+    token_file.chmod(0o600)
+    env_file = tmp_path / ".hermelin.env"
+    env_file.write_text("HERMELIN_PORT=3000\n", encoding="utf-8")
+    try:
+        result = run_helper(
+            tmp_path,
+            "--env-file",
+            str(env_file),
+            "--mode",
+            "node",
+            "--url",
+            f"http://127.0.0.1:{server.server_port}",
+            "--token-file",
+            str(token_file),
+            "--node-id",
+            "remote-test-node",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert result.returncode == 0, result.stderr
+    assert captured == {
+        "path": "/join.sh",
+        "authorization": f"Bearer {token}",
+        "node_id": "remote-test-node",
+    }
+    home = tmp_path / "home"
+    assert (home / "node-role-result").read_text(encoding="utf-8").strip() == "remote-test-node|1|tmux|trusted"
+    assert (home / "node-role-script-mode").read_text(encoding="utf-8").strip() == "700"
+    text = env_file.read_text(encoding="utf-8")
+    assert "HERMELIN_FLEET_MODE=off" in text
+    assert "HERMELIN_FLEET_SERVICE_TOKEN" not in text
+    assert token not in text
+    assert token not in result.stdout + result.stderr

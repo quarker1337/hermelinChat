@@ -23,13 +23,22 @@ SKIP_PYTHON=0
 SKIP_HERMES_PATCH=0
 SKIP_HERMES_SKINS=0
 
-# Optional HermelinFleet integration. Empty means ask interactively, or off with --yes.
+# Preferred host role. Internal FLEET_MODE remains for backwards compatibility.
+FLEET_ROLE=""
 FLEET_MODE=""
 FLEET_URL=""
 FLEET_TOKEN_FILE=""
+FLEET_ENROLLMENT_TOKEN_FILE=""
+FLEET_NODE_ID=""
 FLEET_SOURCE=""
+FLEET_REPOSITORY="https://github.com/quarker1337/hermelinfleet.git"
+FLEET_REF="feat/hermelinchat-bridge-runtimes"
+FLEET_MANAGER_PROFILE="local"
+FLEET_MANAGER_PROFILE_SET=0
+FLEET_MANAGER_HOST=""
 FLEET_ALLOW_INSECURE_HTTP=0
 FLEET_TOKEN_STDIN_VALUE=""
+FLEET_ENROLLMENT_TOKEN_STDIN_VALUE=""
 
 usage() {
   cat <<EOF
@@ -59,10 +68,20 @@ Options:
   --skip-hermes-skins    Skip installing hermelinChat CLI skins into ~/.hermes/skins/
   --skip-hermes-themes   (deprecated alias for --skip-hermes-skins)
 
-  --fleet-mode MODE      HermelinFleet: off, external, or local (interactive default asks; -y defaults off)
-  --fleet-url URL        Existing Fleet central URL for external mode
-  --fleet-token-file P   Read external Fleet credential from a mode-0600 file
-  --fleet-source DIR     HermelinFleet checkout used by local mode
+  --fleet-role ROLE      Host role: standalone (default), manager, or node
+  --fleet-mode MODE      Legacy: off, external, or local
+  --fleet-url URL        Existing Fleet central URL for node/external mode
+  --fleet-enrollment-token-file P
+                         Read a five-minute node enrollment token from a mode-0600 file
+  --fleet-node-id ID     Node identity (default: hostname -s)
+  --fleet-token-file P   Legacy external-cockpit service credential file
+  --fleet-source DIR     Existing HermelinFleet checkout for manager mode
+  --fleet-repository URL Repository cloned automatically when --fleet-source is omitted
+  --fleet-ref REF        Compatible Fleet Git ref used for automatic clone
+  --fleet-manager-profile PROFILE
+                         Manager exposure: local (default) or overlay
+  --fleet-manager-host IP
+                         Private LAN/Tailscale IPv4 advertised by overlay managers
   --fleet-allow-insecure-http
                          Allow external public HTTP only for explicit development use
 
@@ -141,6 +160,11 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
 
+    --fleet-role)
+      FLEET_ROLE="${2:-}"
+      case "$FLEET_ROLE" in standalone|manager|node) ;; *) echo "ERROR: --fleet-role must be standalone, manager, or node" >&2; exit 1 ;; esac
+      shift 2
+      ;;
     --fleet-mode)
       FLEET_MODE="${2:-}"
       case "$FLEET_MODE" in off|external|local) ;; *) echo "ERROR: --fleet-mode must be off, external, or local" >&2; exit 1 ;; esac
@@ -156,9 +180,40 @@ while [[ $# -gt 0 ]]; do
       [[ -n "$FLEET_TOKEN_FILE" ]] || { echo "ERROR: --fleet-token-file requires a path" >&2; exit 1; }
       shift 2
       ;;
+    --fleet-enrollment-token-file)
+      FLEET_ENROLLMENT_TOKEN_FILE="${2:-}"
+      [[ -n "$FLEET_ENROLLMENT_TOKEN_FILE" ]] || { echo "ERROR: --fleet-enrollment-token-file requires a path" >&2; exit 1; }
+      shift 2
+      ;;
+    --fleet-node-id)
+      FLEET_NODE_ID="${2:-}"
+      [[ -n "$FLEET_NODE_ID" ]] || { echo "ERROR: --fleet-node-id requires a value" >&2; exit 1; }
+      shift 2
+      ;;
     --fleet-source)
       FLEET_SOURCE="${2:-}"
       [[ -n "$FLEET_SOURCE" ]] || { echo "ERROR: --fleet-source requires a directory" >&2; exit 1; }
+      shift 2
+      ;;
+    --fleet-repository)
+      FLEET_REPOSITORY="${2:-}"
+      [[ -n "$FLEET_REPOSITORY" ]] || { echo "ERROR: --fleet-repository requires a URL" >&2; exit 1; }
+      shift 2
+      ;;
+    --fleet-ref)
+      FLEET_REF="${2:-}"
+      [[ -n "$FLEET_REF" ]] || { echo "ERROR: --fleet-ref requires a value" >&2; exit 1; }
+      shift 2
+      ;;
+    --fleet-manager-profile)
+      FLEET_MANAGER_PROFILE="${2:-}"
+      case "$FLEET_MANAGER_PROFILE" in local|overlay) ;; *) echo "ERROR: --fleet-manager-profile must be local or overlay" >&2; exit 1 ;; esac
+      FLEET_MANAGER_PROFILE_SET=1
+      shift 2
+      ;;
+    --fleet-manager-host)
+      FLEET_MANAGER_HOST="${2:-}"
+      [[ -n "$FLEET_MANAGER_HOST" ]] || { echo "ERROR: --fleet-manager-host requires an IPv4 address" >&2; exit 1; }
       shift 2
       ;;
     --fleet-allow-insecure-http)
@@ -352,27 +407,82 @@ if [[ "$INSTALL_SERVICE" -eq 0 && "$YES" -eq 0 ]]; then
 fi
 
 # -------------------------------------------------------------------
-# Interactive: optional HermelinFleet integration (default off)
+# Interactive: choose this host's Fleet role (default: standalone)
 # -------------------------------------------------------------------
-if [[ -z "$FLEET_MODE" ]]; then
+if [[ -n "$FLEET_ROLE" && -n "$FLEET_MODE" ]]; then
+  echo "ERROR: use --fleet-role or legacy --fleet-mode, not both" >&2
+  exit 1
+fi
+
+if [[ -z "$FLEET_ROLE" && -n "$FLEET_MODE" ]]; then
+  case "$FLEET_MODE" in
+    off) FLEET_ROLE="standalone" ;;
+    local) FLEET_ROLE="manager" ;;
+    external) FLEET_ROLE="external" ;;
+  esac
+fi
+
+if [[ -z "$FLEET_ROLE" ]]; then
   if [[ "$YES" -eq 1 ]]; then
-    FLEET_MODE="off"
+    FLEET_ROLE="standalone"
   else
-    read -r -p "Enable HermelinFleet remote host/runtime integration? [y/N] " _fleet_enable
-    if [[ "${_fleet_enable,,}" == "y" || "${_fleet_enable,,}" == "yes" ]]; then
-      read -r -p "Connect to an existing Fleet or install a local managed Fleet? [external/local] (default: local) " _fleet_kind
-      if [[ "${_fleet_kind,,}" == "external" || "${_fleet_kind,,}" == "e" ]]; then
-        FLEET_MODE="external"
-      else
-        FLEET_MODE="local"
-      fi
-    else
-      FLEET_MODE="off"
-    fi
+    echo "Choose this HermelinChat host's role:"
+    echo "  1) Local HermelinChat only (default)"
+    echo "  2) New independent FleetManager (central + local node + cockpit)"
+    echo "  3) Join a remote FleetManager as a managed node"
+    read -r -p "Role [1/2/3] (default: 1): " _fleet_role
+    case "${_fleet_role,,}" in
+      2|manager|m) FLEET_ROLE="manager" ;;
+      3|node|n|join) FLEET_ROLE="node" ;;
+      *) FLEET_ROLE="standalone" ;;
+    esac
   fi
 fi
 
-if [[ "$FLEET_MODE" == "external" ]]; then
+case "$FLEET_ROLE" in
+  standalone) FLEET_MODE="off" ;;
+  manager) FLEET_MODE="local" ;;
+  node) FLEET_MODE="node" ;;
+  external) FLEET_MODE="external" ;;
+  *) echo "ERROR: unsupported Fleet role: $FLEET_ROLE" >&2; exit 1 ;;
+esac
+
+if [[ "$FLEET_ROLE" == "manager" ]]; then
+  if [[ "$FLEET_MANAGER_PROFILE_SET" -eq 0 && "$YES" -eq 0 ]]; then
+    read -r -p "Allow other LAN/Tailscale machines to join this manager? [y/N] " _fleet_overlay
+    if [[ "${_fleet_overlay,,}" == "y" || "${_fleet_overlay,,}" == "yes" ]]; then
+      FLEET_MANAGER_PROFILE="overlay"
+    fi
+  fi
+  if [[ "$FLEET_MANAGER_PROFILE" == "overlay" && -z "$FLEET_MANAGER_HOST" ]]; then
+    default_manager_host="$(hostname -I 2>/dev/null | tr ' ' '\n' | sed -n '/^[0-9][0-9.]*$/p' | sed -n '1p')"
+    if [[ "$YES" -eq 1 ]]; then
+      echo "ERROR: overlay manager mode requires --fleet-manager-host" >&2
+      exit 1
+    fi
+    read -r -p "Private LAN/Tailscale IPv4 advertised by Fleet [${default_manager_host}]: " FLEET_MANAGER_HOST
+    FLEET_MANAGER_HOST="${FLEET_MANAGER_HOST:-$default_manager_host}"
+    [[ -n "$FLEET_MANAGER_HOST" ]] || { echo "ERROR: overlay manager requires a private IPv4 address" >&2; exit 1; }
+  fi
+elif [[ "$FLEET_ROLE" == "node" ]]; then
+  if [[ -z "$FLEET_URL" && "$YES" -eq 0 ]]; then
+    read -r -p "Remote FleetManager URL (for example http://192.168.1.10:8080): " FLEET_URL
+  fi
+  [[ -n "$FLEET_URL" ]] || { echo "ERROR: node role requires --fleet-url" >&2; exit 1; }
+  if [[ -z "$FLEET_NODE_ID" ]]; then
+    FLEET_NODE_ID="$(hostname -s 2>/dev/null || hostname)"
+  fi
+  if [[ -z "$FLEET_ENROLLMENT_TOKEN_FILE" ]]; then
+    if [[ "$YES" -eq 1 ]]; then
+      echo "ERROR: noninteractive node role requires --fleet-enrollment-token-file" >&2
+      exit 1
+    fi
+    echo "On the FleetManager, run: fleet-enroll $FLEET_NODE_ID"
+    read -r -s -p "Paste the fresh five-minute enrollment token: " FLEET_ENROLLMENT_TOKEN_STDIN_VALUE
+    echo
+    [[ -n "$FLEET_ENROLLMENT_TOKEN_STDIN_VALUE" ]] || { echo "ERROR: Fleet enrollment token cannot be empty" >&2; exit 1; }
+  fi
+elif [[ "$FLEET_ROLE" == "external" ]]; then
   if [[ -z "$FLEET_URL" && "$YES" -eq 0 ]]; then
     read -r -p "HermelinFleet central URL (HTTPS or private/loopback HTTP): " FLEET_URL
   fi
@@ -382,23 +492,10 @@ if [[ "$FLEET_MODE" == "external" ]]; then
       echo "ERROR: noninteractive external Fleet mode requires --fleet-token-file" >&2
       exit 1
     fi
-    read -r -s -p "HermelinFleet service/admin credential: " FLEET_TOKEN_STDIN_VALUE
+    read -r -s -p "HermelinFleet scoped service credential: " FLEET_TOKEN_STDIN_VALUE
     echo
     [[ -n "$FLEET_TOKEN_STDIN_VALUE" ]] || { echo "ERROR: Fleet credential cannot be empty" >&2; exit 1; }
   fi
-elif [[ "$FLEET_MODE" == "local" ]]; then
-  if [[ -z "$FLEET_SOURCE" ]]; then
-    for candidate in "$ROOT_DIR/../hermelinfleet" "$HOME/fleetbuild/fleet"; do
-      if [[ -x "$candidate/scripts/install.sh" ]]; then FLEET_SOURCE="$candidate"; break; fi
-    done
-  fi
-  if [[ -z "$FLEET_SOURCE" && "$YES" -eq 0 ]]; then
-    read -r -p "Path to the HermelinFleet checkout: " FLEET_SOURCE
-  fi
-  [[ -n "$FLEET_SOURCE" && -x "$FLEET_SOURCE/scripts/install.sh" ]] || {
-    echo "ERROR: local Fleet mode requires --fleet-source pointing to a HermelinFleet checkout" >&2
-    exit 1
-  }
 fi
 
 echo "==> hermelinChat install"
@@ -418,11 +515,19 @@ else
 fi
 
 echo "  - build backend + frontend: yes (via ./scripts/update.sh)"
-echo "  - HermelinFleet mode: $FLEET_MODE"
-if [[ "$FLEET_MODE" == "external" ]]; then
+echo "  - HermelinFleet role: $FLEET_ROLE"
+if [[ "$FLEET_ROLE" == "external" || "$FLEET_ROLE" == "node" ]]; then
   echo "    endpoint: $FLEET_URL"
-elif [[ "$FLEET_MODE" == "local" ]]; then
-  echo "    source: $FLEET_SOURCE"
+elif [[ "$FLEET_ROLE" == "manager" ]]; then
+  if [[ -n "$FLEET_SOURCE" ]]; then
+    echo "    source: $FLEET_SOURCE"
+  else
+    echo "    source: automatic clone ($FLEET_REPOSITORY @ $FLEET_REF)"
+  fi
+  echo "    manager profile: $FLEET_MANAGER_PROFILE"
+  if [[ "$FLEET_MANAGER_PROFILE" == "overlay" ]]; then
+    echo "    advertised host: $FLEET_MANAGER_HOST"
+  fi
   echo "    managed service: hermelinfleet-central.service"
 fi
 if [[ "$PULL" -eq 1 ]]; then
@@ -533,8 +638,28 @@ case "$FLEET_MODE" in
     fi
     FLEET_TOKEN_STDIN_VALUE=""
     ;;
+  node)
+    FLEET_CONFIG_ARGS+=(--url "$FLEET_URL" --node-id "$FLEET_NODE_ID")
+    if [[ -n "$FLEET_ENROLLMENT_TOKEN_FILE" ]]; then
+      python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --token-file "$FLEET_ENROLLMENT_TOKEN_FILE"
+    else
+      printf '%s' "$FLEET_ENROLLMENT_TOKEN_STDIN_VALUE" | python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --token-stdin
+    fi
+    FLEET_ENROLLMENT_TOKEN_STDIN_VALUE=""
+    ;;
   local)
-    PATH="$HOME/.local/go/bin:$PATH" python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --fleet-source "$FLEET_SOURCE"
+    FLEET_CONFIG_ARGS+=(
+      --manager-profile "$FLEET_MANAGER_PROFILE"
+      --fleet-repository "$FLEET_REPOSITORY"
+      --fleet-ref "$FLEET_REF"
+    )
+    if [[ -n "$FLEET_SOURCE" ]]; then
+      FLEET_CONFIG_ARGS+=(--fleet-source "$FLEET_SOURCE")
+    fi
+    if [[ "$FLEET_MANAGER_PROFILE" == "overlay" ]]; then
+      FLEET_CONFIG_ARGS+=(--manager-host "$FLEET_MANAGER_HOST")
+    fi
+    PATH="$HOME/.local/go/bin:$PATH" python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}"
     ;;
 esac
 

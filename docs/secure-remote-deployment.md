@@ -18,6 +18,13 @@ Do not expose these ports directly to the public internet:
 4. Fleet nodes dial central outbound over the overlay.
 5. Remote terminals use Fleet's authenticated tmux stream path; do not expose a node's Hermes dashboard directly.
 
+## Installer roles
+
+- `--fleet-role standalone` is the default and installs no Fleet components.
+- `--fleet-role manager` installs an independent central, local node, and HermelinChat cockpit. `--fleet-manager-profile local` is loopback-only; `overlay` requires an explicit private LAN/Tailscale IPv4 and generates private-CA NATS TLS material.
+- `--fleet-role node` enrolls this host with a five-minute node-bound token and does not copy a remote manager's service/admin credentials into HermelinChat.
+- Legacy `--fleet-mode external` is cockpit-only. Use only a scoped HermelinChat service credential, never the dashboard administrator token.
+
 ## HermelinChat requirements
 
 - Use `HERMELIN_FLEET_MODE=off` when Fleet is not required.

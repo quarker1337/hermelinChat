@@ -233,6 +233,52 @@ Some artifacts are sandboxed iframes. More complex ones spawn their own HTTP ser
 
 ---
 
+## HermelinFleet setup roles
+
+The interactive installer asks one role question:
+
+1. **Local HermelinChat only** (default) — no Fleet processes, ports, or credentials.
+2. **New independent FleetManager** — installs its own Fleet central, local Fleet node, database, credentials, and HermelinChat cockpit. If no `--fleet-source` is supplied, the compatible Fleet ref is cloned automatically into `~/.local/share/hermelinChat/hermelinfleet-source`.
+3. **Join a remote FleetManager** — enrolls this machine as a managed Fleet node using a five-minute node-bound token. It does not copy the manager's admin/service credential and leaves this machine's local Fleet cockpit disabled.
+
+```bash
+./scripts/install.sh
+```
+
+Scriptable equivalents:
+
+```bash
+# Default standalone HermelinChat
+./scripts/install.sh --user-service --fleet-role standalone --yes
+
+# Independent loopback-only manager
+./scripts/install.sh --user-service --fleet-role manager --yes
+
+# Independent manager reachable by LAN/Tailscale nodes
+./scripts/install.sh --user-service --fleet-role manager \
+  --fleet-manager-profile overlay \
+  --fleet-manager-host 192.168.1.10 \
+  --yes
+
+# Join a remote manager without putting the one-time token in argv
+umask 077
+printf '%s\n' 'PASTE-FRESH-TOKEN' > /tmp/fleet-enrollment.token
+./scripts/install.sh --user-service --fleet-role node \
+  --fleet-url http://192.168.1.10:8080 \
+  --fleet-node-id "$(hostname -s)" \
+  --fleet-enrollment-token-file /tmp/fleet-enrollment.token \
+  --yes
+rm -f /tmp/fleet-enrollment.token
+```
+
+For an interactive node join, choose role 3. The installer prints the exact `fleet-enroll <node-id>` command to run on the manager, then reads the fresh token without echoing it.
+
+An overlay manager generates a private CA and IP-SAN server certificate for TLS 1.3 NATS transport. Its HTTP enrollment endpoint remains trusted-LAN/overlay-only; never port-forward ports 8080 or 4222 to the public internet.
+
+Legacy `--fleet-mode off|local|external` automation remains supported. `external` is an advanced cockpit-only bridge and requires a scoped service credential; it is not the normal managed-node join path.
+
+---
+
 ## HermelinFleet bridge
 
 hermelinChat can sit next to HermelinFleet without sharing internals. Configure a Fleet central bridge URL on the hermelinChat backend and the UI will show a Fleet cockpit from the topbar `fleet` button:
