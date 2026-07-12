@@ -101,7 +101,7 @@ interface SessionStore {
   // Actions
   startPolling: () => void
   stopPolling: () => void
-  startNewSession: () => void
+  startNewSession: (opts?: { spawn?: boolean }) => void
   resumeSession: (id: string) => void
   setActiveSessionId: (sid: string) => void
   rename: (id: string, title: string) => Promise<void>
@@ -197,7 +197,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   // -------------------------------------------------------------------------
   // startNewSession — snapshot baseline, reset state, spawn new pty
   // -------------------------------------------------------------------------
-  startNewSession: () => {
+  startNewSession: (opts = {}) => {
     if (!useAuthStore.getState().authenticated) return
 
     const { sessions } = get()
@@ -213,9 +213,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       getSearchStore()?.reset()
     } catch { /* not yet created */ }
 
-    try {
-      getTerminalStore()?.spawn(null)
-    } catch { /* not yet created */ }
+    if (opts.spawn !== false) {
+      try {
+        getTerminalStore()?.spawn(null)
+      } catch { /* not yet created */ }
+    }
   },
 
   // -------------------------------------------------------------------------
@@ -311,12 +313,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     try {
-      const data = await apiCall<{ default_model?: string | null; spawn_cwd?: string | null }>('/api/info')
+      const data = await apiCall<{ default_model?: string | null; spawn_cwd?: string | null; runtime_backend?: string | null; runtime_autostart_default?: boolean }>('/api/info')
       set({
         runtimeInfo: {
           loading: false,
           defaultModel: data.default_model || null,
           spawnCwd: data.spawn_cwd || null,
+          runtimeBackend: data.runtime_backend || null,
+          runtimeAutostartDefault: Boolean(data.runtime_autostart_default),
         },
       })
     } catch {

@@ -254,6 +254,30 @@ test('terminal pet follows structured Hermes sidecar events and never falls back
   useTerminalStore.getState().reset()
 })
 
+test('terminal pet activity resets when switching runtime scopes', () => {
+  installAssetStubs()
+  clearCompiledModules()
+  setWindow(undefined)
+
+  const { useTerminalStore } = loadCompiled('stores/terminal.js')
+
+  useTerminalStore.getState().reset()
+  useTerminalStore.getState().setPetActivityScope('/ws/runtimes/rt-one/attach')
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'runtime-sidecar' })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'run')
+
+  useTerminalStore.getState().setPetActivityScope('/ws/runtimes/rt-two/attach')
+  assert.equal(useTerminalStore.getState().petActivityScope, '/ws/runtimes/rt-two/attach')
+  assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+
+  useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'runtime-sidecar' })
+  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'reading this session' } })
+  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+
+  useTerminalStore.getState().reset()
+})
+
 test('terminal pet does not let missing tool ids pin structured sync on run', () => {
   installAssetStubs()
   clearCompiledModules()

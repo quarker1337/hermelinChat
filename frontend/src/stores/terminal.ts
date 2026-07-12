@@ -52,6 +52,7 @@ interface TerminalStore {
   state: TerminalState
   spawnNonce: number
   petActivity: PetActivity
+  petActivityScope: string
   spawn: (resumeId: string | null) => void
   onConnectionChange: (isUp: boolean, nonce?: number) => void
   onDetectedSessionId: (sid: string) => void
@@ -60,6 +61,7 @@ interface TerminalStore {
   notePetSyncMode: (info: unknown) => void
   noteHermesPetEvent: (event: unknown) => void
   notePetActivity: (state: PetActivityState, holdMs?: number, afterState?: PetActivityState) => void
+  setPetActivityScope: (scope: string) => void
   reset: () => void
 }
 
@@ -78,6 +80,11 @@ let lastStructuredEventType = ''
 const PET_TRACE_LIMIT = 80
 const hermesActiveToolIds = new Set<string>()
 const petSyncTrace: PetSyncDebug['trace'] = []
+
+function normalizePetActivityScope(scope: unknown): string {
+  const text = String(scope || '').trim()
+  return (text || 'legacy:/ws/pty').slice(0, 256)
+}
 
 function resetStructuredPetState() {
   hermesBusy = false
@@ -284,6 +291,25 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
     state: { phase: 'idle' },
     spawnNonce: 0,
     petActivity: { state: 'idle', updatedAt: Date.now() },
+    petActivityScope: 'legacy:/ws/pty',
+
+    setPetActivityScope: (scope: string) => {
+      const nextScope = normalizePetActivityScope(scope)
+      if (get().petActivityScope === nextScope) return
+
+      // Each tmux/Fleet runtime has its own Hermes sidecar stream. Reset the
+      // local reducer when the visible terminal switches so Pepe does not carry
+      // `run`/`review`/`waiting` from the previous session while the new attach
+      // waits for its own pet_sync + cached runtime event.
+      clearPetTimers()
+      lastOutputBeat = 0
+      turnInFlight = false
+      pendingUserInput = ''
+      structuredPetSyncActive = false
+      resetStructuredPetState()
+      set({ petActivityScope: nextScope, petActivity: { state: 'idle', updatedAt: Date.now() } })
+      recordPetSyncDebug('scope.switch', 'idle')
+    },
 
     notePetActivity: (state: PetActivityState, holdMs = 0, afterState: PetActivityState = 'idle') => {
       clearPetActivityTimer()
@@ -569,7 +595,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
       pendingUserInput = ''
       structuredPetSyncActive = false
       resetStructuredPetState()
-      set({ state: { phase: 'idle' }, spawnNonce: 0, petActivity: { state: 'idle', updatedAt: Date.now() } })
+      set({ state: { phase: 'idle' }, spawnNonce: 0, petActivityScope: 'legacy:/ws/pty', petActivity: { state: 'idle', updatedAt: Date.now() } })
     },
   }
 })

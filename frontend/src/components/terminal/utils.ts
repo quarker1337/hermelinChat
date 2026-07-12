@@ -11,12 +11,16 @@ export function stripAnsi(s: string): string {
 
 export function buildWsUrl(
   resumeId: string | null,
-  opts: { cols?: number; rows?: number; themeId?: string } = {},
+  opts: { cols?: number; rows?: number; themeId?: string; attachPath?: string } = {},
 ): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const params = new URLSearchParams()
 
-  if (resumeId) params.set('resume', resumeId)
+  const rawAttachPath = String(opts?.attachPath || '/ws/pty')
+  const attachPath = rawAttachPath.startsWith('/ws/') ? rawAttachPath : '/ws/pty'
+  const isLegacyPty = attachPath === '/ws/pty'
+  const isFleetAttach = attachPath.startsWith('/ws/fleet/agents/') && attachPath.endsWith('/attach')
+  if (resumeId && (isLegacyPty || isFleetAttach)) params.set('resume', resumeId)
 
   const cols = Number(opts?.cols || 0)
   const rows = Number(opts?.rows || 0)
@@ -27,5 +31,5 @@ export function buildWsUrl(
   if (themeId) params.set('ui_theme', themeId)
 
   const q = params.toString()
-  return `${proto}://${window.location.host}/ws/pty${q ? `?${q}` : ''}`
+  return `${proto}://${window.location.host}${attachPath}${q ? `?${q}` : ''}`
 }
