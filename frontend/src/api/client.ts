@@ -18,7 +18,12 @@ export async function apiCall<T>(path: string, opts?: RequestInit): Promise<T> {
     throw new ApiError(401, 'unauthorized')
   }
 
-  const data = await res.json()
+  let data: any
+  try {
+    data = await res.json()
+  } catch {
+    throw new ApiError(res.status, `server returned an invalid JSON response (http ${res.status})`)
+  }
 
   if (!res.ok) {
     throw new ApiError(res.status, data?.error || data?.detail || `http ${res.status}`)

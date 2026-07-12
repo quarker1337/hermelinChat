@@ -30,6 +30,34 @@ function jsonResponse(data, status = 200) {
   }
 }
 
+test('api client reports malformed server responses without leaking a JSON parser exception', async () => {
+  clearCompiledModules()
+  const originalFetch = global.fetch
+  global.fetch = async () => ({
+    status: 502,
+    ok: false,
+    async json() {
+      throw new SyntaxError('JSON.parse: unexpected character at line 1 column 1')
+    },
+  })
+
+  try {
+    const { apiCall, ApiError } = loadCompiled('api/client.js')
+    await assert.rejects(
+      () => apiCall('/api/fleet/snapshot'),
+      (err) => {
+        assert.ok(err instanceof ApiError)
+        assert.equal(err.status, 502)
+        assert.equal(err.message, 'server returned an invalid JSON response (http 502)')
+        assert.doesNotMatch(err.message, /JSON\.parse/)
+        return true
+      },
+    )
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
 test('fleet store normalizes disabled config without probing bridge endpoints', async () => {
   clearCompiledModules()
   const calls = []
