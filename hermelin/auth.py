@@ -64,7 +64,10 @@ def _b64url_decode(data: str) -> bytes:
 def create_session_token(*, secret: bytes, ttl_seconds: int) -> str:
     now = int(time.time())
     payload = {
-        "v": 1,
+        "v": 2,
+        "typ": "session",
+        "iss": "hermelin-chat",
+        "aud": "hermelin-browser",
         "jti": secrets.token_hex(16),
         "iat": now,
         "exp": now + int(ttl_seconds),
@@ -98,12 +101,28 @@ def verify_session_token(*, token: str, secret: bytes, revoked_jtis: Collection[
     except Exception:
         return False
 
-    exp = int(payload.get("exp") or 0)
-    if exp <= int(time.time()):
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("v") != 2:
+        return False
+    if payload.get("typ") != "session":
+        return False
+    if payload.get("iss") != "hermelin-chat" or payload.get("aud") != "hermelin-browser":
+        return False
+
+    now = int(time.time())
+    try:
+        issued_at = int(payload.get("iat") or 0)
+        exp = int(payload.get("exp") or 0)
+    except (TypeError, ValueError):
+        return False
+    if issued_at <= 0 or issued_at > now + 60 or exp <= now or exp <= issued_at:
         return False
 
     jti = payload.get("jti")
-    if jti and revoked_jtis is not None and jti in revoked_jtis:
+    if not isinstance(jti, str) or not jti:
+        return False
+    if revoked_jtis is not None and jti in revoked_jtis:
         return False
 
     return True

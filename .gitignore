@@ -30,3 +30,6 @@ hermelin/static/
 /hermelin-not-flipped.svg
 /matrix_effect.js
 /hermelin-face.svg
+
+# Local Hermes plans and workspace metadata
+/.hermes/

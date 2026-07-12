@@ -4,6 +4,7 @@ import asyncio
 import base64
 from contextlib import asynccontextmanager
 import hmac
+import hashlib
 import json
 import os
 import re
@@ -16,12 +17,21 @@ import signal
 import ssl
 import subprocess
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 import logging
 import yaml
 
 logger = logging.getLogger("hermelin")
+
+_FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES = 64 << 10
+
+
+def _fleet_runtime_attach_frame_size(message: bytes | str) -> int:
+    if isinstance(message, bytes):
+        return len(message)
+    return len(str(message).encode("utf-8", errors="replace"))
+
 
 _RELEASE_TAG_RE = re.compile(r"^(\d+(?:\.\d+)*)(.*)$")
 _RELEASE_SUFFIX_RE = re.compile(r"^(?:[.\-_]?)(dev|a|alpha|b|beta|rc|c|post)(\d*)", re.IGNORECASE)
@@ -109,7 +119,7 @@ def _is_update_available(current_version: str | None, latest_version: str | None
 
 import httpx
 import websockets
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import Body, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -141,6 +151,14 @@ from .config import DEFAULT_HERMELIN_HERMES_CMD, HermelinConfig
 from .default_artifacts import list_default_artifact_settings, resolve_default_artifact_path
 from .hermes_dashboard import DASHBOARD_RUNNER_ID, HermesDashboardManager
 from .dashboard_proxy import create_dashboard_manager, register_hermes_dashboard_routes
+from .fleet_proxy import (
+    FLEET_API_PREFIX,
+    FLEET_DISABLED_PAYLOAD,
+    FLEET_UNAVAILABLE_PAYLOAD,
+    fleet_bridge_token,
+    register_fleet_routes,
+    resolve_fleet_settings,
+)
 from .meta_db import (
     delete_title,
     ensure_meta_db,
@@ -162,6 +180,14 @@ from .config_editor import (
     _set_command_toolset_enabled,
 )
 from .runners import discover_runner_upstream
+from .runtime_backends import (
+    LegacyRuntimeBackend,
+    RuntimeBackendError,
+    RuntimeCreateRequest,
+    TmuxRuntimeBackend,
+    select_runtime_backend,
+)
+from .runtime_registry import RuntimeRecord, RuntimeRegistry, new_runtime_id, utc_ts
 from .ws_writer import WebSocketPriorityWriter
 
 
@@ -238,6 +264,108 @@ def _managed_hermes_executable(command: str) -> str:
     return "hermes"
 
 
+_HERMES_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+
+
+def _safe_hermes_profile_name(value: object) -> str:
+    text = str(value or "default").strip() or "default"
+    if text == "default":
+        return "default"
+    if not _HERMES_PROFILE_NAME_RE.fullmatch(text):
+        return ""
+    if text in {".", ".."} or ".." in text:
+        return ""
+    return text
+
+
+def _hermes_profile_config_path(hermes_home: Path, profile: str) -> Path:
+    name = _safe_hermes_profile_name(profile) or "default"
+    base = Path(hermes_home).expanduser()
+    if name == "default":
+        return base / "config.yaml"
+    return base / "profiles" / name / "config.yaml"
+
+
+def _hermes_profile_model(config_path: Path) -> str | None:
+    try:
+        raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    model_section = raw.get("model")
+    if isinstance(model_section, dict):
+        for key in ("default", "model"):
+            value = model_section.get(key)
+            if value:
+                return str(value)
+    for dotted in ("model.default", "model.model"):
+        value = raw.get(dotted)
+        if value:
+            return str(value)
+    return None
+
+
+def _list_hermes_profiles(hermes_home: Path) -> list[dict[str, object]]:
+    base = Path(hermes_home).expanduser()
+    profiles: list[dict[str, object]] = []
+
+    def add(name: str) -> None:
+        safe = _safe_hermes_profile_name(name)
+        if not safe or any(item.get("name") == safe for item in profiles):
+            return
+        config_path = _hermes_profile_config_path(base, safe)
+        model = _hermes_profile_model(config_path)
+        profiles.append(
+            {
+                "name": safe,
+                "label": safe,
+                "is_default": safe == "default",
+                "configured": config_path.exists(),
+                "model": model,
+            }
+        )
+
+    add("default")
+    profiles_dir = base / "profiles"
+    try:
+        entries = sorted(profiles_dir.iterdir(), key=lambda p: p.name.lower()) if profiles_dir.is_dir() else []
+    except Exception:
+        entries = []
+    for entry in entries:
+        if entry.is_dir():
+            add(entry.name)
+    return profiles
+
+
+def _with_hermes_profile_args(argv: list[str], profile: str) -> list[str]:
+    safe = _safe_hermes_profile_name(profile)
+    if not safe or safe == "default":
+        return list(argv)
+    if not argv:
+        return list(argv)
+    try:
+        exe_name = Path(argv[0]).name.lower()
+    except Exception:
+        exe_name = ""
+    if "hermes" not in exe_name:
+        raise ValueError("profile selection requires a Hermes command")
+
+    cleaned: list[str] = []
+    skip_next = False
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in {"-p", "--profile"}:
+            skip_next = True
+            continue
+        if arg.startswith("--profile="):
+            continue
+        cleaned.append(arg)
+    return [*cleaned, "--profile", safe]
+
+
 def _resolve_hermes_executable(executable: str, env: Mapping[str, str] | None = None) -> str:
     """Resolve the Hermes binary for subprocess launches.
 
@@ -293,6 +421,35 @@ def _is_managed_hermes_command(command: str) -> bool:
         list(_DEFAULT_CLASSIC_HERMES_TOOLSETS),
         [*_DEFAULT_CLASSIC_HERMES_TOOLSETS, "strudel"],
     ]
+
+
+def _repair_malformed_managed_hermes_command(command: str) -> str:
+    """Repair only Hermelin-managed Hermes command strings with broken quoting.
+
+    Runtime creation uses ``shlex.split()`` on the effective Hermes command. A
+    persisted/env-managed command with a missing quote should not be treated as a
+    custom override and break `+ new runtime`; normalize that narrow shape to a
+    quote-free ``--toolsets=...`` form. Leave real custom commands untouched.
+    """
+    cmd = str(command or "").strip()
+    if not cmd:
+        return cmd
+    try:
+        shlex.split(cmd)
+        return cmd
+    except ValueError:
+        pass
+
+    parts = cmd.split()
+    if (
+        len(parts) >= 3
+        and Path(parts[0]).name == "hermes"
+        and parts[1] == "chat"
+        and (parts[2] == "--toolsets" or parts[2].startswith("--toolsets="))
+    ):
+        toolsets = "hermes-cli,artifacts,strudel" if "strudel" in cmd else "hermes-cli,artifacts"
+        return f"{parts[0]} chat --toolsets={toolsets}"
+    return cmd
 
 
 _CONFIG_VALUE_MISSING = object()
@@ -473,7 +630,12 @@ def _pet_overlay_info(config: HermelinConfig, slug_override: str | None = None) 
     pets_dir = config.hermes_home / "pets"
     installed = _installed_pet_summaries(pets_dir)
 
-    if not requested_slug and not terminal_enabled:
+    # `display.pet.enabled` controls Hermes' terminal-rendered pet. HermelinChat
+    # draws its own browser/canvas overlay and has a separate browser-local
+    # visibility toggle, so a configured slug should still resolve here even
+    # when the terminal pet is disabled. This lets users keep terminal sessions
+    # clean while preserving their HermelinChat companion.
+    if not requested_slug and not configured_slug:
         return {
             "enabled": False,
             "terminalEnabled": False,
@@ -574,9 +736,10 @@ def _prepare_pty_managed_scope(config: HermelinConfig, parent_env: dict[str, str
 
 def create_app(config: HermelinConfig | None = None) -> FastAPI:
     config = config or HermelinConfig()
-    env_hermes_cmd = os.getenv("HERMELIN_HERMES_CMD", "").strip()
+    fleet_settings = resolve_fleet_settings(config, warn_legacy=True)
+    env_hermes_cmd = _repair_malformed_managed_hermes_command(os.getenv("HERMELIN_HERMES_CMD", ""))
     env_cmd_override = _env_flag("HERMELIN_HERMES_CMD_OVERRIDE")
-    config_hermes_cmd = str(config.hermes_cmd or "").strip()
+    config_hermes_cmd = _repair_malformed_managed_hermes_command(str(config.hermes_cmd or ""))
     config_explicit_override = bool(getattr(config, "hermes_cmd_override", False))
     env_hermes_cmd_override = bool(env_hermes_cmd) and (env_cmd_override or not _is_managed_hermes_command(env_hermes_cmd))
     config_custom_override = bool(config_hermes_cmd) and not _is_managed_hermes_command(config_hermes_cmd)
@@ -638,12 +801,25 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             timeout=httpx.Timeout(connect=5.0, read=None, write=60.0, pool=5.0),
             follow_redirects=False,
         )
+        fleet_http_client = None
+        if fleet_settings.available:
+            fleet_http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(
+                    max(1.0, min(float(getattr(config, "fleet_timeout_seconds", 10.0) or 10.0), 120.0))
+                ),
+                follow_redirects=False,
+            )
+            app.state.fleet_http_client = fleet_http_client
+        app.state.fleet_settings = fleet_settings
         app.state.hermes_dashboard_manager = dashboard_manager
         app.state.pet_event_channels = {}
+        app.state.pet_event_last_events = {}
         app.state.pet_event_lock = asyncio.Lock()
         try:
             yield
         finally:
+            if fleet_http_client is not None:
+                await fleet_http_client.aclose()
             await app.state.httpx_client.aclose()
             await dashboard_manager.aclose()
 
@@ -837,20 +1013,54 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             path="/",
         )
 
-    def _pet_event_state() -> tuple[dict[str, set[asyncio.Queue[str]]], asyncio.Lock]:
+    def _pet_event_state() -> tuple[dict[str, set[asyncio.Queue[str]]], dict[str, str], asyncio.Lock]:
         channels = getattr(app.state, "pet_event_channels", None)
+        last_events = getattr(app.state, "pet_event_last_events", None)
         lock = getattr(app.state, "pet_event_lock", None)
         if channels is None:
             channels = {}
             app.state.pet_event_channels = channels
+        if last_events is None:
+            last_events = {}
+            app.state.pet_event_last_events = last_events
         if lock is None:
             lock = asyncio.Lock()
             app.state.pet_event_lock = lock
-        return channels, lock
+        return channels, last_events, lock
+
+    def _pet_event_type(payload: str) -> str:
+        try:
+            obj = json.loads(payload)
+        except Exception:
+            return ""
+        if not isinstance(obj, dict):
+            return ""
+        event = obj.get("payload")
+        if isinstance(event, dict):
+            return str(event.get("type") or "").strip()
+        return ""
+
+    def _cacheable_pet_event_type(event_type: str) -> bool:
+        # Replay only steady states for a runtime/session. Terminal flash events
+        # like `message.complete` and `error` are delivered to currently attached
+        # browsers but should not make Pepe wave/fail when the user switches back
+        # to an already-idle session later.
+        return event_type not in {"message.complete", "error"}
 
     async def _broadcast_pet_event(channel: str, payload: str) -> None:
-        channels, lock = _pet_event_state()
+        channels, last_events, lock = _pet_event_state()
+        event_type = _pet_event_type(payload)
         async with lock:
+            if _cacheable_pet_event_type(event_type):
+                last_events[channel] = payload
+                # Bound memory even if old runtimes never reconnect.
+                while len(last_events) > 256:
+                    try:
+                        last_events.pop(next(iter(last_events)))
+                    except Exception:
+                        break
+            else:
+                last_events.pop(channel, None)
             queues = list(channels.get(channel, ()))
         for queue in queues:
             try:
@@ -864,6 +1074,12 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                     queue.put_nowait(payload)
                 except Exception:
                     pass
+
+    async def _last_pet_event(channel: str) -> str | None:
+        _, last_events, lock = _pet_event_state()
+        async with lock:
+            value = last_events.get(channel)
+        return value if isinstance(value, str) and value else None
 
     def _pet_sidecar_tls_enabled() -> bool:
         return bool(str(config.ssl_certfile or "").strip() and str(config.ssl_keyfile or "").strip())
@@ -1166,12 +1382,21 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             client_host=websocket.client.host if websocket.client else "",
         )
 
-    def _dashboard_websocket_origin_allowed(websocket: WebSocket) -> bool:
-        return _same_origin_request(
-            websocket.headers.get("origin"),
+    def _websocket_origin_allowed(websocket: WebSocket, *, allow_missing: bool = False) -> bool:
+        origin = str(websocket.headers.get("origin") or "").strip()
+        if not origin:
+            return allow_missing
+        if _same_origin_request(
+            origin,
             host=websocket.headers.get("host", ""),
             scheme=_dashboard_websocket_external_scheme(websocket),
-        )
+        ):
+            return True
+        normalized = origin.rstrip("/")
+        return normalized in {str(item).strip().rstrip("/") for item in cors_origins}
+
+    def _dashboard_websocket_origin_allowed(websocket: WebSocket) -> bool:
+        return _websocket_origin_allowed(websocket)
 
     def _is_public_path(path: str) -> bool:
         # SPA + static: public. Guard /api except explicit auth endpoints.
@@ -1252,7 +1477,242 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         return {
             "default_model": _read_default_model(),
             "spawn_cwd": str(config.spawn_cwd),
+            "runtime_backend": str(config.runtime_backend or "auto"),
+            "runtime_registry_path": str(config.runtime_registry_path),
+            "runtime_autostart_default": bool(config.runtime_autostart_default),
         }
+
+    runtime_registry = RuntimeRegistry(config.runtime_registry_path)
+
+    def _runtime_backend_or_error():
+        return select_runtime_backend(
+            config.runtime_backend,
+            tmux_prefix=config.runtime_tmux_prefix,
+        )
+
+    def _runtime_dict(record: RuntimeRecord) -> dict:
+        data = record.to_dict()
+        data["can_attach"] = record.backend == "tmux" and record.state != "stopped"
+        data["can_stop"] = record.backend == "tmux" and record.state != "stopped"
+        if record.backend == "legacy":
+            data["attach_ws_path"] = "/ws/pty"
+        else:
+            data["attach_ws_path"] = f"/ws/runtimes/{record.runtime_id}/attach"
+        return data
+
+    def _runtime_launch_env_and_argv(runtime_id: str, source: str, profile: str = "default") -> tuple[list[str], dict[str, str]]:
+        argv = shlex.split(_get_effective_hermes_cmd())
+        env = os.environ.copy()
+        env.setdefault("TERM", "xterm-256color")
+        env.setdefault("COLORTERM", "truecolor")
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env.setdefault("HERMES_HOME", str(config.hermes_home))
+        env["HERMES_MANAGED_BY"] = "hermelinchat"
+        env["HERMES_MANAGED_RUNTIME_ID"] = runtime_id
+        env["HERMES_MANAGED_SOURCE"] = source
+        env["HERMELIN_RUNTIME_ID"] = runtime_id
+        if argv and Path(argv[0]).name == "hermes":
+            argv[0] = _resolve_hermes_executable(argv[0], env)
+        argv = _with_hermes_profile_args(argv, profile)
+        for k in (
+            "LLM_MODEL",
+            "OPENAI_MODEL",
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "OPENROUTER_API_KEY",
+            "FIRECRAWL_API_KEY",
+            "BROWSERBASE_API_KEY",
+            "BROWSERBASE_PROJECT_ID",
+            "GITHUB_TOKEN",
+            "COLUMNS",
+            "LINES",
+        ):
+            env.pop(k, None)
+        try:
+            exe_name = Path(argv[0]).name.lower() if argv else ""
+        except Exception:
+            exe_name = ""
+        if "hermes" in exe_name and not _env_flag_default("HERMELIN_PTY_PET_ENABLED", False):
+            pty_managed_dir = _prepare_pty_managed_scope(config, env)
+            if pty_managed_dir is not None:
+                env["HERMES_MANAGED_DIR"] = str(pty_managed_dir)
+        if _command_supports_pet_sidecar(argv):
+            pet_channel = re.sub(r"[^A-Za-z0-9_-]", "-", f"runtime-{runtime_id}")[:128]
+            if not pet_sidecar_channel_re.match(pet_channel):
+                pet_channel = _new_pet_event_channel()
+            pet_sidecar_url = _build_pet_sidecar_url(pet_channel)
+            if pet_sidecar_url:
+                _prepare_pet_sidecar_tls_env(env)
+                env["HERMES_TUI_SIDECAR_URL"] = pet_sidecar_url
+                env["HERMELIN_PET_EVENT_CHANNEL"] = pet_channel
+        return argv, env
+
+    async def _reconcile_runtime(record: RuntimeRecord) -> RuntimeRecord:
+        if record.backend == "tmux":
+            backend = TmuxRuntimeBackend(prefix=config.runtime_tmux_prefix)
+            status = await backend.status(record)
+            if not status.exists:
+                try:
+                    return runtime_registry.mark_stopped(record.runtime_id)
+                except Exception:
+                    return record
+            try:
+                return runtime_registry.update_runtime(
+                    record.runtime_id,
+                    state=status.state,
+                    hermes_pid=status.hermes_pid,
+                    last_seen_at=utc_ts(),
+                )
+            except Exception:
+                return record
+        return record
+
+    async def _create_runtime_from_payload(payload: dict | None = None) -> RuntimeRecord:
+        payload = payload or {}
+        backend = _runtime_backend_or_error()
+        rid = str(payload.get("runtime_id") or payload.get("runtimeId") or new_runtime_id()).strip()
+        title = str(payload.get("title") or "default").strip() or "default"
+        raw_profile = str(payload.get("profile") or "default").strip() or "default"
+        profile = _safe_hermes_profile_name(raw_profile)
+        if not profile:
+            raise ValueError("invalid Hermes profile")
+        known_profiles = {str(item.get("name")) for item in _list_hermes_profiles(config.hermes_home)}
+        if profile != "default" and profile not in known_profiles:
+            raise ValueError(f"unknown Hermes profile: {profile}")
+        source = str(payload.get("source") or "user_ui").strip() or "user_ui"
+        resume_raw = str(payload.get("resume") or payload.get("resume_id") or payload.get("resumeId") or "").strip()
+        safe_resume = resolve_resume_session_id(config.db_path, resume_raw) if resume_raw else None
+        if resume_raw and not safe_resume:
+            raise ValueError("invalid resume session")
+        cwd_raw = str(payload.get("cwd") or config.spawn_cwd).strip()
+        cwd = Path(cwd_raw).expanduser()
+        cols = int(payload.get("cols") or 120)
+        rows = int(payload.get("rows") or 30)
+        argv, env = _runtime_launch_env_and_argv(rid, source, profile)
+        if safe_resume:
+            argv += ["--resume", safe_resume]
+            title = title if title != "default" else safe_resume
+        tmux_name = backend.tmux_name_for(rid) if isinstance(backend, TmuxRuntimeBackend) else None
+        req = RuntimeCreateRequest(
+            runtime_id=rid,
+            title=title,
+            profile=profile,
+            cwd=cwd,
+            source=source,
+            command=argv,
+            env=env,
+            tmux_name=tmux_name,
+            cols=cols,
+            rows=rows,
+        )
+        record = await backend.create(req)
+        runtime_metadata = dict(record.metadata or {})
+        if env.get("HERMELIN_PET_EVENT_CHANNEL"):
+            runtime_metadata["pet_event_channel"] = env.get("HERMELIN_PET_EVENT_CHANNEL")
+        if env.get("HERMES_TUI_SIDECAR_URL"):
+            runtime_metadata["pet_sidecar"] = True
+        record.metadata = runtime_metadata
+        try:
+            existing = runtime_registry.get_runtime(record.runtime_id)
+            if existing:
+                record = runtime_registry.update_runtime(record.runtime_id, **{k: v for k, v in record.to_dict().items() if k != "runtime_id"})
+            else:
+                record = runtime_registry.create_runtime(record)
+        except ValueError:
+            record = runtime_registry.get_runtime(record.runtime_id) or record
+        runtime_registry.remember_last_active(record.runtime_id)
+        return record
+
+    @app.get("/api/runtimes/config")
+    async def api_runtimes_config():
+        try:
+            backend = _runtime_backend_or_error()
+            backend_name = backend.name
+            available = backend.available()
+            error = None
+        except Exception as exc:
+            backend_name = "off"
+            available = False
+            error = str(exc)
+        return {
+            "enabled": str(config.runtime_backend or "auto").lower() != "off",
+            "backend": backend_name,
+            "available": available,
+            "configured_backend": str(config.runtime_backend or "auto"),
+            "autostart_default": bool(config.runtime_autostart_default),
+            "tmux_prefix": config.runtime_tmux_prefix,
+            "registry_path": str(config.runtime_registry_path),
+            "profiles": _list_hermes_profiles(config.hermes_home),
+            "default_profile": "default",
+            "error": error,
+        }
+
+    @app.get("/api/runtimes")
+    async def api_runtimes():
+        records = runtime_registry.list_runtimes()
+        if not records and config.runtime_autostart_default and str(config.runtime_backend or "auto").lower() != "off":
+            try:
+                records = [await _create_runtime_from_payload({"title": "default"})]
+            except Exception:
+                logger.debug("failed to autostart default runtime", exc_info=True)
+                records = []
+        reconciled = [await _reconcile_runtime(record) for record in records]
+        last_active = runtime_registry.get_last_active()
+        if not last_active and reconciled:
+            last_active = reconciled[0].runtime_id
+            runtime_registry.remember_last_active(last_active)
+        return {"runtimes": [_runtime_dict(record) for record in reconciled], "last_active_runtime_id": last_active}
+
+    @app.post("/api/runtimes")
+    async def api_runtimes_create(payload: dict = Body(default={})):  # type: ignore[assignment]
+        if not isinstance(payload, dict):
+            return JSONResponse({"detail": "payload must be an object"}, status_code=400)
+        try:
+            record = await _create_runtime_from_payload(payload)
+        except RuntimeBackendError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=503)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        except Exception as exc:
+            logger.warning("failed to create runtime", exc_info=True)
+            return JSONResponse({"detail": "failed to create runtime", "error": str(exc)}, status_code=500)
+        return {"runtime": _runtime_dict(record)}
+
+    @app.get("/api/runtimes/{runtime_id}")
+    async def api_runtime_get(runtime_id: str):
+        record = runtime_registry.get_runtime(runtime_id)
+        if not record:
+            return JSONResponse({"detail": "runtime not found"}, status_code=404)
+        record = await _reconcile_runtime(record)
+        return {"runtime": _runtime_dict(record)}
+
+    @app.post("/api/runtimes/{runtime_id}/activate")
+    async def api_runtime_activate(runtime_id: str):
+        record = runtime_registry.get_runtime(runtime_id)
+        if not record:
+            return JSONResponse({"detail": "runtime not found"}, status_code=404)
+        runtime_registry.remember_last_active(runtime_id)
+        try:
+            record = runtime_registry.update_runtime(runtime_id, last_attached_at=utc_ts())
+        except Exception:
+            pass
+        return {"runtime": _runtime_dict(runtime_registry.get_runtime(runtime_id) or record)}
+
+    @app.post("/api/runtimes/{runtime_id}/stop")
+    async def api_runtime_stop(runtime_id: str):
+        record = runtime_registry.get_runtime(runtime_id)
+        if not record:
+            return JSONResponse({"detail": "runtime not found"}, status_code=404)
+        if record.backend != "tmux":
+            record = runtime_registry.mark_stopped(runtime_id)
+            return {"runtime": _runtime_dict(record)}
+        backend = TmuxRuntimeBackend(prefix=config.runtime_tmux_prefix)
+        try:
+            await backend.stop(record)
+        except Exception:
+            logger.debug("failed to stop tmux runtime", exc_info=True)
+        record = runtime_registry.mark_stopped(runtime_id)
+        return {"runtime": _runtime_dict(record)}
 
     @app.get("/api/pet/info")
     async def api_pet_info(slug: str = ""):
@@ -1380,6 +1840,25 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         cookie_name=cookie_name,
         trust_xff=trust_xff,
     )
+
+    # ---------------------------------------------------------------------
+    # HermelinFleet bridge proxy
+    # ---------------------------------------------------------------------
+
+    register_fleet_routes(app, config=config, settings=fleet_settings)
+
+    async def _reject_unavailable_fleet_websocket(websocket: WebSocket) -> bool:
+        payload: dict[str, str] | None = None
+        if not fleet_settings.enabled:
+            payload = FLEET_DISABLED_PAYLOAD
+        elif not fleet_settings.available:
+            payload = FLEET_UNAVAILABLE_PAYLOAD
+        if payload is None:
+            return False
+        await websocket.accept()
+        await websocket.send_json(dict(payload))
+        await websocket.close(code=1008, reason=payload["detail"])
+        return True
 
     # ---------------------------------------------------------------------
     # Runner gateway (iframe runners)
@@ -1623,6 +2102,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     @app.websocket("/r/{tab_id}/_t/{token}")
     @app.websocket("/r/{tab_id}/_t/{token}/{path:path}")
     async def ws_runner_proxy(websocket: WebSocket, tab_id: str, token: str, path: str = ""):
+        if not _websocket_origin_allowed(websocket, allow_missing=True):
+            await websocket.close(code=1008)
+            return
         client_ip = extract_client_ip(
             client_host=websocket.client.host if websocket.client else "",
             headers=websocket.headers,
@@ -3176,6 +3658,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         token: str = "",
         channel: str = "",
     ):
+        if not _websocket_origin_allowed(websocket, allow_missing=True):
+            await websocket.close(code=1008)
+            return
         if not hmac.compare_digest(str(token).encode(), pet_sidecar_secret.encode()):
             await websocket.close(code=1008)
             return
@@ -3201,6 +3686,583 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             logger.debug("pet event publisher ended", exc_info=True)
             pass
 
+    @app.websocket("/ws/fleet/agents/{agent_id}/attach")
+    async def ws_fleet_agent_attach(
+        websocket: WebSocket,
+        agent_id: str,
+        cols: int = 120,
+        rows: int = 30,
+    ):
+        if await _reject_unavailable_fleet_websocket(websocket):
+            return
+        if not _websocket_origin_allowed(websocket):
+            await websocket.close(code=1008)
+            return
+        client_ip = extract_client_ip(
+            client_host=websocket.client.host if websocket.client else "",
+            headers=websocket.headers,
+            trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
+        )
+
+        await websocket.accept()
+        if not _check_allowed(client_ip):
+            await websocket.close(code=1008)
+            return
+
+        if auth_enabled:
+            token = extract_cookie_value(websocket.headers.get("cookie", ""), cookie_name)
+            if not _is_authenticated(token):
+                await websocket.close(code=1008)
+                return
+
+        # Security boundary: Fleet agent metadata is node-controlled and may contain
+        # arbitrary dashboard addresses and credentials. Never connect or relay a
+        # credential to such an address. Remote terminals must use the central-
+        # mediated /nodes/{node}/runtimes/{runtime}/attach path instead.
+        try:
+            await websocket.send_bytes(
+                b"\r\n\x1b[31mlegacy Fleet dashboard attach is disabled; start or select a managed Fleet runtime\x1b[0m\r\n"
+            )
+        finally:
+            await websocket.close(code=1008)
+        return
+
+
+
+    @app.websocket("/ws/fleet/nodes/{node}/runtimes/{runtime_id}/attach")
+    async def ws_fleet_node_runtime_attach(
+        websocket: WebSocket,
+        node: str,
+        runtime_id: str,
+        cols: int = 120,
+        rows: int = 30,
+    ):
+        if await _reject_unavailable_fleet_websocket(websocket):
+            return
+        if not _websocket_origin_allowed(websocket):
+            await websocket.close(code=1008)
+            return
+        client_ip = extract_client_ip(
+            client_host=websocket.client.host if websocket.client else "",
+            headers=websocket.headers,
+            trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
+        )
+
+        await websocket.accept()
+        if not _check_allowed(client_ip):
+            await websocket.close(code=1008)
+            return
+
+        browser_session_token = extract_cookie_value(websocket.headers.get("cookie", ""), cookie_name)
+        if auth_enabled and not _is_authenticated(browser_session_token):
+            await websocket.close(code=1008)
+            return
+
+        base_url = fleet_settings.base_url
+        safe_node = quote(str(node or "").strip(), safe="")
+        safe_runtime = quote(str(runtime_id or "").strip(), safe="")
+        if not base_url or not safe_node or not safe_runtime:
+            try:
+                await websocket.send_bytes(b"\r\n\x1b[31mremote fleet runtime unavailable\x1b[0m\r\n")
+            except Exception:
+                pass
+            await websocket.close(code=1008)
+            return
+
+        parsed = urlparse(base_url)
+        ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+        query = f"cols={max(10, int(cols or 120))}&rows={max(5, int(rows or 30))}"
+        expected_attach_path = f"{FLEET_API_PREFIX}/nodes/{safe_node}/runtimes/{safe_runtime}/attach"
+        fleet_token = fleet_bridge_token(config)
+        if not fleet_token:
+            try:
+                await websocket.send_bytes(b"\r\n\x1b[31mFleet service credential is not configured\x1b[0m\r\n")
+            finally:
+                await websocket.close(code=1011)
+            return
+        session_material = browser_session_token or f"unauthenticated:{client_ip}"
+        session_binding = hashlib.sha256(session_material.encode("utf-8", errors="replace")).hexdigest()
+        ticket_url = f"{base_url.rstrip('/')}{expected_attach_path}-ticket"
+        try:
+            fleet_client = getattr(app.state, "fleet_http_client", None)
+            if fleet_client is None:
+                raise RuntimeError("Fleet HTTP client is unavailable")
+            ticket_response = await fleet_client.request(
+                "POST",
+                ticket_url,
+                headers={"Authorization": f"Bearer {fleet_token}"},
+                json={"user_id": "hermelin-browser", "session_id": session_binding},
+            )
+            if ticket_response.status_code != 201:
+                raise RuntimeError(f"Fleet attach ticket request failed ({ticket_response.status_code})")
+            ticket_payload = ticket_response.json()
+            attach_ticket = str(ticket_payload.get("ticket") or "").strip()
+            attach_path = str(ticket_payload.get("attach_path") or "").strip()
+            if not attach_ticket or attach_path != expected_attach_path:
+                raise RuntimeError("Fleet returned an invalid attach ticket binding")
+        except Exception as exc:
+            try:
+                await websocket.send_bytes(f"\r\n\x1b[31m{exc}\x1b[0m\r\n".encode("utf-8", errors="replace"))
+            finally:
+                await websocket.close(code=1011)
+            return
+        upstream_url = f"{ws_scheme}://{parsed.netloc}{expected_attach_path}?{query}"
+        headers = {
+            "Authorization": f"Bearer {attach_ticket}",
+            "X-Fleet-Attach-User-ID": "hermelin-browser",
+            "X-Fleet-Attach-Session-ID": session_binding,
+        }
+
+        writer = WebSocketPriorityWriter(websocket, max_droppable_backlog=2)
+        writer_task = asyncio.create_task(writer.run())
+
+        async def _send_terminal_error(message: str, *, code: int = 1011) -> None:
+            raw = str(message or "remote fleet runtime attach failed")
+            raw = raw.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+            try:
+                await writer.send_bytes(f"\x1b[31m{raw}\x1b[0m\r\n".encode("utf-8", errors="replace"), priority=0)
+            except Exception:
+                pass
+            try:
+                await writer.stop()
+            except Exception:
+                writer_task.cancel()
+            if not writer_task.done():
+                try:
+                    await asyncio.wait_for(writer_task, timeout=2.0)
+                except Exception:
+                    writer_task.cancel()
+            try:
+                await websocket.close(code=code)
+            except Exception:
+                pass
+
+        try:
+            async with websockets.connect(
+                upstream_url,
+                additional_headers=headers or None,
+                max_size=_FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES,
+                max_queue=4,
+                proxy=None,
+            ) as upstream:
+                async def _upstream_to_browser() -> None:
+                    async for message in upstream:
+                        if _fleet_runtime_attach_frame_size(message) > _FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES:
+                            await websocket.close(code=1009)
+                            return
+                        if isinstance(message, bytes):
+                            await writer.send_bytes(message, priority=0)
+                        else:
+                            await writer.send_text(str(message), priority=0)
+
+                async def _browser_to_upstream() -> None:
+                    while True:
+                        msg = await websocket.receive()
+                        if msg.get("type") == "websocket.disconnect":
+                            break
+                        raw = msg.get("bytes")
+                        if raw is not None:
+                            if _fleet_runtime_attach_frame_size(raw) > _FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES:
+                                await websocket.close(code=1009)
+                                return
+                            if raw:
+                                await upstream.send(raw)
+                            continue
+                        text = msg.get("text")
+                        if isinstance(text, str) and text:
+                            if _fleet_runtime_attach_frame_size(text) > _FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES:
+                                await websocket.close(code=1009)
+                                return
+                            await upstream.send(text)
+
+                upstream_task = asyncio.create_task(_upstream_to_browser())
+                browser_task = asyncio.create_task(_browser_to_upstream())
+                try:
+                    await asyncio.wait({upstream_task, browser_task, writer_task}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    for task in (upstream_task, browser_task):
+                        if not task.done():
+                            task.cancel()
+        except Exception as exc:
+            await _send_terminal_error(f"Remote Fleet tmux runtime connection failed: {exc}")
+            return
+        finally:
+            try:
+                await writer.stop()
+            except Exception:
+                writer_task.cancel()
+            if not writer_task.done():
+                try:
+                    await asyncio.wait_for(writer_task, timeout=2.0)
+                except Exception:
+                    writer_task.cancel()
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+        return
+
+
+    @app.websocket("/ws/runtimes/{runtime_id}/attach")
+    async def ws_runtime_attach(
+        websocket: WebSocket,
+        runtime_id: str,
+        cols: int = 120,
+        rows: int = 30,
+    ):
+        if not _websocket_origin_allowed(websocket):
+            await websocket.close(code=1008)
+            return
+        client_ip = extract_client_ip(
+            client_host=websocket.client.host if websocket.client else "",
+            headers=websocket.headers,
+            trust_xff=trust_xff,
+            trusted_proxy_spec=config.trusted_proxy_ips,
+        )
+
+        await websocket.accept()
+        if not _check_allowed(client_ip):
+            await websocket.close(code=1008)
+            return
+
+        if auth_enabled:
+            token = extract_cookie_value(websocket.headers.get("cookie", ""), cookie_name)
+            if not _is_authenticated(token):
+                await websocket.close(code=1008)
+                return
+
+        record = runtime_registry.get_runtime(runtime_id)
+        if not record or record.state == "stopped":
+            await websocket.close(code=1008)
+            return
+        if record.backend != "tmux":
+            await websocket.close(code=1008)
+            return
+
+        try:
+            qp = websocket.query_params
+            cq = qp.get("cols")
+            rq = qp.get("rows")
+            if cq:
+                cols = int(cq)
+            if rq:
+                rows = int(rq)
+        except Exception:
+            pass
+        cols = max(10, int(cols or 120))
+        rows = max(5, int(rows or 30))
+        init_cols = cols
+        init_rows = rows
+        prefetched: list[dict] = []
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 0.6
+            while loop.time() < deadline:
+                msg = await asyncio.wait_for(websocket.receive(), timeout=deadline - loop.time())
+                if msg.get("type") == "websocket.disconnect":
+                    return
+                t = msg.get("text")
+                if t:
+                    try:
+                        payload = json.loads(t)
+                    except json.JSONDecodeError:
+                        prefetched.append(msg)
+                        continue
+                    if payload.get("type") == "resize":
+                        c = int(payload.get("cols") or 0)
+                        r = int(payload.get("rows") or 0)
+                        if c > 0 and r > 0:
+                            init_cols = c
+                            init_rows = r
+                            break
+                prefetched.append(msg)
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            prefetched = []
+
+        backend = TmuxRuntimeBackend(prefix=config.runtime_tmux_prefix)
+        try:
+            p = backend.attach_process(record, cols=init_cols, rows=init_rows)
+        except Exception as exc:
+            hint = f"\r\n\x1b[31mUnable to attach runtime {runtime_id}: {exc}\x1b[0m\r\n"
+            try:
+                await websocket.send_bytes(hint.encode("utf-8", errors="replace"))
+            except Exception:
+                pass
+            try:
+                await websocket.close(code=1011)
+            except Exception:
+                pass
+            return
+
+        try:
+            runtime_registry.update_runtime(runtime_id, last_attached_at=utc_ts(), metadata={**(record.metadata or {}), "attached": True})
+            runtime_registry.remember_last_active(runtime_id)
+        except Exception:
+            pass
+
+        writer = WebSocketPriorityWriter(websocket, max_droppable_backlog=2)
+        pet_event_channel = str((record.metadata or {}).get("pet_event_channel") or "")
+
+        def _runtime_artifact_snapshot() -> dict[str, dict]:
+            items = list_artifacts(config.artifact_dir, hermes_home=config.hermes_home)
+            out: dict[str, dict] = {}
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                artifact_id = item.get("id")
+                if artifact_id:
+                    out[str(artifact_id)] = item
+            return out
+
+        def _runtime_artifact_changed(prev: dict | None, curr: dict) -> bool:
+            if not isinstance(prev, dict):
+                return True
+            for key in ("timestamp", "updated_at", "live", "persistent", "refresh_seconds", "runner_active", "runner_status"):
+                if prev.get(key) != curr.get(key):
+                    return True
+            return False
+
+        def _runtime_artifact_list_payload(snapshot: dict[str, dict]) -> str:
+            payload = sorted(snapshot.values(), key=lambda item: float(item.get("timestamp") or 0.0), reverse=True)
+            return json.dumps({"type": "artifact_list", "payload": payload}, ensure_ascii=False)
+
+        def _runtime_artifact_payload(item: dict) -> str:
+            return json.dumps({"type": "artifact", "payload": item}, ensure_ascii=False)
+
+        async def pump_runtime_artifacts_to_ws() -> None:
+            async def _load_snapshot() -> dict[str, dict]:
+                return await asyncio.to_thread(_runtime_artifact_snapshot)
+
+            try:
+                initial = await _load_snapshot()
+                previous: dict[str, dict] = {}
+                if initial:
+                    if await writer.send_text(_runtime_artifact_list_payload(initial), priority=20, droppable=True):
+                        previous = initial
+
+                close_signal_path = config.artifact_dir / "_close_signal.json"
+                focus_signal_path = config.artifact_dir / "_focus.json"
+                close_signal_seen_ns = 0
+                focus_signal_seen_ns = 0
+                bridge_commands_dir = artifact_bridge_commands_dir(config.artifact_dir)
+
+                while True:
+                    await asyncio.sleep(0.75)
+                    current = await _load_snapshot()
+
+                    try:
+                        ns = close_signal_path.stat().st_mtime_ns
+                        if ns and ns != close_signal_seen_ns:
+                            close_signal_seen_ns = ns
+                            try:
+                                sig = json.loads(close_signal_path.read_text(encoding="utf-8"))
+                            except Exception:
+                                sig = None
+                            if isinstance(sig, dict) and sig.get("action") == "close_all":
+                                await writer.send_text(json.dumps({"type": "artifact_close", "payload": sig}, ensure_ascii=False), priority=5, droppable=False)
+                    except FileNotFoundError:
+                        pass
+                    except Exception:
+                        pass
+
+                    try:
+                        ns = focus_signal_path.stat().st_mtime_ns
+                        if ns and ns != focus_signal_seen_ns:
+                            focus_signal_seen_ns = ns
+                            try:
+                                sig = json.loads(focus_signal_path.read_text(encoding="utf-8"))
+                            except Exception:
+                                sig = None
+                            if isinstance(sig, dict) and sig.get("action") == "focus" and sig.get("tab_id"):
+                                await writer.send_text(json.dumps({"type": "artifact_focus", "payload": sig}, ensure_ascii=False), priority=5, droppable=False)
+                                try:
+                                    focus_signal_path.unlink()
+                                    focus_signal_seen_ns = 0
+                                except Exception:
+                                    pass
+                    except FileNotFoundError:
+                        focus_signal_seen_ns = 0
+                    except Exception:
+                        pass
+
+                    try:
+                        for cmd_path in sorted(bridge_commands_dir.glob("*.json"), key=lambda path: path.name):
+                            if not cmd_path.is_file():
+                                continue
+                            try:
+                                cmd = json.loads(cmd_path.read_text(encoding="utf-8"))
+                            except Exception:
+                                cmd = None
+                            if isinstance(cmd, dict):
+                                await writer.send_text(json.dumps({"type": "artifact_bridge_command", "payload": cmd}, ensure_ascii=False), priority=5, droppable=False)
+                            try:
+                                cmd_path.unlink()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+                    for artifact_id in sorted(previous.keys() - current.keys()):
+                        await writer.send_text(json.dumps({"type": "artifact_close", "payload": {"id": artifact_id}}, ensure_ascii=False), priority=5, droppable=False)
+                        previous.pop(artifact_id, None)
+
+                    changed_ids = [artifact_id for artifact_id, item in current.items() if artifact_id not in previous or _runtime_artifact_changed(previous.get(artifact_id), item)]
+                    changed_ids.sort(key=lambda artifact_id: float(current[artifact_id].get("timestamp") or 0.0))
+                    for artifact_id in changed_ids:
+                        if await writer.send_text(_runtime_artifact_payload(current[artifact_id]), priority=20, droppable=True):
+                            previous[artifact_id] = current[artifact_id]
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("pump_runtime_artifacts_to_ws failed", exc_info=True)
+
+        async def pump_runtime_pet_events_to_ws() -> None:
+            if not pet_event_channel or not pet_sidecar_channel_re.match(pet_event_channel):
+                return
+            queue: asyncio.Queue[str] = asyncio.Queue(maxsize=512)
+            channels, _, lock = _pet_event_state()
+            async with lock:
+                channels.setdefault(pet_event_channel, set()).add(queue)
+            try:
+                await writer.send_text(
+                    json.dumps({"type": "pet_sync", "payload": {"mode": "structured", "source": "runtime-sidecar"}}, ensure_ascii=False),
+                    priority=5,
+                    droppable=False,
+                )
+                cached_payload = await _last_pet_event(pet_event_channel)
+                if cached_payload:
+                    if not await writer.send_text(cached_payload, priority=5, droppable=False):
+                        return
+                while True:
+                    payload = await queue.get()
+                    if not await writer.send_text(payload, priority=5, droppable=False):
+                        break
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("pump runtime pet events ended", exc_info=True)
+            finally:
+                try:
+                    channels, _, lock = _pet_event_state()
+                    async with lock:
+                        queues = channels.get(pet_event_channel)
+                        if queues is not None:
+                            queues.discard(queue)
+                            if not queues:
+                                channels.pop(pet_event_channel, None)
+                except Exception:
+                    pass
+
+        def _handle_runtime_ws_message(msg: dict) -> bool:
+            if msg.get("type") == "websocket.disconnect":
+                return False
+            b = msg.get("bytes")
+            if b is not None:
+                if b:
+                    p.write(b)
+                return True
+            t = msg.get("text")
+            if t is None:
+                return True
+            try:
+                payload = json.loads(t)
+            except json.JSONDecodeError:
+                p.write(t.encode("utf-8", errors="ignore"))
+                return True
+            if payload.get("type") == "resize":
+                c = int(payload.get("cols") or 0)
+                r = int(payload.get("rows") or 0)
+                if c > 0 and r > 0:
+                    p.resize(cols=c, rows=r)
+                return True
+            if payload.get("type") == "signal":
+                sig = str(payload.get("sig") or "").upper()
+                # Signals here target only the tmux attach wrapper, not the
+                # underlying persistent Hermes runtime. Explicit stop is a
+                # separate authenticated POST /api/runtimes/{id}/stop action.
+                if sig in {"INT", "TERM", "HUP", "QUIT"}:
+                    try:
+                        os.killpg(p.proc.pid, getattr(signal, f"SIG{sig}"))
+                    except Exception:
+                        pass
+                elif sig == "KILL":
+                    p.kill()
+                return True
+            return True
+
+        for msg in prefetched:
+            try:
+                if not _handle_runtime_ws_message(msg):
+                    break
+            except Exception:
+                pass
+
+        async def pump_attach_to_ws() -> None:
+            try:
+                while True:
+                    data = await asyncio.to_thread(os.read, p.master_fd, 8192)
+                    if not data:
+                        break
+                    if not await writer.send_bytes(data, priority=0):
+                        break
+            except Exception:
+                logger.debug("pump runtime attach to ws ended", exc_info=True)
+
+        async def pump_ws_to_attach() -> None:
+            try:
+                while True:
+                    msg = await websocket.receive()
+                    if not _handle_runtime_ws_message(msg):
+                        break
+            except Exception:
+                logger.debug("pump ws to runtime attach ended", exc_info=True)
+
+        t1 = asyncio.create_task(pump_attach_to_ws())
+        t2 = asyncio.create_task(pump_ws_to_attach())
+        t3 = asyncio.create_task(pump_runtime_artifacts_to_ws())
+        t4 = asyncio.create_task(pump_runtime_pet_events_to_ws())
+        writer_task = asyncio.create_task(writer.run())
+        try:
+            await asyncio.wait({t1, t2, writer_task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            try:
+                for task in (t1, t2, t3, t4):
+                    if not task.done():
+                        task.cancel()
+                for task in (t3, t4):
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+                try:
+                    await writer.stop()
+                except Exception:
+                    writer_task.cancel()
+                if not writer_task.done():
+                    try:
+                        await asyncio.wait_for(writer_task, timeout=2.0)
+                    except Exception:
+                        writer_task.cancel()
+            finally:
+                p.terminate()
+                p.close_fds()
+                try:
+                    current = runtime_registry.get_runtime(runtime_id)
+                    if current:
+                        runtime_registry.update_runtime(runtime_id, metadata={**(current.metadata or {}), "attached": False}, last_seen_at=utc_ts())
+                except Exception:
+                    pass
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+
     @app.websocket("/ws/pty")
     async def ws_pty(
         websocket: WebSocket,
@@ -3210,6 +4272,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         rows: int = 30,
         clear_session_artifacts: bool = Query(False),
     ):
+        if not _websocket_origin_allowed(websocket):
+            await websocket.close(code=1008)
+            return
         client_ip = extract_client_ip(
             client_host=websocket.client.host if websocket.client else "",
             headers=websocket.headers,
@@ -3705,7 +4770,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 return
 
             queue: asyncio.Queue[str] = asyncio.Queue(maxsize=512)
-            channels, lock = _pet_event_state()
+            channels, _, lock = _pet_event_state()
             async with lock:
                 channels.setdefault(pet_event_channel, set()).add(queue)
 
@@ -3721,6 +4786,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                     priority=5,
                     droppable=False,
                 )
+                cached_payload = await _last_pet_event(pet_event_channel)
+                if cached_payload:
+                    if not await writer.send_text(cached_payload, priority=5, droppable=False):
+                        return
                 while True:
                     payload = await queue.get()
                     # Pet state is control-plane truth, not cosmetic artifact data.
@@ -3736,7 +4805,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 pass
             finally:
                 try:
-                    channels, lock = _pet_event_state()
+                    channels, _, lock = _pet_event_state()
                     async with lock:
                         queues = channels.get(pet_event_channel)
                         if queues is not None:

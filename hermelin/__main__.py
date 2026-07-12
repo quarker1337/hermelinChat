@@ -10,7 +10,12 @@ from pathlib import Path
 import uvicorn
 
 from .config import DEFAULT_HERMELIN_HERMES_CMD, HermelinConfig
-from .server import _is_managed_hermes_command, _managed_hermes_executable, create_app
+from .server import (
+    _is_managed_hermes_command,
+    _managed_hermes_executable,
+    _repair_malformed_managed_hermes_command,
+    create_app,
+)
 
 
 def _env_bool(name: str, default: str = "0") -> bool:
@@ -96,11 +101,15 @@ def main() -> None:
 
     args = p.parse_args()
 
-    env_hermes_cmd = os.getenv("HERMELIN_HERMES_CMD", "").strip()
+    raw_env_hermes_cmd = os.getenv("HERMELIN_HERMES_CMD", "").strip()
+    env_hermes_cmd = _repair_malformed_managed_hermes_command(raw_env_hermes_cmd)
+    if raw_env_hermes_cmd and env_hermes_cmd != raw_env_hermes_cmd:
+        os.environ["HERMELIN_HERMES_CMD"] = env_hermes_cmd
     env_cmd_override = _env_bool("HERMELIN_HERMES_CMD_OVERRIDE", "0")
     env_hermes_cmd_override = bool(env_hermes_cmd) and (env_cmd_override or not _is_managed_hermes_command(env_hermes_cmd))
     hermes_cmd_override = args.hermes_cmd is not None or env_hermes_cmd_override
-    hermes_cmd = str(args.hermes_cmd if args.hermes_cmd is not None else (env_hermes_cmd or DEFAULT_HERMELIN_HERMES_CMD))
+    arg_hermes_cmd = _repair_malformed_managed_hermes_command(args.hermes_cmd) if args.hermes_cmd is not None else None
+    hermes_cmd = str(arg_hermes_cmd if arg_hermes_cmd is not None else (env_hermes_cmd or DEFAULT_HERMELIN_HERMES_CMD))
 
     if args.reload:
         # Uvicorn reload requires an import string. We pass config via env.

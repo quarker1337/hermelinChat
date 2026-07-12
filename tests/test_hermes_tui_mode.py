@@ -530,6 +530,40 @@ class HermesTuiModeTests(unittest.TestCase):
             else:
                 os.environ["HERMELIN_HERMES_CMD_OVERRIDE"] = old_override_env
 
+    def test_agent_settings_get_treats_malformed_managed_env_command_as_non_override(self):
+        old_env = os.environ.get("HERMELIN_HERMES_CMD")
+        old_override_env = os.environ.get("HERMELIN_HERMES_CMD_OVERRIDE")
+        try:
+            os.environ["HERMELIN_HERMES_CMD"] = "hermes chat --toolsets 'hermes-cli, artifacts, strudel"
+            os.environ.pop("HERMELIN_HERMES_CMD_OVERRIDE", None)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp = Path(tmpdir)
+                hermes_home = tmp / "hermes-home"
+                hermes_home.mkdir(parents=True, exist_ok=True)
+                (hermes_home / "config.yaml").write_text("hermelin:\n  hermes_launch_mode: tui\n", encoding="utf-8")
+                config = HermelinConfig(
+                    hermes_home=hermes_home,
+                    meta_db_path=tmp / "hermelin_meta.db",
+                    spawn_cwd=tmp / "spawn-cwd",
+                    hermes_cmd="hermes chat --toolsets 'hermes-cli, artifacts, strudel",
+                )
+                app = create_app(config)
+                route = _route_for_path(app, "/api/settings/agent", method="GET")
+
+                result = asyncio.run(route.endpoint())
+
+                self.assertFalse(result["hermelin"]["hermes_cmd_override"])
+                self.assertEqual(result["hermelin"]["effective_hermes_cmd"], "hermes chat --tui")
+        finally:
+            if old_env is None:
+                os.environ.pop("HERMELIN_HERMES_CMD", None)
+            else:
+                os.environ["HERMELIN_HERMES_CMD"] = old_env
+            if old_override_env is None:
+                os.environ.pop("HERMELIN_HERMES_CMD_OVERRIDE", None)
+            else:
+                os.environ["HERMELIN_HERMES_CMD_OVERRIDE"] = old_override_env
+
     def test_agent_settings_get_treats_absolute_managed_env_command_as_non_override(self):
         old_env = os.environ.get("HERMELIN_HERMES_CMD")
         old_override_env = os.environ.get("HERMELIN_HERMES_CMD_OVERRIDE")

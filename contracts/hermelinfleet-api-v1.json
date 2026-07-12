@@ -1,0 +1,31 @@
+{
+  "contract_id": "hermelinfleet-api-v1-2026-07-11",
+  "api_prefix": "/api/v1",
+  "authentication": {
+    "reads": "admin-or-hermelin-service-bearer",
+    "mutations": "admin-or-hermelin-service-bearer",
+    "include_secrets": "admin-only",
+    "runtime_attach": "single-use-ticket-bearer-plus-exact-x-fleet-attach-user-id-and-x-fleet-attach-session-id-bindings"
+  },
+  "endpoints": {
+    "status": "GET /api/v1/status",
+    "nodes": "GET /api/v1/nodes",
+    "agents": "GET /api/v1/agents",
+    "sessions": "GET /api/v1/sessions",
+    "capabilities": "GET /api/v1/capabilities",
+    "runtimes": "GET /api/v1/runtimes",
+    "node_runtimes": "GET /api/v1/nodes/{node}/runtimes",
+    "runtime_create": "POST /api/v1/nodes/{node}/runtimes",
+    "runtime_stop": "POST /api/v1/nodes/{node}/runtimes/{runtime_id}/stop",
+    "runtime_attach_ticket": "POST /api/v1/nodes/{node}/runtimes/{runtime_id}/attach-ticket",
+    "runtime_attach": "GET /api/v1/nodes/{node}/runtimes/{runtime_id}/attach"
+  },
+  "required_fields": {
+    "status": ["ok", "ts", "dispatcher_configured", "nodes", "agents", "sessions", "capabilities"],
+    "node": ["node", "state", "agent_count", "agent_ids", "capabilities", "state_counts"],
+    "agent": ["agent_id", "kind", "host", "state", "capabilities", "can_inject"],
+    "session": ["session_id", "state", "agent_id", "agent_ids", "nodes", "capabilities", "can_inject"],
+    "capabilities": ["verbs", "by_kind", "by_node", "by_agent", "inject_agents"],
+    "runtime": ["runtime_id", "node", "title", "profile", "cwd", "state", "source", "backend", "can_attach", "can_stop", "attach_ws_path"]
+  }
+}

@@ -23,6 +23,14 @@ SKIP_PYTHON=0
 SKIP_HERMES_PATCH=0
 SKIP_HERMES_SKINS=0
 
+# Optional HermelinFleet integration. Empty means ask interactively, or off with --yes.
+FLEET_MODE=""
+FLEET_URL=""
+FLEET_TOKEN_FILE=""
+FLEET_SOURCE=""
+FLEET_ALLOW_INSECURE_HTTP=0
+FLEET_TOKEN_STDIN_VALUE=""
+
 usage() {
   cat <<EOF
 Usage: ./scripts/install.sh [options]
@@ -50,6 +58,13 @@ Options:
   --skip-hermes-patch    Skip patching the active Hermes installation with artifact tools
   --skip-hermes-skins    Skip installing hermelinChat CLI skins into ~/.hermes/skins/
   --skip-hermes-themes   (deprecated alias for --skip-hermes-skins)
+
+  --fleet-mode MODE      HermelinFleet: off, external, or local (interactive default asks; -y defaults off)
+  --fleet-url URL        Existing Fleet central URL for external mode
+  --fleet-token-file P   Read external Fleet credential from a mode-0600 file
+  --fleet-source DIR     HermelinFleet checkout used by local mode
+  --fleet-allow-insecure-http
+                         Allow external public HTTP only for explicit development use
 
   -y, --yes              Do not prompt for confirmation
   -h, --help             Show help
@@ -123,6 +138,31 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-hermes-skins|--skip-hermes-themes)
       SKIP_HERMES_SKINS=1
+      shift
+      ;;
+
+    --fleet-mode)
+      FLEET_MODE="${2:-}"
+      case "$FLEET_MODE" in off|external|local) ;; *) echo "ERROR: --fleet-mode must be off, external, or local" >&2; exit 1 ;; esac
+      shift 2
+      ;;
+    --fleet-url)
+      FLEET_URL="${2:-}"
+      [[ -n "$FLEET_URL" ]] || { echo "ERROR: --fleet-url requires a URL" >&2; exit 1; }
+      shift 2
+      ;;
+    --fleet-token-file)
+      FLEET_TOKEN_FILE="${2:-}"
+      [[ -n "$FLEET_TOKEN_FILE" ]] || { echo "ERROR: --fleet-token-file requires a path" >&2; exit 1; }
+      shift 2
+      ;;
+    --fleet-source)
+      FLEET_SOURCE="${2:-}"
+      [[ -n "$FLEET_SOURCE" ]] || { echo "ERROR: --fleet-source requires a directory" >&2; exit 1; }
+      shift 2
+      ;;
+    --fleet-allow-insecure-http)
+      FLEET_ALLOW_INSECURE_HTTP=1
       shift
       ;;
 
@@ -284,10 +324,13 @@ if [[ -z "$COOKIE_SECRET" ]]; then
 fi
 
 WRITE_ENV=0
+PRESERVE_EXISTING_ENV=0
 if [[ ! -f "$ENV_FILE" ]]; then
   WRITE_ENV=1
 elif [[ "$FORCE_ENV" -eq 1 ]]; then
   WRITE_ENV=1
+else
+  PRESERVE_EXISTING_ENV=1
 fi
 
 # -------------------------------------------------------------------
@@ -308,6 +351,56 @@ if [[ "$INSTALL_SERVICE" -eq 0 && "$YES" -eq 0 ]]; then
   fi
 fi
 
+# -------------------------------------------------------------------
+# Interactive: optional HermelinFleet integration (default off)
+# -------------------------------------------------------------------
+if [[ -z "$FLEET_MODE" ]]; then
+  if [[ "$YES" -eq 1 ]]; then
+    FLEET_MODE="off"
+  else
+    read -r -p "Enable HermelinFleet remote host/runtime integration? [y/N] " _fleet_enable
+    if [[ "${_fleet_enable,,}" == "y" || "${_fleet_enable,,}" == "yes" ]]; then
+      read -r -p "Connect to an existing Fleet or install a local managed Fleet? [external/local] (default: local) " _fleet_kind
+      if [[ "${_fleet_kind,,}" == "external" || "${_fleet_kind,,}" == "e" ]]; then
+        FLEET_MODE="external"
+      else
+        FLEET_MODE="local"
+      fi
+    else
+      FLEET_MODE="off"
+    fi
+  fi
+fi
+
+if [[ "$FLEET_MODE" == "external" ]]; then
+  if [[ -z "$FLEET_URL" && "$YES" -eq 0 ]]; then
+    read -r -p "HermelinFleet central URL (HTTPS or private/loopback HTTP): " FLEET_URL
+  fi
+  [[ -n "$FLEET_URL" ]] || { echo "ERROR: external Fleet mode requires --fleet-url" >&2; exit 1; }
+  if [[ -z "$FLEET_TOKEN_FILE" ]]; then
+    if [[ "$YES" -eq 1 ]]; then
+      echo "ERROR: noninteractive external Fleet mode requires --fleet-token-file" >&2
+      exit 1
+    fi
+    read -r -s -p "HermelinFleet service/admin credential: " FLEET_TOKEN_STDIN_VALUE
+    echo
+    [[ -n "$FLEET_TOKEN_STDIN_VALUE" ]] || { echo "ERROR: Fleet credential cannot be empty" >&2; exit 1; }
+  fi
+elif [[ "$FLEET_MODE" == "local" ]]; then
+  if [[ -z "$FLEET_SOURCE" ]]; then
+    for candidate in "$ROOT_DIR/../hermelinfleet" "$HOME/fleetbuild/fleet"; do
+      if [[ -x "$candidate/scripts/install.sh" ]]; then FLEET_SOURCE="$candidate"; break; fi
+    done
+  fi
+  if [[ -z "$FLEET_SOURCE" && "$YES" -eq 0 ]]; then
+    read -r -p "Path to the HermelinFleet checkout: " FLEET_SOURCE
+  fi
+  [[ -n "$FLEET_SOURCE" && -x "$FLEET_SOURCE/scripts/install.sh" ]] || {
+    echo "ERROR: local Fleet mode requires --fleet-source pointing to a HermelinFleet checkout" >&2
+    exit 1
+  }
+fi
+
 echo "==> hermelinChat install"
 echo "    root:     $ROOT_DIR"
 echo "    env file: $ENV_FILE"
@@ -325,6 +418,13 @@ else
 fi
 
 echo "  - build backend + frontend: yes (via ./scripts/update.sh)"
+echo "  - HermelinFleet mode: $FLEET_MODE"
+if [[ "$FLEET_MODE" == "external" ]]; then
+  echo "    endpoint: $FLEET_URL"
+elif [[ "$FLEET_MODE" == "local" ]]; then
+  echo "    source: $FLEET_SOURCE"
+  echo "    managed service: hermelinfleet-central.service"
+fi
 if [[ "$PULL" -eq 1 ]]; then
   echo "  - git pull: yes"
 else
@@ -414,13 +514,37 @@ if [[ -f "$ENV_FILE" ]]; then
   chmod 600 "$ENV_FILE" || true
 fi
 
+# Configure optional Fleet integration before service unit generation. Secrets are
+# read from a protected file or stdin and never placed in argv.
+FLEET_CONFIG_ARGS=(--env-file "$ENV_FILE" --mode "$FLEET_MODE")
+if [[ "$FLEET_ALLOW_INSECURE_HTTP" -eq 1 ]]; then
+  FLEET_CONFIG_ARGS+=(--allow-insecure-http)
+fi
+case "$FLEET_MODE" in
+  off)
+    python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}"
+    ;;
+  external)
+    FLEET_CONFIG_ARGS+=(--url "$FLEET_URL")
+    if [[ -n "$FLEET_TOKEN_FILE" ]]; then
+      python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --token-file "$FLEET_TOKEN_FILE"
+    else
+      printf '%s' "$FLEET_TOKEN_STDIN_VALUE" | python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --token-stdin
+    fi
+    FLEET_TOKEN_STDIN_VALUE=""
+    ;;
+  local)
+    PATH="$HOME/.local/go/bin:$PATH" python3 "$SELF_DIR/configure_fleet.py" "${FLEET_CONFIG_ARGS[@]}" --fleet-source "$FLEET_SOURCE"
+    ;;
+esac
+
 # -------------------------------------------------------------------
 # Ensure env file contains systemd-friendly Hermes command
 # -------------------------------------------------------------------
 # Under systemd, PATH does not include ~/.local/bin by default (no bashrc).
 # If HERMELIN_HERMES_CMD is missing (or set to plain "hermes ..."), PTY spawn
 # fails with: FileNotFoundError: 'hermes'
-if [[ -f "$ENV_FILE" ]]; then
+if [[ -f "$ENV_FILE" && "$PRESERVE_EXISTING_ENV" -eq 0 ]]; then
   # -------------------------------------------------------------------
   # Ensure env file contains HTTPS settings
   # -------------------------------------------------------------------
@@ -556,7 +680,9 @@ fi
 # -------------------------------------------------------------------
 # Ensure UI password auth is configured (argon2id hash in env)
 # -------------------------------------------------------------------
-if [[ "$SKIP_PYTHON" -eq 1 ]]; then
+if [[ "$PRESERVE_EXISTING_ENV" -eq 1 ]]; then
+  echo "==> preserving existing non-Fleet env settings"
+elif [[ "$SKIP_PYTHON" -eq 1 ]]; then
   echo "WARNING: --skip-python set; cannot generate HERMELIN_PASSWORD_HASH." >&2
   echo "Set HERMELIN_PASSWORD_HASH manually in $ENV_FILE or re-run without --skip-python." >&2
 else
@@ -650,6 +776,17 @@ if generated:
 PY
 fi
 
+FLEET_UNIT_AFTER=""
+FLEET_UNIT_WANTS=""
+if [[ "$FLEET_MODE" == "local" && "$INSTALL_SERVICE" -eq 1 && "$SERVICE_MODE" != "user" ]]; then
+  echo "ERROR: local HermelinFleet is installed as a user service; use --user-service for hermelinChat or choose external Fleet." >&2
+  exit 1
+fi
+if [[ "$FLEET_MODE" == "local" ]]; then
+  FLEET_UNIT_AFTER=" hermelinfleet-central.service"
+  FLEET_UNIT_WANTS="Wants=hermelinfleet-central.service"
+fi
+
 install_service_system() {
   local unit_path="/etc/systemd/system/${SERVICE}.service"
 
@@ -671,7 +808,9 @@ install_service_system() {
   sudo tee "$unit_path" >/dev/null <<EOF
 [Unit]
 Description=hermelinChat
-After=network.target
+After=network-online.target$FLEET_UNIT_AFTER
+Wants=network-online.target
+$FLEET_UNIT_WANTS
 
 [Service]
 Type=simple
@@ -707,7 +846,9 @@ install_service_user() {
   cat >"$unit_path" <<EOF
 [Unit]
 Description=hermelinChat
-After=network.target
+After=network-online.target$FLEET_UNIT_AFTER
+Wants=network-online.target
+$FLEET_UNIT_WANTS
 
 [Service]
 Type=simple

@@ -91,11 +91,11 @@ class PetOverlayTests(unittest.TestCase):
             self.assertEqual(base64.b64decode(data["spritesheetBase64"]), ghost_raw)
             self.assertEqual(yaml.safe_load(config_path.read_text(encoding="utf-8"))["display"]["pet"]["slug"], "slime")
 
-    def test_pet_info_hides_when_user_disabled_pet(self):
+    def test_pet_info_returns_browser_pet_when_terminal_pet_disabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             config = self._config(tmp)
-            self._write_pet(config.hermes_home)
+            raw = self._write_pet(config.hermes_home)
             config.hermes_home.mkdir(parents=True, exist_ok=True)
             (config.hermes_home / "config.yaml").write_text(
                 yaml.safe_dump({"display": {"pet": {"enabled": False, "slug": "slime"}}}),
@@ -106,8 +106,11 @@ class PetOverlayTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             data = response.json()
-            self.assertFalse(data["enabled"])
+            self.assertTrue(data["enabled"])
+            self.assertFalse(data["terminalEnabled"])
             self.assertEqual(data["slug"], "slime")
+            self.assertEqual(data["displayName"], "Slime")
+            self.assertEqual(base64.b64decode(data["spritesheetBase64"]), raw)
             self.assertIn({"slug": "slime", "displayName": "Slime", "description": "test pet"}, data["installedPets"])
 
     def test_pty_managed_scope_disables_terminal_pet_without_touching_real_config(self):
@@ -162,7 +165,7 @@ class PetOverlayTests(unittest.TestCase):
             saw_pet_sync = False
             saw_sidecar_env = False
             with TestClient(create_app(config)) as client:
-                with client.websocket_connect("/ws/pty?cols=80&rows=20") as ws:
+                with client.websocket_connect("/ws/pty?cols=80&rows=20", headers={"origin": "http://testserver"}) as ws:
                     for _ in range(20):
                         message = ws.receive()
                         if message.get("type") == "websocket.close":
@@ -227,7 +230,7 @@ class PetOverlayTests(unittest.TestCase):
 
             decoded_output = ""
             with TestClient(create_app(config)) as client:
-                with client.websocket_connect("/ws/pty?cols=80&rows=20") as ws:
+                with client.websocket_connect("/ws/pty?cols=80&rows=20", headers={"origin": "http://testserver"}) as ws:
                     for _ in range(20):
                         message = ws.receive()
                         if message.get("type") == "websocket.close":
@@ -282,7 +285,7 @@ class PetOverlayTests(unittest.TestCase):
             }
             with mock.patch("ssl._ssl._test_decode_cert", return_value=decoded_cert):
                 with TestClient(create_app(config)) as client:
-                    with client.websocket_connect("/ws/pty?cols=80&rows=20") as ws:
+                    with client.websocket_connect("/ws/pty?cols=80&rows=20", headers={"origin": "http://testserver"}) as ws:
                         for _ in range(20):
                             message = ws.receive()
                             if message.get("type") == "websocket.close":
@@ -331,7 +334,7 @@ class PetOverlayTests(unittest.TestCase):
             decoded_cert = {"subjectAltName": (("DNS", "*.example.test"), ("DNS", "example.test"))}
             with mock.patch("ssl._ssl._test_decode_cert", return_value=decoded_cert):
                 with TestClient(create_app(config)) as client:
-                    with client.websocket_connect("/ws/pty?cols=80&rows=20") as ws:
+                    with client.websocket_connect("/ws/pty?cols=80&rows=20", headers={"origin": "http://testserver"}) as ws:
                         for _ in range(20):
                             message = ws.receive()
                             if message.get("type") == "websocket.close":
@@ -372,7 +375,7 @@ class PetOverlayTests(unittest.TestCase):
             with TestClient(create_app(config)) as client:
                 with client.websocket_connect(
                     "/ws/pty?cols=80&rows=20",
-                    headers={"x-forwarded-for": "127.0.0.1"},
+                    headers={"x-forwarded-for": "127.0.0.1", "origin": "http://testserver"},
                 ) as ws:
                     decoded_output = ""
                     for _ in range(20):
@@ -409,6 +412,14 @@ class PetOverlayTests(unittest.TestCase):
         self.assertIn("payload = await queue.get()", block)
         self.assertIn("droppable=False", block)
         self.assertNotIn("droppable=True", block)
+
+    def test_pet_events_cache_steady_runtime_state_for_late_attach(self):
+        source = (Path(__file__).resolve().parents[1] / "hermelin" / "server.py").read_text(encoding="utf-8")
+
+        self.assertIn("app.state.pet_event_last_events = {}", source)
+        self.assertIn("def _last_pet_event(channel: str) -> str | None:", source)
+        self.assertIn("return event_type not in {\"message.complete\", \"error\"}", source)
+        self.assertIn("cached_payload = await _last_pet_event(pet_event_channel)", source)
 
 
 if __name__ == "__main__":

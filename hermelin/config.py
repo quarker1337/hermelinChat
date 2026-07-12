@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -11,6 +11,7 @@ def _env_bool(name: str, default: str = "0") -> bool:
 
 _DEFAULT_HERMES_HOME = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
 _DEFAULT_META_DB = _DEFAULT_HERMES_HOME / "hermelin_meta.db"
+_DEFAULT_RUNTIME_REGISTRY = _DEFAULT_HERMES_HOME / "hermelin" / "runtimes.json"
 _DEFAULT_SPAWN_CWD = _DEFAULT_HERMES_HOME / "artifacts" / "runners" / "projects"
 DEFAULT_HERMELIN_HERMES_CMD = 'hermes chat --toolsets "hermes-cli, artifacts"'
 DEFAULT_HERMES_DASHBOARD_BASE_PATH = "/api/runners/hermes-dashboard"
@@ -46,6 +47,15 @@ class HermelinConfig:
     #
     # Override with HERMELIN_SPAWN_CWD if you want a different workspace.
     spawn_cwd: Path = Path(os.getenv("HERMELIN_SPAWN_CWD", str(_DEFAULT_SPAWN_CWD))).expanduser()
+
+    # Local persistent runtime manager. This is standalone HermelinChat state;
+    # Fleet can observe managed Hermes processes later but is not required.
+    runtime_backend: str = os.getenv("HERMELIN_RUNTIME_BACKEND", "auto").strip().lower() or "auto"
+    runtime_autostart_default: bool = _env_bool("HERMELIN_AUTOSTART_DEFAULT_RUNTIME", "1")
+    runtime_registry_path: Path = Path(
+        os.getenv("HERMELIN_RUNTIME_REGISTRY_PATH", str(_DEFAULT_RUNTIME_REGISTRY))
+    ).expanduser()
+    runtime_tmux_prefix: str = os.getenv("HERMELIN_RUNTIME_TMUX_PREFIX", "hermelin").strip() or "hermelin"
 
     # CORS (optional): comma-separated browser origins allowed for cross-origin requests.
     # Default is disabled (same-origin UI does not need CORS).
@@ -87,6 +97,39 @@ class HermelinConfig:
     ).strip() or DEFAULT_HERMES_DASHBOARD_BASE_PATH
     hermes_dashboard_startup_timeout_seconds: float = float(
         os.getenv("HERMELIN_HERMES_DASHBOARD_STARTUP_TIMEOUT_SECONDS", "20") or "20"
+    )
+
+    # Optional HermelinFleet bridge. hermelinChat talks to Fleet through its own
+    # same-origin backend proxy so the browser never needs the Fleet admin token.
+    # An unset mode is retained as a short-lived compatibility sentinel: a valid
+    # legacy URL implies external mode with a deprecation warning; otherwise the
+    # effective mode is off.
+    fleet_mode: str = field(default_factory=lambda: os.getenv("HERMELIN_FLEET_MODE", "").strip().lower())
+    fleet_bridge_url: str = field(
+        default_factory=lambda: os.getenv("HERMELIN_FLEET_URL", os.getenv("FLEET_BRIDGE_URL", "")).strip()
+    )
+    fleet_service_token: str = field(
+        default_factory=lambda: os.getenv("HERMELIN_FLEET_SERVICE_TOKEN", "").strip(),
+        repr=False,
+    )
+    fleet_service_token_file: Path | None = field(
+        default_factory=lambda: Path(value).expanduser() if (value := os.getenv("HERMELIN_FLEET_SERVICE_TOKEN_FILE", "").strip()) else None,
+        repr=False,
+    )
+    # Parsed only so older configuration files remain loadable. Administrator
+    # identity is never used by the Fleet bridge; configure a scoped service token.
+    fleet_admin_token: str = field(
+        default_factory=lambda: os.getenv("HERMELIN_FLEET_ADMIN_TOKEN", os.getenv("FLEET_ADMIN_TOKEN", "")).strip(),
+        repr=False,
+    )
+    fleet_timeout_seconds: float = field(
+        default_factory=lambda: float(os.getenv("HERMELIN_FLEET_TIMEOUT_SECONDS", "10") or "10")
+    )
+    # Development escape hatch for a public plain-HTTP Fleet central. Private,
+    # loopback, and overlay HTTP hosts remain allowed without this override.
+    fleet_allow_insecure_http: bool = field(
+        default_factory=lambda: _env_bool("HERMELIN_FLEET_ALLOW_INSECURE_HTTP", "0")
+        or _env_bool("HERMELIN_FLEET_DEV_ALLOW_PUBLIC_HTTP", "0")
     )
 
     # Only enable this if running behind a trusted reverse proxy.

@@ -3,11 +3,19 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
-from hermelin.auth import create_session_token, extract_session_exp, extract_session_jti, hash_login_password, verify_session_token
+from hermelin.auth import (
+    create_runner_token,
+    create_session_token,
+    extract_session_exp,
+    extract_session_jti,
+    hash_login_password,
+    verify_session_token,
+)
 from hermelin.config import HermelinConfig
 from hermelin.security import ip_allowed
 from hermelin.server import _github_release_tag_for_version, _is_update_available, create_app
@@ -34,19 +42,9 @@ class PathTraversalTests(unittest.TestCase):
                 meta_db_path=Path(tmpdir) / "hermelin_meta.db",
                 spawn_cwd=Path(tmpdir) / "spawn-cwd",
             )
-            # Patch static_dir on the config's class to point at our temp dir.
-            # The server reads config.static_dir which is derived from the module
-            # location, so we need to ensure our app uses our custom static_dir.
-            # Instead, we build the app normally and rely on the server's own
-            # static_dir handling. We need to create the app with a static dir
-            # that has an index.html.
-            #
-            # The create_app function uses config.static_dir (which is the
-            # hermelin/static folder). We'll create the index.html there
-            # temporarily, but that would be fragile. Instead, we can test
-            # the path traversal logic directly by calling the endpoint.
-
-            app = create_app(config)
+            with patch.object(HermelinConfig, "static_dir", new_callable=PropertyMock) as mocked_static_dir:
+                mocked_static_dir.return_value = static_dir
+                app = create_app(config)
             route = _route_for_path(app, "/{path:path}")
 
             # Call with a path traversal attempt
@@ -69,6 +67,11 @@ class SessionTokenTests(unittest.TestCase):
         token = create_session_token(secret=secret, ttl_seconds=300)
         result = verify_session_token(token=token, secret=secret)
         self.assertTrue(result)
+
+    def test_runner_capability_cannot_authenticate_as_browser_session(self):
+        secret = b"shared-key-must-not-confuse-token-types"
+        runner = create_runner_token(secret=secret, tab_id="artifact-1", ttl_seconds=300)
+        self.assertFalse(verify_session_token(token=runner, secret=secret))
 
     def test_expired_token_rejected(self):
         secret = b"test-secret-key-for-expiry"
@@ -197,6 +200,41 @@ class IpAllowlistTests(unittest.TestCase):
         self.assertFalse(ip_allowed("192.168.1.1", "10.0.0.0/8"))
         self.assertTrue(ip_allowed("10.0.0.1", "10.0.0.0/8"))
         self.assertTrue(ip_allowed("127.0.0.1", "*"))
+
+
+class WebSocketOriginTests(unittest.TestCase):
+    def _app(self, tmpdir: str):
+        tmp = Path(tmpdir)
+        return create_app(HermelinConfig(
+            hermes_home=tmp / "hermes-home",
+            meta_db_path=tmp / "hermelin_meta.db",
+            spawn_cwd=tmp / "spawn-cwd",
+            allowed_ips="*",
+            auth_password_hash="",
+            hermes_dashboard_enabled=False,
+            hermes_cmd="python3 -c 'import time; time.sleep(1)'",
+            hermes_cmd_override=True,
+        ))
+
+    def test_cookie_websocket_rejects_missing_and_cross_site_origins(self):
+        with tempfile.TemporaryDirectory() as tmpdir, TestClient(self._app(tmpdir)) as client:
+            with self.assertRaises(WebSocketDisconnect):
+                with client.websocket_connect("/ws/runtimes/missing"):
+                    pass
+            with self.assertRaises(WebSocketDisconnect):
+                with client.websocket_connect(
+                    "/ws/runtimes/missing",
+                    headers={"origin": "https://evil.example"},
+                ):
+                    pass
+
+    def test_cookie_websocket_accepts_exact_same_origin_before_route_checks(self):
+        with tempfile.TemporaryDirectory() as tmpdir, TestClient(self._app(tmpdir)) as client:
+            with client.websocket_connect(
+                "/ws/pty?cols=80&rows=20",
+                headers={"origin": "http://testserver"},
+            ) as websocket:
+                websocket.close()
 
 
 class HealthEndpointTests(unittest.TestCase):

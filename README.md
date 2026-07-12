@@ -233,6 +233,32 @@ Some artifacts are sandboxed iframes. More complex ones spawn their own HTTP ser
 
 ---
 
+## HermelinFleet bridge
+
+hermelinChat can sit next to HermelinFleet without sharing internals. Configure a Fleet central bridge URL on the hermelinChat backend and the UI will show a Fleet cockpit from the topbar `fleet` button:
+
+```dotenv
+HERMELIN_FLEET_MODE=external
+HERMELIN_FLEET_URL=http://127.0.0.1:8080
+HERMELIN_FLEET_SERVICE_TOKEN=[REDACTED]
+```
+
+The browser never receives the scoped service credential. It calls hermelinChat's same-origin `/api/fleet/*` routes, and hermelinChat forwards to Fleet's versioned `/api/v1/*` bridge API server-side. The service credential cannot log into Fleet's dashboard, access legacy admin APIs, or request secret-bearing metadata.
+
+`--fleet-mode local` accepts only a Fleet checkout with the exact checked-in API contract in `contracts/hermelinfleet-api-v1.json`. Because the managed local Fleet central is a systemd user service, pair local mode with HermelinChat's `--user-service`; system-service mode fails closed instead of writing a dependency that systemd cannot resolve.
+
+The cockpit shows Fleet status, nodes, agents, session metadata, capabilities, logs, and can inject messages into agents that advertise `inject_task` when `HERMELIN_FLEET_SERVICE_TOKEN` is configured.
+
+This Fleet bridge is separate from existing personal Hermes access. For Desktop-style local/personal Hermes chat, run the Hermes dashboard/TUI backend and connect HermelinChat to that path instead of the messaging gateway:
+
+```bash
+hermes dashboard --tui --no-open --insecure --host <lan-or-tailscale-ip> --port 9119
+```
+
+Fleet-managed Hermes workers should use HermelinFleet's blank-slate `FLEET_HERMES_HOME` plus profile `fleet`; hermelinChat only consumes their Fleet bridge state.
+
+---
+
 ## Optional extras
 
 ### Auto session titles
@@ -366,6 +392,16 @@ Full purge:
 | `HERMELIN_RUNNER_TOKEN_BIND_IP` | `1` | Bind tokens to client IP |
 | `HERMELIN_TRUSTED_PROXY_IPS` | *(none)* | Only trust XFF from these IPs |
 | `HERMELIN_CORS_ORIGINS` | *(none)* | Cross-origin access (disabled by default) |
+
+### HermelinFleet bridge
+
+| Variable | Default | Description |
+|---|---|---|
+| `HERMELIN_FLEET_MODE` | `off` for a fresh install | `off`, `external`, or `local`; disabled mode does not probe Fleet |
+| `HERMELIN_FLEET_URL` / `FLEET_BRIDGE_URL` | *(none)* | Fleet central bridge base URL, e.g. `http://127.0.0.1:8080` |
+| `HERMELIN_FLEET_SERVICE_TOKEN` | *(none)* | Scoped server-side Fleet bridge credential; never returned to the browser |
+| `HERMELIN_FLEET_ADMIN_TOKEN` / `FLEET_ADMIN_TOKEN` | *(ignored by bridge)* | Parsed only for old configuration compatibility; administrator identity is never used for Fleet proxy traffic |
+| `HERMELIN_FLEET_TIMEOUT_SECONDS` | `10` | Fleet proxy request timeout |
 
 ---
 
