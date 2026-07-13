@@ -4,7 +4,10 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 
-const COMPILED_ROOT = process.env.HERMELIN_FRONTEND_CJS_ROOT || '/tmp/hermelin-frontend-cjs'
+const COMPILED_ROOT_INPUT = process.env.HERMELIN_FRONTEND_CJS_ROOT || '/tmp/hermelin-frontend-cjs'
+const COMPILED_ROOT = fs.existsSync(COMPILED_ROOT_INPUT)
+  ? fs.realpathSync(COMPILED_ROOT_INPUT)
+  : COMPILED_ROOT_INPUT
 const SOURCE_ROOT = path.resolve(__dirname, '..', 'src')
 const UI_PREFS_STORAGE_KEY = 'hermelinChat.uiPrefs'
 

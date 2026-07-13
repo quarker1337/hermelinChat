@@ -10,12 +10,23 @@ FORCE_ENV=0
 YES=0
 PULL=0
 
+PLATFORM="$(uname -s 2>/dev/null || true)"
+if [[ "$PLATFORM" == "Darwin" ]]; then
+  SERVICE_BACKEND="launchd"
+else
+  SERVICE_BACKEND="systemd"
+fi
+
 # By default we generate a self-signed cert and serve HTTPS directly.
 # Disable with: ./scripts/install.sh --no-https
 ENABLE_HTTPS=1
 
 INSTALL_SERVICE=0
-SERVICE_MODE="system"  # system|user
+if [[ "$SERVICE_BACKEND" == "launchd" ]]; then
+  SERVICE_MODE="user"
+else
+  SERVICE_MODE="system"
+fi
 
 # Forwarded to update.sh
 SKIP_FRONTEND=0
@@ -32,7 +43,7 @@ This is a first-time setup helper.
 It will:
   - create .hermelin.env (gitignored) if missing
   - run ./scripts/update.sh (creates .venv, installs backend deps, builds frontend, patches Hermes)
-  - optionally install + start a systemd service
+  - optionally install + start a background service (systemd on Linux, launchd on macOS)
 
 Options:
   --pull                 Run git pull (default: no pull)
@@ -40,9 +51,9 @@ Options:
   --force-env            Overwrite the env file if it already exists
   --no-https             Disable built-in HTTPS (do not generate self-signed cert)
 
-  --install-service       Install a systemd service (default: system service)
-  --user-service          Install a systemd *user* service (no sudo)
-  --system-service        Install a systemd *system* service (sudo)
+  --install-service       Install an OS service (systemd on Linux, LaunchAgent on macOS)
+  --user-service          Install a user service (systemd or launchd; no sudo)
+  --system-service        Install a systemd system service (Linux only; sudo)
   --service NAME          Service name (default: hermelin)
 
   --skip-frontend        Skip npm install/build (NOT recommended; UI will 404 on /)
@@ -87,7 +98,6 @@ while [[ $# -gt 0 ]]; do
 
     --install-service)
       INSTALL_SERVICE=1
-      SERVICE_MODE="system"
       shift
       ;;
     --system-service)
@@ -141,6 +151,17 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$SERVICE_BACKEND" == "launchd" && "$SERVICE_MODE" == "system" ]]; then
+  echo "ERROR: --system-service is only supported on Linux." >&2
+  echo "On macOS, use --install-service or --user-service to install a LaunchAgent." >&2
+  exit 1
+fi
+
+if [[ ! "$SERVICE" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: --service may contain only letters, numbers, dots, underscores, and hyphens." >&2
+  exit 1
+fi
 
 cd "$ROOT_DIR"
 
@@ -204,6 +225,9 @@ if [[ "$ENABLE_HTTPS" -eq 1 ]]; then
     host1="$(hostname 2>/dev/null || true)"
     host2="$(hostname -f 2>/dev/null || true)"
     ips="$(hostname -I 2>/dev/null || true)"
+    if [[ "$PLATFORM" == "Darwin" ]] && command -v ifconfig >/dev/null 2>&1; then
+      ips="$(ifconfig 2>/dev/null | sed -n 's/^[[:space:]]*inet[[:space:]][[:space:]]*\([0-9.][0-9.]*\).*/\1/p' | tr '\n' ' ')"
+    fi
 
     {
       echo "[req]"
@@ -291,20 +315,33 @@ elif [[ "$FORCE_ENV" -eq 1 ]]; then
 fi
 
 # -------------------------------------------------------------------
-# Interactive: offer systemd service install (recommended)
+# Interactive: offer the platform's service manager
 # -------------------------------------------------------------------
 if [[ "$INSTALL_SERVICE" -eq 0 && "$YES" -eq 0 ]]; then
-  if command -v systemctl >/dev/null 2>&1; then
-    read -r -p "Install and start a systemd service for hermelinChat? [y/N] " _svc
-    if [[ "${_svc,,}" == "y" || "${_svc,,}" == "yes" ]]; then
-      INSTALL_SERVICE=1
-      read -r -p "Install as user service (no sudo) or system service (sudo)? [u/s] (default: u) " _mode
-      if [[ "${_mode,,}" == "s" || "${_mode,,}" == "system" ]]; then
-        SERVICE_MODE="system"
-      else
+  if [[ "$SERVICE_BACKEND" == "launchd" ]] && command -v launchctl >/dev/null 2>&1; then
+    read -r -p "Install and start a macOS LaunchAgent for hermelinChat? [y/N] " _svc
+    case "$_svc" in
+      y|Y|yes|YES|Yes)
+        INSTALL_SERVICE=1
         SERVICE_MODE="user"
-      fi
-    fi
+        ;;
+    esac
+  elif command -v systemctl >/dev/null 2>&1; then
+    read -r -p "Install and start a systemd service for hermelinChat? [y/N] " _svc
+    case "$_svc" in
+      y|Y|yes|YES|Yes)
+        INSTALL_SERVICE=1
+        read -r -p "Install as user service (no sudo) or system service (sudo)? [u/s] (default: u) " _mode
+        case "$_mode" in
+          s|S|system|SYSTEM|System)
+            SERVICE_MODE="system"
+            ;;
+          *)
+            SERVICE_MODE="user"
+            ;;
+        esac
+        ;;
+    esac
   fi
 fi
 
@@ -332,20 +369,24 @@ else
 fi
 
 if [[ "$INSTALL_SERVICE" -eq 1 ]]; then
-  echo "  - install + start systemd service: yes ($SERVICE_MODE)"
+  echo "  - install + start $SERVICE_BACKEND service: yes ($SERVICE_MODE)"
   echo "    service name: $SERVICE"
 else
-  echo "  - install + start systemd service: no (pass --install-service/--user-service)"
+  echo "  - install + start $SERVICE_BACKEND service: no (pass --install-service/--user-service)"
 fi
 
 echo
 
 if [[ "$YES" -eq 0 ]]; then
   read -r -p "Proceed? [y/N] " ans
-  if [[ "${ans,,}" != "y" && "${ans,,}" != "yes" ]]; then
-    echo "Aborted."
-    exit 0
-  fi
+  case "$ans" in
+    y|Y|yes|YES|Yes)
+      ;;
+    *)
+      echo "Aborted."
+      exit 0
+      ;;
+  esac
 fi
 
 if [[ "$WRITE_ENV" -eq 1 ]]; then
@@ -726,8 +767,68 @@ EOF
   systemctl --user --no-pager status "$SERVICE" || true
 }
 
+install_service_launchd() {
+  local uid
+  local label="chat.hermelin.${SERVICE}"
+  local unit_dir="$HOME/Library/LaunchAgents"
+  local unit_path="$unit_dir/${label}.plist"
+  local log_dir="${DEFAULT_HERMES_HOME}/logs"
+
+  if ! command -v launchctl >/dev/null 2>&1; then
+    echo "ERROR: launchctl not found; cannot install macOS LaunchAgent." >&2
+    exit 1
+  fi
+
+  uid="$(id -u)"
+  mkdir -p "$unit_dir" "$log_dir"
+
+  echo "==> installing macOS LaunchAgent: $unit_path"
+  HERMELIN_LAUNCHD_LABEL="$label" \
+    HERMELIN_LAUNCHD_PLIST="$unit_path" \
+    HERMELIN_LAUNCHD_ROOT="$ROOT_DIR" \
+    HERMELIN_LAUNCHD_ENV_FILE="$ENV_FILE" \
+    HERMELIN_LAUNCHD_EXE="$ROOT_DIR/.venv/bin/hermelin" \
+    HERMELIN_LAUNCHD_STDOUT="$log_dir/${SERVICE}.log" \
+    HERMELIN_LAUNCHD_STDERR="$log_dir/${SERVICE}.error.log" \
+    "$ROOT_DIR/.venv/bin/python" - <<'PY'
+import os
+import plistlib
+from pathlib import Path
+
+plist_path = Path(os.environ["HERMELIN_LAUNCHD_PLIST"])
+payload = {
+    "Label": os.environ["HERMELIN_LAUNCHD_LABEL"],
+    "ProgramArguments": [
+        "/bin/bash",
+        "-c",
+        'set -a; source "$1"; set +a; exec "$2"',
+        "hermelin-launchd",
+        os.environ["HERMELIN_LAUNCHD_ENV_FILE"],
+        os.environ["HERMELIN_LAUNCHD_EXE"],
+    ],
+    "WorkingDirectory": os.environ["HERMELIN_LAUNCHD_ROOT"],
+    "RunAtLoad": True,
+    "KeepAlive": {"SuccessfulExit": False},
+    "ThrottleInterval": 5,
+    "StandardOutPath": os.environ["HERMELIN_LAUNCHD_STDOUT"],
+    "StandardErrorPath": os.environ["HERMELIN_LAUNCHD_STDERR"],
+}
+with plist_path.open("wb") as handle:
+    plistlib.dump(payload, handle, sort_keys=False)
+PY
+
+  chmod 600 "$unit_path"
+  launchctl bootout "gui/${uid}/${label}" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/${uid}" "$unit_path"
+  launchctl enable "gui/${uid}/${label}"
+  launchctl kickstart -k "gui/${uid}/${label}"
+  launchctl print "gui/${uid}/${label}" >/dev/null
+}
+
 if [[ "$INSTALL_SERVICE" -eq 1 ]]; then
-  if [[ "$SERVICE_MODE" == "user" ]]; then
+  if [[ "$SERVICE_BACKEND" == "launchd" ]]; then
+    install_service_launchd
+  elif [[ "$SERVICE_MODE" == "user" ]]; then
     install_service_user
   else
     install_service_system
