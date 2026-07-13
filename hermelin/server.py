@@ -19,6 +19,7 @@ import stat
 import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Optional
+from urllib.parse import parse_qs, urlparse
 
 import logging
 import yaml
@@ -27,6 +28,104 @@ logger = logging.getLogger("hermelin")
 
 _FLEET_RUNTIME_ATTACH_MAX_FRAME_BYTES = 64 << 10
 _FLEET_CA_MAX_BYTES = 64 << 10
+_PET_SIDECAR_SECRET_MAX_BYTES = 512
+_PET_SIDECAR_ENVIRON_MAX_BYTES = 256 << 10
+_PET_SIDECAR_CHANNEL_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+_PET_SIDECAR_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,512}$")
+
+
+def _load_or_create_pet_sidecar_secret(path: Path) -> str:
+    """Load the restart-stable capability used by managed Hermes publishers."""
+
+    secret_path = Path(path).expanduser()
+    secret_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    read_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+    def _read_existing() -> str:
+        fd = os.open(secret_path, read_flags)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("pet sidecar secret must be a regular file")
+            if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+                raise PermissionError("pet sidecar secret must be owner-only")
+            payload = os.read(fd, _PET_SIDECAR_SECRET_MAX_BYTES + 1)
+        finally:
+            os.close(fd)
+        if not payload or len(payload) > _PET_SIDECAR_SECRET_MAX_BYTES:
+            raise ValueError("pet sidecar secret has an invalid size")
+        secret = payload.decode("ascii").strip()
+        if not _PET_SIDECAR_TOKEN_RE.fullmatch(secret):
+            raise ValueError("pet sidecar secret has an invalid format")
+        return secret
+
+    try:
+        return _read_existing()
+    except FileNotFoundError:
+        pass
+
+    secret = secrets.token_urlsafe(32)
+    write_flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        fd = os.open(secret_path, write_flags, 0o600)
+    except FileExistsError:
+        return _read_existing()
+    try:
+        os.write(fd, (secret + "\n").encode("ascii"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return secret
+
+
+def _pet_sidecar_token_from_process(
+    pid: int | None,
+    expected_channel: str,
+    *,
+    proc_root: Path = Path("/proc"),
+) -> str | None:
+    """Recover a pre-restart sidecar capability from a live managed process."""
+
+    try:
+        process_id = int(pid or 0)
+    except (TypeError, ValueError):
+        return None
+    channel = str(expected_channel or "")
+    if process_id <= 1 or not _PET_SIDECAR_CHANNEL_RE.fullmatch(channel):
+        return None
+    environ_path = Path(proc_root) / str(process_id) / "environ"
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(environ_path, flags)
+        try:
+            payload = os.read(fd, _PET_SIDECAR_ENVIRON_MAX_BYTES + 1)
+        finally:
+            os.close(fd)
+    except (OSError, ValueError):
+        return None
+    if len(payload) > _PET_SIDECAR_ENVIRON_MAX_BYTES:
+        return None
+    prefix = b"HERMES_TUI_SIDECAR_URL="
+    raw_url = next((item[len(prefix) :] for item in payload.split(b"\0") if item.startswith(prefix)), b"")
+    try:
+        parsed = urlparse(raw_url.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if parsed.scheme not in {"ws", "wss"} or parsed.path != "/ws/pet-events-pub":
+        return None
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    tokens = query.get("token") or []
+    channels = query.get("channel") or []
+    if len(tokens) != 1 or len(channels) != 1 or channels[0] != channel:
+        return None
+    token = str(tokens[0])
+    return token if _PET_SIDECAR_TOKEN_RE.fullmatch(token) else None
 
 
 def _fleet_ssl_context(ca_file: Path | None) -> ssl.SSLContext:
@@ -787,8 +886,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
     hermes_cmd_override_runtime = [
         config_explicit_override or env_hermes_cmd_override or config_custom_override
     ]
-    pet_sidecar_secret = secrets.token_urlsafe(32)
-    pet_sidecar_channel_re = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+    pet_sidecar_secret = _load_or_create_pet_sidecar_secret(
+        config.hermes_home / "hermelin" / "pet-sidecar.secret"
+    )
+    pet_sidecar_channel_re = _PET_SIDECAR_CHANNEL_RE
 
     def _get_hermes_cmd() -> str:
         return str(hermes_cmd_runtime[0] or "").strip()
@@ -1561,6 +1662,24 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     runtime_registry = RuntimeRegistry(config.runtime_registry_path)
 
+    def _pet_sidecar_token_valid(token: str, channel: str) -> bool:
+        candidate = str(token or "")
+        runtime_channel = str(channel or "")
+        if not _PET_SIDECAR_TOKEN_RE.fullmatch(candidate):
+            return False
+        if hmac.compare_digest(candidate.encode(), pet_sidecar_secret.encode()):
+            return True
+        for record in runtime_registry.list_runtimes():
+            if record.state == "stopped" or record.backend != "tmux":
+                continue
+            recorded_channel = str((record.metadata or {}).get("pet_event_channel") or "")
+            if recorded_channel != runtime_channel:
+                continue
+            recovered = _pet_sidecar_token_from_process(record.hermes_pid, recorded_channel)
+            if recovered and hmac.compare_digest(candidate.encode(), recovered.encode()):
+                return True
+        return False
+
     def _runtime_backend_or_error():
         return select_runtime_backend(
             config.runtime_backend,
@@ -1691,6 +1810,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             source=source,
             command=argv,
             env=env,
+            launcher_dir=config.hermes_home / "hermelin" / "runtime-launchers",
             tmux_name=tmux_name,
             cols=cols,
             rows=rows,
@@ -3788,7 +3908,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         if not _websocket_origin_allowed(websocket, allow_missing=True):
             await websocket.close(code=1008)
             return
-        if not hmac.compare_digest(str(token).encode(), pet_sidecar_secret.encode()):
+        if not _pet_sidecar_token_valid(token, channel):
             await websocket.close(code=1008)
             return
         if not pet_sidecar_channel_re.match(str(channel or "")):

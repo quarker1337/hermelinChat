@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 import shlex
 import shutil
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +28,7 @@ class RuntimeCreateRequest:
     source: str
     command: list[str]
     env: dict[str, str]
+    launcher_dir: Path | None = None
     tmux_name: str | None = None
     cols: int = 120
     rows: int = 30
@@ -110,6 +113,66 @@ class TmuxRuntimeBackend:
         except Exception:
             return None
 
+    def _write_private_launcher(
+        self,
+        request: RuntimeCreateRequest,
+        env: Mapping[str, str],
+    ) -> Path:
+        launcher_dir = request.launcher_dir or (
+            Path.home() / ".cache" / "hermelin" / "runtime-launchers"
+        )
+        launcher_dir = Path(launcher_dir).expanduser()
+        launcher_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        info = launcher_dir.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise RuntimeBackendError("runtime launcher directory is not a directory")
+        if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise RuntimeBackendError("runtime launcher directory must be owner-only")
+
+        safe_runtime_id = "".join(
+            ch if ch.isalnum() or ch in "._-" else "-" for ch in request.runtime_id
+        )
+        launcher = launcher_dir / (
+            f"{safe_runtime_id}-{os.getpid()}-{secrets.token_hex(6)}.sh"
+        )
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        exports = [
+            f"export {key}={shlex.quote(value)}"
+            for key, value in env.items()
+            if value
+        ]
+        command = " ".join(shlex.quote(part) for part in request.command)
+        script = "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                *exports,
+                'rm -f -- "$0"',
+                f"exec {command}",
+                "",
+            ]
+        )
+        try:
+            fd = os.open(launcher, flags, 0o600)
+            try:
+                os.write(fd, script.encode("utf-8"))
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except Exception:
+            try:
+                launcher.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise
+        return launcher
+
     async def create(self, request: RuntimeCreateRequest) -> RuntimeRecord:
         if not self.available():
             raise RuntimeBackendError("tmux is not installed")
@@ -159,9 +222,9 @@ class TmuxRuntimeBackend:
             "PYTHONUNBUFFERED",
             "COLORTERM",
         ]
-        env_args = [f"{key}={env[key]}" for key in launch_env_keys if env.get(key)]
-        command_parts = ["env", *env_args, *request.command] if env_args else request.command
-        command = " ".join(shlex.quote(part) for part in command_parts)
+        launch_env = {key: env[key] for key in launch_env_keys if env.get(key)}
+        launcher = self._write_private_launcher(request, launch_env)
+        command = " ".join((shlex.quote("/bin/sh"), shlex.quote(str(launcher))))
 
         args = [
             "new-session",
@@ -176,8 +239,20 @@ class TmuxRuntimeBackend:
             str(request.cwd),
             command,
         ]
-        result = await asyncio.to_thread(self._run, args, env=env, timeout=10.0)
+        tmux_env_keys = (
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "LANG",
+            "LC_ALL",
+            "TERM",
+            "TMPDIR",
+        )
+        tmux_env = {key: env[key] for key in tmux_env_keys if env.get(key)}
+        result = await asyncio.to_thread(self._run, args, env=tmux_env, timeout=10.0)
         if result.returncode != 0:
+            launcher.unlink(missing_ok=True)
             detail = (result.stderr or result.stdout or "tmux new-session failed").strip()
             raise RuntimeBackendError(detail)
 

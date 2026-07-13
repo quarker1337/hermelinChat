@@ -11,7 +11,13 @@ import yaml
 from fastapi.testclient import TestClient
 
 from hermelin.config import HermelinConfig
-from hermelin.server import _prepare_pty_managed_scope, create_app
+from hermelin.runtime_registry import RuntimeRecord, RuntimeRegistry
+from hermelin.server import (
+    _load_or_create_pet_sidecar_secret,
+    _pet_sidecar_token_from_process,
+    _prepare_pty_managed_scope,
+    create_app,
+)
 
 
 class PetOverlayTests(unittest.TestCase):
@@ -19,6 +25,7 @@ class PetOverlayTests(unittest.TestCase):
         return HermelinConfig(
             hermes_home=tmp / "hermes-home",
             meta_db_path=tmp / "hermelin_meta.db",
+            runtime_registry_path=tmp / "runtimes.json",
             spawn_cwd=tmp / "spawn-cwd",
             allowed_ips="*",
             auth_password_hash="",
@@ -43,6 +50,67 @@ class PetOverlayTests(unittest.TestCase):
             encoding="utf-8",
         )
         return raw
+
+    def test_pet_sidecar_secret_survives_server_restart_with_private_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "hermelin" / "pet-sidecar.secret"
+
+            first = _load_or_create_pet_sidecar_secret(path)
+            second = _load_or_create_pet_sidecar_secret(path)
+
+            self.assertEqual(first, second)
+            self.assertGreaterEqual(len(first), 32)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_pet_sidecar_recovers_capability_from_live_runtime_environment(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            proc_root = Path(tmpdir) / "proc"
+            environ = proc_root / "123" / "environ"
+            environ.parent.mkdir(parents=True)
+            environ.write_bytes(
+                b"OTHER=value\0"
+                b"HERMES_TUI_SIDECAR_URL=wss://chat.test/ws/pet-events-pub?token=legacy-secret-1234567890-abcdefghi&channel=runtime-demo1234\0"
+            )
+
+            token = _pet_sidecar_token_from_process(
+                123,
+                "runtime-demo1234",
+                proc_root=proc_root,
+            )
+
+            self.assertEqual(token, "legacy-secret-1234567890-abcdefghi")
+            self.assertIsNone(
+                _pet_sidecar_token_from_process(
+                    123,
+                    "runtime-other5678",
+                    proc_root=proc_root,
+                )
+            )
+
+    def test_pet_event_publisher_accepts_recovered_live_runtime_capability(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            config = self._config(tmp)
+            channel = "runtime-demo1234"
+            RuntimeRegistry(config.runtime_registry_path).create_runtime(
+                RuntimeRecord(
+                    runtime_id="demo1234",
+                    state="idle",
+                    backend="tmux",
+                    hermes_pid=123,
+                    metadata={"pet_event_channel": channel, "pet_sidecar": True},
+                )
+            )
+
+            with mock.patch(
+                "hermelin.server._pet_sidecar_token_from_process",
+                return_value="legacy-secret-1234567890-abcdefghi",
+            ):
+                with TestClient(create_app(config)) as client:
+                    with client.websocket_connect(
+                        f"/ws/pet-events-pub?token=legacy-secret-1234567890-abcdefghi&channel={channel}",
+                    ) as publisher:
+                        publisher.send_text(json.dumps({"type": "message.start", "payload": {}}))
 
     def test_pet_info_returns_selected_installed_pet(self):
         with tempfile.TemporaryDirectory() as tmpdir:

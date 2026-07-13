@@ -1,13 +1,21 @@
+import asyncio
 import json
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
 from hermelin.config import HermelinConfig
-from hermelin.runtime_backends import LegacyRuntimeBackend, TmuxRuntimeBackend, select_runtime_backend
+from hermelin.runtime_backends import (
+    LegacyRuntimeBackend,
+    RuntimeCreateRequest,
+    TmuxRuntimeBackend,
+    select_runtime_backend,
+)
 from hermelin.runtime_registry import RuntimeRecord, RuntimeRegistry
 from hermelin.server import (
     _hermes_profile_state_db_path,
@@ -129,6 +137,57 @@ class RuntimeBackendSelectionTests(unittest.TestCase):
     def test_explicit_legacy_is_always_available(self):
         backend = select_runtime_backend("legacy", which=lambda name: None)
         self.assertIsInstance(backend, LegacyRuntimeBackend)
+
+    def test_tmux_launch_keeps_sidecar_capability_out_of_process_argv(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            backend = TmuxRuntimeBackend(tmux_bin="tmux", prefix="hm")
+            captured: dict[str, object] = {}
+            token = "sidecar-secret-1234567890-abcdefgh"
+
+            def fake_run(args, *, env=None, timeout=5.0):
+                if args[0] == "has-session":
+                    return subprocess.CompletedProcess(args, 1, "", "")
+                if args[0] == "display-message":
+                    return subprocess.CompletedProcess(args, 0, "123\n", "")
+                if args[0] == "new-session":
+                    captured["args"] = list(args)
+                    captured["env"] = dict(env or {})
+                    launcher = Path(str(args[-1]).split()[-1])
+                    captured["launcher"] = launcher
+                    captured["script"] = launcher.read_text(encoding="utf-8")
+                    captured["mode"] = launcher.stat().st_mode & 0o777
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                raise AssertionError(args)
+
+            request = RuntimeCreateRequest(
+                runtime_id="demo",
+                title="demo",
+                profile="default",
+                cwd=tmp / "cwd",
+                source="user_ui",
+                command=["/usr/bin/hermes", "chat", "--tui"],
+                env={
+                    "PATH": "/usr/bin",
+                    "HOME": str(tmp),
+                    "HERMES_TUI_SIDECAR_URL": (
+                        f"wss://chat.test/ws/pet-events-pub?token={token}&channel=runtime-demo"
+                    ),
+                },
+                launcher_dir=tmp / "launchers",
+            )
+
+            with mock.patch.object(backend, "available", return_value=True):
+                with mock.patch.object(backend, "_run", side_effect=fake_run):
+                    record = asyncio.run(backend.create(request))
+
+            self.assertEqual(record.hermes_pid, 123)
+            self.assertNotIn(token, json.dumps(captured["args"]))
+            self.assertNotIn(token, json.dumps(captured["env"]))
+            self.assertIn(token, str(captured["script"]))
+            self.assertIn('rm -f -- "$0"', str(captured["script"]))
+            self.assertEqual(captured["mode"], 0o600)
+            Path(captured["launcher"]).unlink(missing_ok=True)  # type: ignore[arg-type]
 
 
 class RuntimeProfileTests(unittest.TestCase):
