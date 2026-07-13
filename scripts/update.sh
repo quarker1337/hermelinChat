@@ -21,7 +21,7 @@ Options:
   --service NAME       systemd service name to restart (default: hermelin)
   --skip-frontend       Skip npm install/build
   --skip-python         Skip pip install -e .
-  --skip-hermes-patch   Skip patching the active Hermes installation with artifact tools
+  --skip-hermes-patch   Skip patching the active Hermes installation for HermelinChat integration
   --skip-hermes-skins   Skip installing hermelinChat CLI skins into ~/.hermes/skins/
   --skip-hermes-themes  (deprecated alias for --skip-hermes-skins)
   --no-pull             Skip git pull
