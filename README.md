@@ -74,14 +74,32 @@ set -a && source .hermelin.env && set +a
 ./.venv/bin/hermelin
 ```
 
-Open **http://127.0.0.1:3000** and you're in.
+Open **https://127.0.0.1:3000** and accept the self-signed certificate warning.
+
+### Access over Wi-Fi
+
+Load the installed environment and start LAN mode:
+
+```bash
+set -a && source .hermelin.env && set +a
+./.venv/bin/hermelin --lan
+```
+
+The command prints the LAN URL, such as `https://192.168.1.20:3000`.
+LAN mode binds to all IPv4 interfaces but only permits loopback and private-network client ranges by default.
+Keep password authentication and HTTPS enabled when using LAN mode.
+On macOS, allow incoming connections if the firewall prompts you.
 
 ### Requirements
 
-- **Linux** (PTY-based). macOS may work. Windows is not supported.
+- **Linux or macOS** (PTY-based). Windows is not supported.
 - **Python 3.10+**
 - **Node.js 18+** (frontend build only)
 - **Hermes Agent** installed, with `hermes` on `PATH` and a `state.db` in `~/.hermes/`
+
+On macOS, the installer works with Apple's system Bash 3.2 and uses a compatible Homebrew or `uv`-managed Python when `/usr/bin/python3` is too old.
+
+Pass `--install-service` to install a systemd service on Linux or a per-user LaunchAgent on macOS.
 
 ---
 
@@ -125,8 +143,8 @@ HERMELIN_PASSWORD=change-me
 HERMELIN_COOKIE_SECRET=generate-a-long-random-string
 
 # Optional overrides
-# HERMELIN_HERMES_CMD=/home/you/.local/bin/hermes
-# HERMES_HOME=/home/you/.hermes
+# HERMELIN_HERMES_CMD=/home/you/.local/bin/hermes  # macOS example: /Users/you/.local/bin/hermes
+# HERMES_HOME=/home/you/.hermes                    # macOS example: /Users/you/.hermes
 # HERMELIN_META_DB_PATH=/home/you/.hermes/hermelin_meta.db
 # HERMELIN_SPAWN_CWD=/home/you
 # HERMELIN_ARTIFACT_READ_MAX_FILE_BYTES=8388608
@@ -156,18 +174,17 @@ hermelin --host 127.0.0.1 --port 3000
 ## Updating
 
 ```bash
-cd /opt/hermelinChat          # or wherever you cloned it
+cd /path/to/hermelinChat
 ./scripts/update.sh
-sudo systemctl restart hermelin   # if using systemd
 ```
 
-Or combine update + restart:
+If installed as a systemd service or macOS LaunchAgent, combine update and restart:
 
 ```bash
 ./scripts/update.sh --restart
 ```
 
-Flags: `--skip-frontend`, `--skip-python`, `--skip-hermes-patch`, `--service NAME`
+Flags: `--restart`, `--skip-frontend`, `--skip-python`, `--skip-hermes-patch`, `--service NAME`
 
 ---
 
@@ -344,6 +361,8 @@ Full purge:
 | `HERMELIN_META_DB_PATH` | `$HERMES_HOME/hermelin_meta.db` | Metadata DB for titles and whispers |
 | `HERMELIN_DISPLAY_NAME` | `$USER` | Display name for `{user}` substitutions |
 | `HERMELIN_HOST` / `HERMELIN_PORT` | `127.0.0.1` / `3000` | Server bind address |
+
+The `--lan` CLI flag overrides the default host and IP allowlist for safe private-network access.
 
 ### Security
 

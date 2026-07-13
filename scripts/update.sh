@@ -4,6 +4,11 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SELF_DIR}/.." && pwd)"
 
+# shellcheck source=python_venv_hint.sh
+source "$SELF_DIR/python_venv_hint.sh"
+
+PLATFORM="$(uname -s 2>/dev/null || true)"
+
 RESTART=0
 SERVICE="hermelin"
 SKIP_FRONTEND=0
@@ -17,8 +22,8 @@ usage() {
 Usage: ./scripts/update.sh [options]
 
 Options:
-  --restart            Restart systemd service after updating (default service: hermelin)
-  --service NAME       systemd service name to restart (default: hermelin)
+  --restart             Restart the systemd service or macOS LaunchAgent after updating
+  --service NAME        Service name to restart (default: hermelin)
   --skip-frontend       Skip npm install/build
   --skip-python         Skip pip install -e .
   --skip-hermes-patch   Skip patching the active Hermes installation with artifact tools
@@ -79,6 +84,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ ! "$SERVICE" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: --service may contain only letters, numbers, dots, underscores, and hyphens." >&2
+  exit 1
+fi
+
 cd "$ROOT_DIR"
 
 echo "==> hermelinChat update"
@@ -110,32 +120,53 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
   VENV_PY="${VENV_DIR}/bin/python"
   VENV_ACTIVATE="${VENV_DIR}/bin/activate"
 
-  # If a previous venv creation failed (common when python3-venv/ensurepip is missing),
-  # Debian can leave a partial .venv behind that has bin/python but no activate/pip.
-  # Detect that and recreate automatically.
+  # Detect incomplete environments and environments created with an unsupported
+  # Python. The latter is common on macOS, whose system python3 may be older than
+  # the Python version required by this project.
   if [[ -d "$VENV_DIR" ]]; then
     if [[ ! -x "$VENV_PY" || ! -f "$VENV_ACTIVATE" ]]; then
       echo "WARNING: $VENV_DIR exists but looks incomplete (missing python/activate). Recreating venv."
+      rm -rf "$VENV_DIR"
+    elif ! hermelin_python_is_supported "$VENV_PY"; then
+      echo "WARNING: $VENV_DIR uses Python older than 3.10. Recreating venv."
       rm -rf "$VENV_DIR"
     fi
   fi
 
   if [[ ! -x "$VENV_PY" ]]; then
-    if ! command -v python3 >/dev/null 2>&1; then
-      echo "ERROR: python3 not found (needed to create .venv)." >&2
+    PYTHON_BIN="$(hermelin_find_supported_python || true)"
+    if [[ -n "$PYTHON_BIN" ]]; then
+      echo "==> creating venv with $PYTHON_BIN: $VENV_DIR"
+      "$PYTHON_BIN" -m venv "$VENV_DIR" || {
+        rm -rf "$VENV_DIR" || true
+        echo "ERROR: failed to create venv with $PYTHON_BIN." >&2
+        hermelin_print_python_venv_fix_help
+        exit 1
+      }
+    elif command -v uv >/dev/null 2>&1; then
+      echo "==> no compatible system Python found; asking uv for Python 3.10+"
+      uv venv --python ">=3.10" "$VENV_DIR" || {
+        rm -rf "$VENV_DIR" || true
+        echo "ERROR: uv could not create a Python 3.10+ virtual environment." >&2
+        hermelin_print_python_venv_fix_help
+        exit 1
+      }
+    else
+      echo "ERROR: Python 3.10 or newer not found (needed to create .venv)." >&2
+      hermelin_print_python_venv_fix_help
       exit 1
     fi
-    echo "==> creating venv: $VENV_DIR"
-    python3 -m venv "$VENV_DIR" || {
-      rm -rf "$VENV_DIR" || true
-      echo "ERROR: failed to create venv. On Debian/Ubuntu you may need: sudo apt install python3-venv" >&2
-      exit 1
-    }
   fi
 
   if [[ ! -f "$VENV_ACTIVATE" ]]; then
     echo "ERROR: $VENV_ACTIVATE not found. The venv appears corrupted." >&2
     echo "Try: rm -rf $VENV_DIR" >&2
+    hermelin_print_python_venv_fix_help
+    exit 1
+  fi
+
+  if ! hermelin_python_is_supported "$VENV_PY"; then
+    echo "ERROR: $VENV_PY is older than Python 3.10." >&2
     hermelin_print_python_venv_fix_help
     exit 1
   fi
@@ -146,7 +177,7 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
   USE_PIP=0
   if command -v uv >/dev/null 2>&1; then
     echo "==> using uv pip for backend deps"
-    if ! uv pip install -e .; then
+    if ! uv pip install --python "$VENV_PY" -e .; then
       echo "WARNING: uv pip install failed; falling back to python -m pip" >&2
       USE_PIP=1
     fi
@@ -156,13 +187,13 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
 
   if [[ "$USE_PIP" -eq 1 ]]; then
     # Some environments (notably uv-created venvs) may not include pip.
-    if ! python -m pip --version >/dev/null 2>&1; then
+    if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
       echo "==> pip missing in .venv; bootstrapping with ensurepip"
-      python -m ensurepip --upgrade >/dev/null 2>&1 || true
+      "$VENV_PY" -m ensurepip --upgrade >/dev/null 2>&1 || true
     fi
 
-    if python -m pip --version >/dev/null 2>&1; then
-      python -m pip install -e .
+    if "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+      "$VENV_PY" -m pip install -e .
     else
       echo "ERROR: pip is missing in .venv and could not be bootstrapped." >&2
       echo "Fix options:" >&2
@@ -177,37 +208,44 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
   fi
 fi
 
+PYTHON_RUNNER=""
+if [[ -x "$ROOT_DIR/.venv/bin/python" ]] && hermelin_python_is_supported "$ROOT_DIR/.venv/bin/python"; then
+  PYTHON_RUNNER="$ROOT_DIR/.venv/bin/python"
+else
+  PYTHON_RUNNER="$(hermelin_find_supported_python || true)"
+fi
+
 if [[ "$SKIP_HERMES_PATCH" -eq 0 ]]; then
   echo "==> patching active Hermes installation for artifact tools"
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "ERROR: python3 not found (needed for Hermes artifact patch installer)." >&2
+  if [[ -z "$PYTHON_RUNNER" ]]; then
+    echo "ERROR: Python 3.10 or newer not found (needed for Hermes artifact patch installer)." >&2
     exit 1
   fi
-  python3 scripts/install_hermes_artifact_patch.py
+  "$PYTHON_RUNNER" scripts/install_hermes_artifact_patch.py
 fi
 
 if [[ "$SKIP_HERMES_SKINS" -eq 0 ]]; then
   echo "==> installing hermelinChat skins into Hermes (~/.hermes/skins/)"
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "ERROR: python3 not found (needed for Hermes skin installer)." >&2
+  if [[ -z "$PYTHON_RUNNER" ]]; then
+    echo "ERROR: Python 3.10 or newer not found (needed for Hermes skin installer)." >&2
     exit 1
   fi
-  python3 scripts/install_hermes_skins.py --auto --force
+  "$PYTHON_RUNNER" scripts/install_hermes_skins.py --auto --force
 fi
 
 if [[ "$SKIP_FRONTEND" -eq 0 ]]; then
   echo "==> node: ensure native Hermes dashboard frontend"
   if ! command -v hermes >/dev/null 2>&1; then
     echo "WARNING: hermes not found; skipping native dashboard frontend check." >&2
-  elif ! command -v python3 >/dev/null 2>&1; then
-    echo "WARNING: python3 not found; skipping native dashboard frontend check." >&2
+  elif [[ -z "$PYTHON_RUNNER" ]]; then
+    echo "WARNING: Python 3.10 or newer not found; skipping native dashboard frontend check." >&2
   else
     if command -v npm >/dev/null 2>&1; then
       HERMELIN_NPM_AVAILABLE=1
     else
       HERMELIN_NPM_AVAILABLE=0
     fi
-    HERMELIN_ACTIVE_HERMES_EXE="$(command -v hermes)" HERMELIN_NPM_AVAILABLE="$HERMELIN_NPM_AVAILABLE" python3 - <<'PY'
+    HERMELIN_ACTIVE_HERMES_EXE="$(command -v hermes)" HERMELIN_NPM_AVAILABLE="$HERMELIN_NPM_AVAILABLE" "$PYTHON_RUNNER" - <<'PY'
 import os
 import importlib.util
 import subprocess
@@ -318,23 +356,39 @@ fi
 echo "==> update complete"
 
 if [[ "$RESTART" -eq 1 ]]; then
-  if ! command -v systemctl >/dev/null 2>&1; then
-    echo "WARNING: systemctl not found; restart the server manually." >&2
-    exit 0
-  fi
-
-  echo "==> restarting service: $SERVICE"
-
-  # Prefer user service if it exists and systemd user session is available.
-  if systemctl --user list-unit-files 2>/dev/null | grep -q "^${SERVICE}\.service"; then
-    systemctl --user restart "$SERVICE"
-    systemctl --user --no-pager status "$SERVICE" || true
+  if [[ "$PLATFORM" == "Darwin" ]]; then
+    label="chat.hermelin.${SERVICE}"
+    unit_path="$HOME/Library/LaunchAgents/${label}.plist"
+    if [[ ! -f "$unit_path" ]]; then
+      echo "WARNING: macOS LaunchAgent not found at $unit_path; restart the server manually." >&2
+      exit 0
+    fi
+    echo "==> restarting macOS LaunchAgent: $label"
+    launchctl kickstart -k "gui/$(id -u)/${label}"
   else
-    sudo systemctl restart "$SERVICE"
-    sudo systemctl --no-pager status "$SERVICE" || true
+    if ! command -v systemctl >/dev/null 2>&1; then
+      echo "WARNING: systemctl not found; restart the server manually." >&2
+      exit 0
+    fi
+
+    echo "==> restarting systemd service: $SERVICE"
+
+    # Prefer user service if it exists and systemd user session is available.
+    if systemctl --user list-unit-files 2>/dev/null | grep -q "^${SERVICE}\.service"; then
+      systemctl --user restart "$SERVICE"
+      systemctl --user --no-pager status "$SERVICE" || true
+    else
+      sudo systemctl restart "$SERVICE"
+      sudo systemctl --no-pager status "$SERVICE" || true
+    fi
   fi
 else
-  echo "Restart your running server to pick up changes. systemd examples:"
-  echo "  sudo systemctl restart $SERVICE"
-  echo "  systemctl --user restart $SERVICE"
+  if [[ "$PLATFORM" == "Darwin" ]]; then
+    echo "Restart your running server to pick up changes:"
+    echo "  ./scripts/update.sh --restart"
+  else
+    echo "Restart your running server to pick up changes. systemd examples:"
+    echo "  sudo systemctl restart $SERVICE"
+    echo "  systemctl --user restart $SERVICE"
+  fi
 fi

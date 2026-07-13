@@ -4,7 +4,11 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SELF_DIR}/.." && pwd)"
 
+# shellcheck source=python_venv_hint.sh
+source "$SELF_DIR/python_venv_hint.sh"
+
 SERVICE="hermelin"
+PLATFORM="$(uname -s 2>/dev/null || true)"
 REMOVE_SERVICE=0
 KEEP_VENV=0
 KEEP_STATIC=0
@@ -21,8 +25,8 @@ Usage: ./scripts/uninstall.sh [options]
 This removes local hermelinChat runtime artifacts so you can reinstall cleanly.
 
 Options:
-  --service NAME          systemd service name (default: hermelin)
-  --remove-service        Stop + disable service and attempt to remove the unit file
+  --service NAME          systemd or launchd service name (default: hermelin)
+  --remove-service        Stop + disable service and remove its unit file or LaunchAgent
   --keep-venv             Do not delete .venv/
   --keep-static           Do not delete hermelin/static/
   --remove-node-modules   Delete frontend/node_modules/
@@ -92,6 +96,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ ! "$SERVICE" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: --service may contain only letters, numbers, dots, underscores, and hyphens." >&2
+  exit 1
+fi
+
 cd "$ROOT_DIR"
 
 echo "==> hermelinChat uninstall"
@@ -99,11 +108,11 @@ echo "    root: $ROOT_DIR"
 echo
 
 echo "Planned actions:"
-echo "  - stop service (if running): $SERVICE"
+echo "  - stop OS service (if running): $SERVICE"
 if [[ "$REMOVE_SERVICE" -eq 1 ]]; then
-  echo "  - disable + remove service unit file: yes"
+  echo "  - disable + remove OS service definition: yes"
 else
-  echo "  - disable + remove service unit file: no (pass --remove-service)"
+  echo "  - disable + remove OS service definition: no (pass --remove-service)"
 fi
 
 if [[ "$KEEP_VENV" -eq 0 ]]; then
@@ -146,10 +155,14 @@ echo
 
 if [[ "$YES" -eq 0 ]]; then
   read -r -p "Proceed? [y/N] " ans
-  if [[ "${ans,,}" != "y" && "${ans,,}" != "yes" ]]; then
-    echo "Aborted."
-    exit 0
-  fi
+  case "$ans" in
+    y|Y|yes|YES|Yes)
+      ;;
+    *)
+      echo "Aborted."
+      exit 0
+      ;;
+  esac
 fi
 
 stop_service() {
@@ -228,9 +241,59 @@ stop_service() {
   fi
 }
 
-# Stop running service (prefer user, then system)
-stop_service "user"
-stop_service "system"
+stop_launchd_service() {
+  local uid
+  local label="chat.hermelin.${SERVICE}"
+  local unit_path="$HOME/Library/LaunchAgents/${label}.plist"
+
+  if ! command -v launchctl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  uid="$(id -u)"
+  if launchctl print "gui/${uid}/${label}" >/dev/null 2>&1; then
+    echo "==> stopping macOS LaunchAgent: $label"
+    launchctl bootout "gui/${uid}/${label}" >/dev/null 2>&1 || true
+  fi
+
+  if [[ "$REMOVE_SERVICE" -eq 1 && -f "$unit_path" ]]; then
+    echo "==> removing macOS LaunchAgent: $unit_path"
+    rm -f "$unit_path"
+  fi
+}
+
+# Stop the running service using the current platform's service manager.
+if [[ "$PLATFORM" == "Darwin" ]]; then
+  stop_launchd_service
+else
+  stop_service "user"
+  stop_service "system"
+fi
+
+PYTHON_RUNNER=""
+if [[ -x "$ROOT_DIR/.venv/bin/python" ]] && hermelin_python_is_supported "$ROOT_DIR/.venv/bin/python"; then
+  PYTHON_RUNNER="$ROOT_DIR/.venv/bin/python"
+else
+  PYTHON_RUNNER="$(hermelin_find_supported_python || true)"
+fi
+
+if [[ "$REMOVE_CRONJOBS" -eq 1 ]]; then
+  echo "==> removing hermelinChat Hermes cron jobs"
+  if [[ -n "$PYTHON_RUNNER" ]]; then
+    "$PYTHON_RUNNER" scripts/uninstall_hermelin_cronjobs.py || true
+  else
+    echo "WARNING: Python 3.10 or newer not found; cannot remove Hermes cron jobs." >&2
+  fi
+fi
+
+if [[ "$UNPATCH_HERMES" -eq 1 ]]; then
+  echo "==> unpatching Hermes artifact tools"
+  if [[ -n "$PYTHON_RUNNER" ]]; then
+    "$PYTHON_RUNNER" scripts/uninstall_hermes_artifact_patch.py || true
+  else
+    echo "WARNING: Python 3.10 or newer not found; cannot unpatch Hermes artifact tools." >&2
+  fi
+fi
 
 if [[ "$KEEP_VENV" -eq 0 && -d .venv ]]; then
   echo "==> removing .venv/"
@@ -245,16 +308,6 @@ fi
 if [[ "$REMOVE_NODE_MODULES" -eq 1 && -d frontend/node_modules ]]; then
   echo "==> removing frontend/node_modules/"
   rm -rf frontend/node_modules
-fi
-
-if [[ "$REMOVE_CRONJOBS" -eq 1 ]]; then
-  echo "==> removing hermelinChat Hermes cron jobs"
-  python3 scripts/uninstall_hermelin_cronjobs.py || true
-fi
-
-if [[ "$UNPATCH_HERMES" -eq 1 ]]; then
-  echo "==> unpatching Hermes artifact tools"
-  python3 scripts/uninstall_hermes_artifact_patch.py || true
 fi
 
 if [[ "$PURGE_DATA" -eq 1 ]]; then

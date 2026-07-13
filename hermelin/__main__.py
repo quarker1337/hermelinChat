@@ -5,12 +5,16 @@ import ipaddress
 import logging
 import os
 import re
+import socket
 from pathlib import Path
 
 import uvicorn
 
 from .config import DEFAULT_HERMELIN_HERMES_CMD, HermelinConfig
 from .server import _is_managed_hermes_command, _managed_hermes_executable, create_app
+
+
+LAN_ALLOWED_IPS = "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10"
 
 
 def _env_bool(name: str, default: str = "0") -> bool:
@@ -25,6 +29,25 @@ def _is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(h).is_loopback
     except ValueError:
         return False
+
+
+def _discover_lan_ipv4() -> str:
+    """Return the preferred LAN IPv4 address without sending network traffic."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("192.0.2.1", 9))
+        return str(sock.getsockname()[0])
+    except OSError:
+        return ""
+    finally:
+        sock.close()
+
+
+def _print_lan_access(port: int, *, https: bool) -> None:
+    lan_ip = _discover_lan_ipv4()
+    if lan_ip:
+        scheme = "https" if https else "http"
+        print(f"LAN access: {scheme}://{lan_ip}:{port}")
 
 
 class _RunnerTokenFilter(logging.Filter):
@@ -44,8 +67,13 @@ class _RunnerTokenFilter(logging.Filter):
 
 def main() -> None:
     p = argparse.ArgumentParser(prog="hermelin", description="hermelinChat web UI for Hermes Agent")
-    p.add_argument("--host", default=os.getenv("HERMELIN_HOST", "127.0.0.1"))
+    p.add_argument("--host", default=None)
     p.add_argument("--port", type=int, default=int(os.getenv("HERMELIN_PORT", "3000")))
+    p.add_argument(
+        "--lan",
+        action="store_true",
+        help="Bind all IPv4 interfaces and allow private-network clients (TLS strongly recommended)",
+    )
 
     # Built-in TLS (served directly by uvicorn)
     p.add_argument(
@@ -82,7 +110,7 @@ def main() -> None:
 
     p.add_argument(
         "--allowed-ips",
-        default=os.getenv("HERMELIN_ALLOWED_IPS", "127.0.0.1,::1"),
+        default=None,
         help="Comma-separated IPs/CIDRs allowed to access the UI (default: localhost only). Use '*' to allow all.",
     )
     p.add_argument(
@@ -95,6 +123,11 @@ def main() -> None:
     p.add_argument("--reload", action="store_true", help="Auto-reload server on code changes (dev)")
 
     args = p.parse_args()
+
+    if args.host is None:
+        args.host = "0.0.0.0" if args.lan else os.getenv("HERMELIN_HOST", "127.0.0.1")
+    if args.allowed_ips is None:
+        args.allowed_ips = LAN_ALLOWED_IPS if args.lan else os.getenv("HERMELIN_ALLOWED_IPS", "127.0.0.1,::1")
 
     env_hermes_cmd = os.getenv("HERMELIN_HERMES_CMD", "").strip()
     env_cmd_override = _env_bool("HERMELIN_HERMES_CMD_OVERRIDE", "0")
@@ -135,6 +168,9 @@ def main() -> None:
             print("Hint: configure HERMELIN_SSL_CERTFILE/HERMELIN_SSL_KEYFILE (default), or set HERMELIN_ALLOW_INSECURE_HTTP=1")
             raise SystemExit(1)
 
+        if args.lan:
+            _print_lan_access(int(args.port), https=bool(ssl_certfile and ssl_keyfile))
+
         logging.getLogger("uvicorn.access").addFilter(_RunnerTokenFilter())
         uvicorn.run(
             "hermelin.server:create_app",
@@ -172,6 +208,9 @@ def main() -> None:
         print("ERROR: refusing to serve insecure HTTP on non-localhost without TLS")
         print("Hint: configure HERMELIN_SSL_CERTFILE/HERMELIN_SSL_KEYFILE (default), or set HERMELIN_ALLOW_INSECURE_HTTP=1")
         raise SystemExit(1)
+
+    if args.lan:
+        _print_lan_access(cfg.port, https=bool(ssl_certfile and ssl_keyfile))
 
     app = create_app(cfg)
 
