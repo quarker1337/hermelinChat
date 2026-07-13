@@ -11,7 +11,7 @@ export function stripAnsi(s: string): string {
 
 export function buildWsUrl(
   resumeId: string | null,
-  opts: { cols?: number; rows?: number; themeId?: string; attachPath?: string } = {},
+  opts: { cols?: number; rows?: number; themeId?: string; attachPath?: string; profile?: string } = {},
 ): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const params = new URLSearchParams()
@@ -26,6 +26,9 @@ export function buildWsUrl(
   const rows = Number(opts?.rows || 0)
   if (cols > 0) params.set('cols', String(cols))
   if (rows > 0) params.set('rows', String(rows))
+
+  const profile = String(opts?.profile || '').trim()
+  if (isLegacyPty && profile && profile !== 'default') params.set('profile', profile)
 
   const themeId = String(opts?.themeId || '').trim()
   if (themeId) params.set('ui_theme', themeId)

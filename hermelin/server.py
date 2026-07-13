@@ -315,6 +315,16 @@ def _hermes_profile_config_path(hermes_home: Path, profile: str) -> Path:
     return base / "profiles" / name / "config.yaml"
 
 
+def _hermes_profile_state_db_path(hermes_home: Path, profile: str) -> Path:
+    name = _safe_hermes_profile_name(profile)
+    if not name:
+        raise ValueError("invalid Hermes profile")
+    base = Path(hermes_home).expanduser()
+    if name == "default":
+        return base / "state.db"
+    return base / "profiles" / name / "state.db"
+
+
 def _hermes_profile_model(config_path: Path) -> str | None:
     try:
         raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
@@ -362,7 +372,7 @@ def _list_hermes_profiles(hermes_home: Path) -> list[dict[str, object]]:
     except Exception:
         entries = []
     for entry in entries:
-        if entry.is_dir():
+        if entry.is_dir() and not entry.is_symlink():
             add(entry.name)
     return profiles
 
@@ -851,6 +861,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         app.state.hermes_dashboard_manager = dashboard_manager
         app.state.pet_event_channels = {}
         app.state.pet_event_last_events = {}
+        app.state.pet_event_activity = {}
         app.state.pet_event_lock = asyncio.Lock()
         try:
             yield
@@ -1065,6 +1076,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             app.state.pet_event_lock = lock
         return channels, last_events, lock
 
+    def _pet_activity_state() -> dict[str, str]:
+        activity = getattr(app.state, "pet_event_activity", None)
+        if not isinstance(activity, dict):
+            activity = {}
+            app.state.pet_event_activity = activity
+        return activity
+
     def _pet_event_type(payload: str) -> str:
         try:
             obj = json.loads(payload)
@@ -1086,8 +1104,30 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
     async def _broadcast_pet_event(channel: str, payload: str) -> None:
         channels, last_events, lock = _pet_event_state()
+        activity = _pet_activity_state()
         event_type = _pet_event_type(payload)
         async with lock:
+            if event_type in {"message.complete", "error"}:
+                activity[channel] = "idle"
+            elif event_type in {
+                "message.start",
+                "thinking.delta",
+                "reasoning.delta",
+                "reasoning.available",
+                "tool.start",
+                "tool.complete",
+                "message.delta",
+                "clarify.request",
+                "approval.request",
+                "sudo.request",
+                "secret.request",
+            }:
+                activity[channel] = "working"
+            while len(activity) > 256:
+                try:
+                    activity.pop(next(iter(activity)))
+                except Exception:
+                    break
             if _cacheable_pet_event_type(event_type):
                 last_events[channel] = payload
                 # Bound memory even if old runtimes never reconnect.
@@ -1527,8 +1567,27 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             tmux_prefix=config.runtime_tmux_prefix,
         )
 
+    def _known_hermes_profile(value: object) -> str:
+        profile = _safe_hermes_profile_name(value)
+        if not profile:
+            raise ValueError("invalid Hermes profile")
+        if profile != "default":
+            known = {str(item.get("name")) for item in _list_hermes_profiles(config.hermes_home)}
+            if profile not in known:
+                raise ValueError(f"unknown Hermes profile: {profile}")
+        return profile
+
+    def _profile_state_db(profile: object) -> tuple[str, Path]:
+        selected = _known_hermes_profile(profile)
+        if selected == "default":
+            return selected, Path(config.db_path)
+        return selected, _hermes_profile_state_db_path(config.hermes_home, selected)
+
     def _runtime_dict(record: RuntimeRecord) -> dict:
         data = record.to_dict()
+        channel = str((record.metadata or {}).get("pet_event_channel") or "")
+        observed_activity = _pet_activity_state().get(channel) if channel else None
+        data["runtime_activity"] = observed_activity or ("working" if record.state == "starting" else "idle")
         data["can_attach"] = record.backend == "tmux" and record.state != "stopped"
         data["can_stop"] = record.backend == "tmux" and record.state != "stopped"
         if record.backend == "legacy":
@@ -1609,16 +1668,10 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         backend = _runtime_backend_or_error()
         rid = str(payload.get("runtime_id") or payload.get("runtimeId") or new_runtime_id()).strip()
         title = str(payload.get("title") or "default").strip() or "default"
-        raw_profile = str(payload.get("profile") or "default").strip() or "default"
-        profile = _safe_hermes_profile_name(raw_profile)
-        if not profile:
-            raise ValueError("invalid Hermes profile")
-        known_profiles = {str(item.get("name")) for item in _list_hermes_profiles(config.hermes_home)}
-        if profile != "default" and profile not in known_profiles:
-            raise ValueError(f"unknown Hermes profile: {profile}")
+        profile, profile_db = _profile_state_db(payload.get("profile") or "default")
         source = str(payload.get("source") or "user_ui").strip() or "user_ui"
         resume_raw = str(payload.get("resume") or payload.get("resume_id") or payload.get("resumeId") or "").strip()
-        safe_resume = resolve_resume_session_id(config.db_path, resume_raw) if resume_raw else None
+        safe_resume = resolve_resume_session_id(profile_db, resume_raw) if resume_raw else None
         if resume_raw and not safe_resume:
             raise ValueError("invalid resume session")
         cwd_raw = str(payload.get("cwd") or config.spawn_cwd).strip()
@@ -2291,7 +2344,14 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             pass
         return _resolve_hermes_executable("hermes", os.environ)
 
-    def _hermes_sessions_rename(session_id: str, title: str) -> tuple[bool, str]:
+    def _hermes_profiled_prefix(profile: str) -> list[str]:
+        selected = _known_hermes_profile(profile)
+        prefix = [_hermes_bin()]
+        if selected != "default":
+            prefix.extend(["--profile", selected])
+        return prefix
+
+    def _hermes_sessions_rename(session_id: str, title: str, profile: str = "default") -> tuple[bool, str]:
         sid = str(session_id or "").strip()
         t = str(title or "").strip()
         if not sid:
@@ -2303,7 +2363,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         env.setdefault("PYTHONUNBUFFERED", "1")
         env["HERMES_HOME"] = str(config.hermes_home)
 
-        cmd = [_hermes_bin(), "sessions", "rename", sid, t]
+        cmd = [*_hermes_profiled_prefix(profile), "sessions", "rename", sid, t]
         try:
             r = subprocess.run(
                 cmd,
@@ -2332,7 +2392,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
 
         return True, ""
 
-    def _hermes_sessions_delete(session_id: str) -> tuple[bool, str]:
+    def _hermes_sessions_delete(session_id: str, profile: str = "default") -> tuple[bool, str]:
         sid = str(session_id or "").strip()
         if not sid:
             return False, "session id is required"
@@ -2341,7 +2401,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         env.setdefault("PYTHONUNBUFFERED", "1")
         env["HERMES_HOME"] = str(config.hermes_home)
 
-        cmd = [_hermes_bin(), "sessions", "delete", sid, "--yes"]
+        cmd = [*_hermes_profiled_prefix(profile), "sessions", "delete", sid, "--yes"]
 
         last_out = ""
         for attempt in range(3):
@@ -3557,8 +3617,15 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         limit: int = 50,
         offset: int = 0,
         source: Optional[str] = None,
+        profile: str = "default",
     ):
-        sessions = list_sessions(config.db_path, limit=limit, offset=offset, source=source)
+        try:
+            selected_profile, state_db = _profile_state_db(profile)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        sessions = list_sessions(state_db, limit=limit, offset=offset, source=source)
+        for session in sessions:
+            session["profile"] = selected_profile
 
         # Overlay custom titles from meta DB, if present.
         try:
@@ -3592,7 +3659,14 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         if len(title) > 200:
             return JSONResponse({"detail": "title too long"}, status_code=400)
 
-        ok, err = await asyncio.to_thread(_hermes_sessions_rename, sid, title)
+        try:
+            profile, state_db = _profile_state_db((payload or {}).get("profile") or "default")
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        if not resolve_resume_session_id(state_db, sid):
+            return JSONResponse({"detail": "session not found for profile"}, status_code=404)
+
+        ok, err = await asyncio.to_thread(_hermes_sessions_rename, sid, title, profile)
         if not ok:
             return JSONResponse(
                 {
@@ -3612,12 +3686,18 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         return {"ok": True, "session_id": sid, "title": title}
 
     @app.post("/api/sessions/{session_id}/delete")
-    async def api_session_delete(session_id: str):
+    async def api_session_delete(session_id: str, payload: dict | None = Body(default=None)):
         sid = str(session_id or "").strip()
         if not is_valid_artifact_id(sid):
             return JSONResponse({"detail": "invalid session id"}, status_code=400)
+        try:
+            profile, state_db = _profile_state_db((payload or {}).get("profile") or "default")
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        if not resolve_resume_session_id(state_db, sid):
+            return JSONResponse({"detail": "session not found for profile"}, status_code=404)
 
-        ok, err = await asyncio.to_thread(_hermes_sessions_delete, sid)
+        ok, err = await asyncio.to_thread(_hermes_sessions_delete, sid, profile)
         if not ok:
             return JSONResponse(
                 {
@@ -3642,9 +3722,14 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         limit: int = 20,
         offset: int = 0,
         session_id: Optional[str] = None,
+        profile: str = "default",
     ):
+        try:
+            _, state_db = _profile_state_db(profile)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
         results = search_messages(
-            config.db_path,
+            state_db,
             query=q,
             limit=limit,
             offset=offset,
@@ -3673,8 +3758,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         message_id: int,
         before: int = 3,
         after: int = 3,
+        profile: str = "default",
     ):
-        ctx = get_message_context(config.db_path, message_id=message_id, before=before, after=after)
+        try:
+            _, state_db = _profile_state_db(profile)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        ctx = get_message_context(state_db, message_id=message_id, before=before, after=after)
         if ctx is None:
             return JSONResponse({"detail": "not found"}, status_code=404)
 
@@ -4309,6 +4399,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         cols: int = 120,
         rows: int = 30,
         clear_session_artifacts: bool = Query(False),
+        profile: str = "default",
     ):
         if not _websocket_origin_allowed(websocket):
             await websocket.close(code=1008)
@@ -4331,7 +4422,13 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                 await websocket.close(code=1008)
                 return
 
-        argv = shlex.split(_get_effective_hermes_cmd())
+        try:
+            selected_profile, state_db = _profile_state_db(profile)
+        except ValueError:
+            await websocket.close(code=1008)
+            return
+
+        argv = _with_hermes_profile_args(shlex.split(_get_effective_hermes_cmd()), selected_profile)
 
         # -------------------------------------------------------------
         # hermelinChat UI theme -> Hermes CLI skin (upstream skin system)
@@ -4365,7 +4462,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             except Exception:
                 pass
 
-        safe_resume = resolve_resume_session_id(config.db_path, resume) if resume else None
+        safe_resume = resolve_resume_session_id(state_db, resume) if resume else None
         if resume and not safe_resume:
             await websocket.close(code=1008)
             return

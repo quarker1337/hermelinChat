@@ -3,7 +3,7 @@ import type { SearchHit, SearchGroup, PeekState } from '../types'
 import { apiCall, ApiError } from '../api/client'
 import { useAuthStore } from './auth'
 import { useArtifactStore } from './artifacts'
-import { registerSearchStore } from './sessions'
+import { registerSearchStore, useSessionStore } from './sessions'
 
 // ---------------------------------------------------------------------------
 // Module-level timer / abort refs (not in store state)
@@ -156,10 +156,12 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
       }
 
       try {
+        const profile = useSessionStore.getState().profile
         const data = await apiCall<{ results?: SearchHit[] }>(
-          `/api/search?q=${encodeURIComponent(trimmed)}&limit=25`,
+          `/api/search?q=${encodeURIComponent(trimmed)}&limit=25&profile=${encodeURIComponent(profile)}`,
           { signal: ctrl.signal },
         )
+        if (useSessionStore.getState().profile !== profile) return
         const results = data.results || []
         const groups = computeGroups(results)
         const expandedSessions = computeExpandedSessions(get().expandedSessions, results)
@@ -203,14 +205,17 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
       },
     })
 
+    const profile = useSessionStore.getState().profile
     try {
       const data = await apiCall<PeekState['context']>(
-        `/api/messages/context?message_id=${encodeURIComponent(hit.id)}&before=3&after=3`,
+        `/api/messages/context?message_id=${encodeURIComponent(hit.id)}&before=3&after=3&profile=${encodeURIComponent(profile)}`,
       )
+      if (useSessionStore.getState().profile !== profile || get().peek.hit?.id !== hit.id) return
       set((s) => ({
         peek: { ...s.peek, loading: false, context: data ?? null },
       }))
     } catch (err: unknown) {
+      if (useSessionStore.getState().profile !== profile || get().peek.hit?.id !== hit.id) return
       const error =
         err instanceof Error && err.name === 'ApiError'
           ? 'not found'

@@ -43,6 +43,10 @@ test('terminal websocket URL sends resume to legacy and Fleet attach paths only'
       'wss://hermelin.test/ws/pty?resume=20260630_000000_abcdef&cols=100&rows=30&ui_theme=hermelin',
     )
     assert.equal(
+      buildWsUrl('20260630_000000_abcdef', { cols: 100, rows: 30, profile: 'otrod' }),
+      'wss://hermelin.test/ws/pty?resume=20260630_000000_abcdef&cols=100&rows=30&profile=otrod',
+    )
+    assert.equal(
       buildWsUrl('20260630_000000_abcdef', { cols: 100, rows: 30, attachPath: '/ws/runtimes/rt-one/attach' }),
       'wss://hermelin.test/ws/runtimes/rt-one/attach?cols=100&rows=30',
     )
@@ -171,7 +175,7 @@ test('sidebar new session keeps session-store new-session semantics in tmux mode
   assert.match(body, /useSessionStore\.getState\(\)\.startNewSession\(\)/, 'legacy sidebar new session should still run session-store new-session flow')
 })
 
-test('runtime dropdown exposes explicit switch/current affordances', () => {
+test('runtime dropdown is live-only and keeps compact switch affordances', () => {
   const appSource = fs.readFileSync(path.join(SOURCE_ROOT, 'components/AppShell.tsx'), 'utf8')
   const runtimeSource = fs.readFileSync(path.join(SOURCE_ROOT, 'stores/runtimes.ts'), 'utf8')
   assert.match(runtimeSource, /Runtime polling can race|snap back/i, 'runtime store should document stale polling snapback protection')
@@ -180,12 +184,46 @@ test('runtime dropdown exposes explicit switch/current affordances', () => {
   assert.match(appSource, /<span>profile<\/span>/, 'runtime dropdown should expose a local Hermes profile selector')
   assert.match(appSource, /runtimeProfiles\.map\(\(profile\)/, 'runtime dropdown should render Hermes profiles from runtime config')
   assert.match(appSource, /createRuntime\(`Hermes \$\{count\}`, \{ profile: selectedRuntimeProfile \}\)/, 'new local runtime should start with the selected profile')
-  assert.match(appSource, /profile \$\{runtime\.profile \|\| 'default'\}/, 'runtime rows should show the profile actually backing that runtime')
+  assert.match(appSource, /runtime\.profile \|\| 'default'/, 'runtime rows should show the profile actually backing that runtime')
   assert.match(appSource, /liveLocalRuntimes\.map/, 'runtime dropdown should render only live local runtimes')
   assert.doesNotMatch(appSource, /isStopped \? 'stopped'/, 'runtime dropdown should not render stopped local runtimes as disabled rows')
-  assert.match(appSource, /stopped runtime.*hidden/, 'runtime dropdown should summarize hidden stopped local runtimes')
+  assert.doesNotMatch(appSource, /stopped runtime.*hidden/i, 'runtime dropdown should not display stopped-runtime counts')
   assert.match(appSource, /active \? 'current' : 'switch'/, 'runtime rows should show explicit current/switch state')
   assert.match(appSource, /width: '100%'/, 'runtime row switch target should span the row')
+})
+
+test('zero managed runtimes renders an intentional empty state instead of legacy PTY fallback', () => {
+  const appSource = fs.readFileSync(path.join(SOURCE_ROOT, 'components/AppShell.tsx'), 'utf8')
+
+  assert.match(appSource, /const hasAttachableTerminal = runtimeConfig\.enabled && \(runtimeConfig\.backend !== 'tmux' \|\| Boolean\(activeRuntime \|\| activeFleetRuntimeRecord\)\)/, 'terminal mounting must wait for a successful runtime config load')
+  assert.match(appSource, /No Hermes Session Active/)
+  assert.match(appSource, /Start New Session/)
+  assert.match(appSource, /hasAttachableTerminal \? \(/, 'TerminalPane must mount only for a legacy backend or a live managed runtime')
+  assert.match(appSource, /onClick=\{handleNewSession\}/, 'empty-state action must use the normal managed runtime creator')
+})
+
+test('sidebar mode defaults to profile-aware history and can persist active runtime navigation', () => {
+  const prefsSource = fs.readFileSync(path.join(SOURCE_ROOT, 'utils/ui-prefs.ts'), 'utf8')
+  assert.match(prefsSource, /sidebar:\s*\{\s*mode: 'history'/, 'history must remain the default mode')
+  assert.match(prefsSource, /sidebar\.mode === 'active' \? 'active' : 'history'/, 'only the two supported modes may be restored')
+
+  const sidebarSource = fs.readFileSync(path.join(SOURCE_ROOT, 'components/sidebar/Sidebar.tsx'), 'utf8')
+  const appSource = fs.readFileSync(path.join(SOURCE_ROOT, 'components/AppShell.tsx'), 'utf8')
+  const sessionStoreSource = fs.readFileSync(path.join(SOURCE_ROOT, 'stores/sessions.ts'), 'utf8')
+  const activeListSource = fs.readFileSync(path.join(SOURCE_ROOT, 'components/sidebar/ActiveRuntimeList.tsx'), 'utf8')
+
+  assert.match(sidebarSource, /prefs\.sidebar\.mode/)
+  assert.match(sidebarSource, /history/)
+  assert.match(sidebarSource, /active/)
+  assert.match(sidebarSource, /<ActiveRuntimeList/)
+  assert.match(activeListSource, /working/)
+  assert.match(activeListSource, /idle/)
+  assert.match(activeListSource, /onSelectLocal/)
+  assert.match(activeListSource, /onSelectRemote/)
+  assert.match(sessionStoreSource, /profile: string/)
+  assert.match(sessionStoreSource, /\/api\/sessions\?limit=50&profile=/)
+  assert.match(appSource, /setSessionProfile\(historyProfile\)/)
+  assert.match(appSource, /profile: session\.profile/)
 })
 
 test('runtime dropdown stacks above xterm so menus remain selectable and copyable', () => {
@@ -211,7 +249,7 @@ test('runtime dropdown connects Fleet tmux remotes through the normal xterm atta
   const backendSource = fs.readFileSync(path.resolve(__dirname, '..', '..', 'hermelin/server.py'), 'utf8')
   const proxySource = fs.readFileSync(path.resolve(__dirname, '..', '..', 'hermelin/fleet_proxy.py'), 'utf8')
 
-  assert.match(appSource, /remote fleet tmux/, 'runtime menu should expose a remote Fleet tmux section')
+  assert.match(appSource, />Fleet<\/span>/, 'runtime menu should expose a compact Fleet section')
   assert.match(appSource, /remoteFleetRuntimes\.map/, 'runtime menu should render Fleet tmux runtime rows')
   assert.match(appSource, /runtime\.can_attach !== false && runtime\.state !== 'stopped'/, 'runtime menu should hide stale non-attachable Fleet tmux rows')
   assert.match(appSource, /remoteFleetStartNodes\.map/, 'runtime menu should render start-on-host rows even without sessions')

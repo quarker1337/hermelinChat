@@ -85,12 +85,17 @@ function getSearchStore(): SearchStoreRef | null {
   return _searchStore
 }
 
+function sessionsPath(profile: string): string {
+  return `/api/sessions?limit=50&profile=${encodeURIComponent(profile || 'default')}`
+}
+
 // ---------------------------------------------------------------------------
 // Store interface
 // ---------------------------------------------------------------------------
 
 interface SessionStore {
   sessions: Session[]
+  profile: string
   activeSessionId: string | null
   runtimeInfo: RuntimeInfo
 
@@ -101,6 +106,7 @@ interface SessionStore {
   // Actions
   startPolling: () => void
   stopPolling: () => void
+  setProfile: (profile: string) => void
   startNewSession: (opts?: { spawn?: boolean }) => void
   resumeSession: (id: string) => void
   setActiveSessionId: (sid: string) => void
@@ -116,6 +122,7 @@ interface SessionStore {
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
+  profile: 'default',
   activeSessionId: null,
   runtimeInfo: { loading: true, defaultModel: null, spawnCwd: null },
   activeSession: null,
@@ -144,7 +151,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
 
       try {
-        const data = await apiCall<{ sessions: Session[] }>('/api/sessions?limit=50')
+        const requestedProfile = get().profile
+        const data = await apiCall<{ sessions: Session[] }>(sessionsPath(requestedProfile))
+        if (get().profile !== requestedProfile) return
         const sessions = data.sessions || []
         set((s) => ({
           sessions,
@@ -167,6 +176,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null }
     if (_fastPollTimer) { clearInterval(_fastPollTimer); _fastPollTimer = null }
     if (_fallbackTimer) { clearInterval(_fallbackTimer); _fallbackTimer = null }
+  },
+
+  setProfile: (profile: string) => {
+    const nextProfile = String(profile || 'default').trim() || 'default'
+    if (nextProfile === get().profile) return
+    get().stopPolling()
+    _newSessionStartedAt = null
+    _newSessionBaselineRef = null
+    set({
+      profile: nextProfile,
+      sessions: [],
+      activeSessionId: null,
+      activeSession: null,
+      grouped: { Today: [], Yesterday: [], Earlier: [] },
+    })
+    try { getSearchStore()?.reset() } catch { /* not yet created */ }
+    if (useAuthStore.getState().authenticated) get().startPolling()
   },
 
   // -------------------------------------------------------------------------
@@ -245,10 +271,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const sid = String(id)
     const nextTitle = title.trim()
 
+    const profile = get().sessions.find((session) => session.id === sid)?.profile || get().profile
     const data = await apiPost<{ title?: string }>(
       `/api/sessions/${encodeURIComponent(sid)}/rename`,
-      { title: nextTitle },
+      { title: nextTitle, profile },
     )
+    if (get().profile !== profile) return
 
     const finalTitle = String(data?.title || nextTitle).trim() || nextTitle
 
@@ -283,7 +311,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       get().startNewSession()
     }
 
-    await apiPost(`/api/sessions/${encodeURIComponent(sid)}/delete`, {})
+    const profile = get().sessions.find((session) => session.id === sid)?.profile || get().profile
+    await apiPost(`/api/sessions/${encodeURIComponent(sid)}/delete`, { profile })
+    if (get().profile !== profile) return
 
     set((s) => {
       const sessions = (s.sessions || []).filter((sess) => sess?.id !== sid)
@@ -340,6 +370,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     set({
       sessions: [],
+      profile: 'default',
       activeSessionId: null,
       activeSession: null,
       grouped: { Today: [], Yesterday: [], Earlier: [] },
@@ -360,7 +391,9 @@ function _startFastPoll(activeSessionId: string) {
   const tick = async () => {
     tries += 1
     try {
-      const data = await apiCall<{ sessions: Session[] }>('/api/sessions?limit=50')
+      const requestedProfile = useSessionStore.getState().profile
+      const data = await apiCall<{ sessions: Session[] }>(sessionsPath(requestedProfile))
+      if (useSessionStore.getState().profile !== requestedProfile) return
       const sessions = data.sessions || []
       useSessionStore.setState((s) => ({
         sessions,
@@ -399,7 +432,9 @@ export function startFallbackDetection() {
   const tick = async () => {
     tries += 1
     try {
-      const data = await apiCall<{ sessions: Session[] }>('/api/sessions?limit=50')
+      const requestedProfile = useSessionStore.getState().profile
+      const data = await apiCall<{ sessions: Session[] }>(sessionsPath(requestedProfile))
+      if (useSessionStore.getState().profile !== requestedProfile) return
       const list = data.sessions || []
 
       useSessionStore.setState((s) => ({

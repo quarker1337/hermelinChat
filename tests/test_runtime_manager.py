@@ -9,7 +9,13 @@ from fastapi.testclient import TestClient
 from hermelin.config import HermelinConfig
 from hermelin.runtime_backends import LegacyRuntimeBackend, TmuxRuntimeBackend, select_runtime_backend
 from hermelin.runtime_registry import RuntimeRecord, RuntimeRegistry
-from hermelin.server import create_app, _list_hermes_profiles, _safe_hermes_profile_name, _with_hermes_profile_args
+from hermelin.server import (
+    _hermes_profile_state_db_path,
+    _list_hermes_profiles,
+    _safe_hermes_profile_name,
+    _with_hermes_profile_args,
+    create_app,
+)
 
 
 def _config(tmpdir: str, **overrides) -> HermelinConfig:
@@ -33,6 +39,52 @@ def _write_state_session(db_path: Path, session_id: str) -> None:
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY)")
         conn.execute("INSERT OR REPLACE INTO sessions (id) VALUES (?)", (session_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _write_history_session(db_path: Path, session_id: str, title: str, started_at: float = 1.0) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                user_id TEXT,
+                model TEXT,
+                model_config TEXT,
+                system_prompt TEXT,
+                parent_session_id TEXT,
+                started_at REAL NOT NULL,
+                ended_at REAL,
+                end_reason TEXT,
+                message_count INTEGER DEFAULT 0,
+                tool_call_count INTEGER DEFAULT 0,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                title TEXT
+            );
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT,
+                timestamp REAL NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO sessions (
+                id, source, started_at, message_count, tool_call_count,
+                input_tokens, output_tokens, title
+            ) VALUES (?, 'cli', ?, 0, 0, 0, 0, ?)
+            """,
+            (session_id, started_at, title),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -89,12 +141,16 @@ class RuntimeProfileTests(unittest.TestCase):
             profile_dir.mkdir(parents=True)
             (profile_dir / "config.yaml").write_text("model:\n  default: xiaomi/mimo-v2.5-pro\n", encoding="utf-8")
             (home / "profiles" / "../bad").mkdir(parents=True, exist_ok=True)
+            outside = Path(tmpdir) / "outside-profile"
+            outside.mkdir()
+            (home / "profiles" / "linked").symlink_to(outside, target_is_directory=True)
 
             profiles = _list_hermes_profiles(home)
 
         names = [item["name"] for item in profiles]
         self.assertIn("default", names)
         self.assertIn("otrod", names)
+        self.assertNotIn("linked", names)
         self.assertNotIn("path", json.dumps(profiles).lower())
         otrod = next(item for item in profiles if item["name"] == "otrod")
         self.assertEqual(otrod["model"], "xiaomi/mimo-v2.5-pro")
@@ -104,6 +160,13 @@ class RuntimeProfileTests(unittest.TestCase):
         argv = _with_hermes_profile_args(["hermes", "chat", "--profile", "old", "--toolsets", "hermes-cli"], "otrod")
         self.assertEqual(argv, ["hermes", "chat", "--toolsets", "hermes-cli", "--profile", "otrod"])
         self.assertEqual(_with_hermes_profile_args(["hermes", "chat", "--profile=old"], "default"), ["hermes", "chat", "--profile=old"])
+
+    def test_profile_state_db_path_is_bounded_to_known_layout(self):
+        home = Path("/tmp/hermes-home")
+        self.assertEqual(_hermes_profile_state_db_path(home, "default"), home / "state.db")
+        self.assertEqual(_hermes_profile_state_db_path(home, "otrod"), home / "profiles" / "otrod" / "state.db")
+        with self.assertRaises(ValueError):
+            _hermes_profile_state_db_path(home, "../escape")
 
 
 class RuntimeApiTests(unittest.TestCase):
@@ -155,6 +218,42 @@ class RuntimeApiTests(unittest.TestCase):
             self.assertEqual(valid.json()["runtime"]["title"], "Resume")
             self.assertEqual(invalid.status_code, 400)
 
+    def test_session_history_and_resume_use_selected_profile_database(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir, runtime_backend="legacy", runtime_autostart_default=False)
+            _write_history_session(config.db_path, "default-session", "Default history")
+            profile_dir = config.hermes_home / "profiles" / "otrod"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            (profile_dir / "config.yaml").write_text("model:\n  default: xiaomi/mimo-v2.5-pro\n", encoding="utf-8")
+            profile_db = profile_dir / "state.db"
+            _write_history_session(profile_db, "otrod-session", "Otrod history")
+
+            with TestClient(create_app(config)) as client:
+                default_history = client.get("/api/sessions?profile=default")
+                otrod_history = client.get("/api/sessions?profile=otrod")
+                invalid_history = client.get("/api/sessions?profile=../escape")
+                profile_resume = client.post(
+                    "/api/runtimes",
+                    json={"title": "Resume Otrod", "profile": "otrod", "resume": "otrod-session"},
+                )
+                wrong_profile_resume = client.post(
+                    "/api/runtimes",
+                    json={"title": "Wrong profile", "profile": "default", "resume": "otrod-session"},
+                )
+
+            default_items = default_history.json()["sessions"]
+            otrod_items = otrod_history.json()["sessions"]
+            self.assertEqual(default_history.status_code, 200)
+            self.assertEqual([item["id"] for item in default_items], ["default-session"])
+            self.assertEqual(default_items[0]["profile"], "default")
+            self.assertEqual(otrod_history.status_code, 200)
+            self.assertEqual([item["id"] for item in otrod_items], ["otrod-session"])
+            self.assertEqual(otrod_items[0]["profile"], "otrod")
+            self.assertEqual(invalid_history.status_code, 400)
+            self.assertEqual(profile_resume.status_code, 200)
+            self.assertEqual(profile_resume.json()["runtime"]["profile"], "otrod")
+            self.assertEqual(wrong_profile_resume.status_code, 400)
+
     def test_runtime_create_records_selected_profile_and_rejects_unknown(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir, runtime_backend="legacy", runtime_autostart_default=False)
@@ -200,6 +299,19 @@ class RuntimeApiTests(unittest.TestCase):
             self.assertEqual(data["backend"], "legacy")
             self.assertEqual(data["configured_backend"], "legacy")
             self.assertNotIn("fleet", json.dumps(data).lower())
+
+    def test_legacy_websocket_rejects_invalid_profile_before_spawning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = create_app(_config(tmpdir, runtime_backend="legacy", runtime_autostart_default=False))
+            with TestClient(app) as client:
+                with client.websocket_connect(
+                    "/ws/pty?profile=../escape",
+                    headers={"origin": "http://testserver"},
+                ) as websocket:
+                    message = websocket.receive()
+
+            self.assertEqual(message.get("type"), "websocket.close")
+            self.assertEqual(message.get("code"), 1008)
 
 
 if __name__ == "__main__":

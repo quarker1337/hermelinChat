@@ -8,7 +8,8 @@ import { SidebarHeader } from './SidebarHeader'
 import { SessionList } from './SessionList'
 import { SearchPanel } from './SearchPanel'
 import { PeekDrawer } from './PeekDrawer'
-import type { Session, SessionMenu } from '../../types'
+import { ActiveRuntimeList } from './ActiveRuntimeList'
+import type { HermesRuntime, PetActivityState, Session, SessionMenu } from '../../types'
 
 interface SidebarProps {
   onOpenSettings: () => void
@@ -17,6 +18,13 @@ interface SidebarProps {
   onNewSession: () => void
   sessionMenu: SessionMenu | null
   updateAvailable?: boolean
+  localRuntimes: HermesRuntime[]
+  remoteRuntimes: HermesRuntime[]
+  activeLocalRuntimeId: string | null
+  activeRemoteTarget: { node: string; runtimeId: string } | null
+  currentActivityState: PetActivityState
+  onSelectLocalRuntime: (runtimeId: string) => void
+  onSelectRemoteRuntime: (runtime: HermesRuntime) => void
 }
 
 export const Sidebar = ({
@@ -26,14 +34,30 @@ export const Sidebar = ({
   onNewSession,
   sessionMenu,
   updateAvailable = false,
+  localRuntimes,
+  remoteRuntimes,
+  activeLocalRuntimeId,
+  activeRemoteTarget,
+  currentActivityState,
+  onSelectLocalRuntime,
+  onSelectRemoteRuntime,
 }: SidebarProps) => {
   const [collapsed, setCollapsed] = useState(false)
 
   const auth = useAuthStore()
   const { query, setQuery, searching, closePeek, openPeek, peek } = useSearchStore()
   const prefs = useUiPrefsStore((s) => s.prefs)
+  const sidebarMode = prefs.sidebar.mode
 
-  const searchActive = !!(query || '').trim()
+  const setSidebarMode = (mode: 'history' | 'active') => {
+    useUiPrefsStore.getState().update((current) => ({ ...current, sidebar: { mode } }))
+    if (mode === 'active') {
+      setQuery('')
+      closePeek()
+    }
+  }
+
+  const searchActive = sidebarMode === 'history' && !!(query || '').trim()
 
   return (
     <>
@@ -154,8 +178,32 @@ export const Sidebar = ({
         {/* Expanded content */}
         {!collapsed && (
           <>
+            <div style={{ padding: '9px 10px 2px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              {(['history', 'active'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className="hm-btn"
+                  onClick={() => setSidebarMode(mode)}
+                  style={{
+                    padding: '5px 7px',
+                    borderRadius: 7,
+                    border: `1px solid ${sidebarMode === mode ? AMBER[800] : SLATE.border}`,
+                    background: sidebarMode === mode ? `${AMBER[900]}38` : SLATE.elevated,
+                    color: sidebarMode === mode ? AMBER[300] : SLATE.muted,
+                    fontSize: 9,
+                    letterSpacing: 0.5,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {mode === 'history' ? 'history' : 'active'}
+                </button>
+              ))}
+            </div>
+
             {/* Search input */}
-            <div style={{ padding: '10px 10px 6px' }}>
+            {sidebarMode === 'history' && (
+            <div style={{ padding: '8px 10px 6px' }}>
               <div
                 style={{
                   display: 'flex',
@@ -202,9 +250,28 @@ export const Sidebar = ({
                 )}
               </div>
             </div>
+            )}
 
-            {/* Session list or search results */}
-            {auth.authenticated && searchActive ? (
+            {/* Session list, active runtimes, or search results */}
+            {sidebarMode === 'active' ? (
+              auth.authenticated ? (
+                <div style={{ flex: 1, overflow: 'auto', padding: '6px 8px' }}>
+                  <ActiveRuntimeList
+                    localRuntimes={localRuntimes}
+                    remoteRuntimes={remoteRuntimes}
+                    activeLocalRuntimeId={activeLocalRuntimeId}
+                    activeRemoteTarget={activeRemoteTarget}
+                    currentActivityState={currentActivityState}
+                    onSelectLocal={onSelectLocalRuntime}
+                    onSelectRemote={onSelectRemoteRuntime}
+                  />
+                </div>
+              ) : (
+                <div style={{ flex: 1, color: SLATE.muted, fontSize: 10, padding: '18px 12px', textAlign: 'center' }}>
+                  Login to view active sessions
+                </div>
+              )
+            ) : auth.authenticated && searchActive ? (
               <div style={{ flex: 1, overflow: 'auto', padding: '4px 6px' }}>
                 <SearchPanel />
               </div>
@@ -302,7 +369,7 @@ export const Sidebar = ({
       </div>
 
       {/* Peek Drawer — rendered adjacent to sidebar in the flex row */}
-      {peek.open && (
+      {sidebarMode === 'history' && peek.open && (
         <PeekDrawer
           loading={peek.loading}
           error={peek.error}

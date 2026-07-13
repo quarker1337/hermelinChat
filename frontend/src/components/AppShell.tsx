@@ -196,11 +196,12 @@ export function AppShell() {
   const activeSession = useSessionStore((s) => s.activeSession)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
   const runtimeInfo = useSessionStore((s) => s.runtimeInfo)
+  const setSessionProfile = useSessionStore((s) => s.setProfile)
 
   const runtimes = useRuntimeStore((s) => s.runtimes)
   const activeRuntimeId = useRuntimeStore((s) => s.activeRuntimeId)
   const runtimeConfig = useRuntimeStore((s) => s.config)
-  const activeRuntime = runtimes.find((runtime) => runtime.runtime_id === activeRuntimeId) || null
+  const activeRuntime = runtimes.find((runtime) => runtime.runtime_id === activeRuntimeId && isAttachableLocalRuntime(runtime)) || null
   const runtimeProfiles = useMemo(() => {
     const profiles = Array.isArray(runtimeConfig.profiles) && runtimeConfig.profiles.length
       ? runtimeConfig.profiles
@@ -208,12 +209,10 @@ export function AppShell() {
     return profiles
   }, [runtimeConfig.profiles])
   const liveLocalRuntimes = useMemo(() => runtimes.filter(isAttachableLocalRuntime), [runtimes])
-  const hiddenStoppedLocalRuntimeCount = Math.max(0, runtimes.length - liveLocalRuntimes.length)
 
   const fleetConfig = useFleetStore((s) => s.config)
   const fleetNodes = useFleetStore((s) => s.nodes)
   const fleetRuntimes = useFleetStore((s) => s.runtimes)
-  const fleetSessions = useFleetStore((s) => s.sessions)
   const fleetLoading = useFleetStore((s) => s.loading)
   const fleetError = useFleetStore((s) => s.error)
 
@@ -260,6 +259,8 @@ export function AppShell() {
     ? fleetRuntimes.find((runtime) => runtime.runtime_id === activeFleetRuntimeTarget.runtimeId && fleetRuntimeNode(runtime) === activeFleetRuntimeTarget.node) || null
     : null
   const activeFleetRuntimeAttachPath = fleetRuntimeAttachPath(activeFleetRuntimeRecord)
+  const hasAttachableTerminal = runtimeConfig.enabled && (runtimeConfig.backend !== 'tmux' || Boolean(activeRuntime || activeFleetRuntimeRecord))
+  const historyProfile = activeRuntime?.profile || selectedRuntimeProfile
 
   // Pause background animation while any overlay/modal is open
   const overlayOpen = !!(settingsOpen || fleetPanelOpen || renameSession || deleteSession || locked)
@@ -277,6 +278,12 @@ export function AppShell() {
     const fallback = runtimeProfiles.find((profile) => profile.name === runtimeConfig.default_profile)?.name || runtimeProfiles[0]?.name || 'default'
     setSelectedRuntimeProfile(fallback)
   }, [runtimeProfiles, runtimeConfig.default_profile, selectedRuntimeProfile])
+
+  // History is isolated per Hermes profile. Follow the selected live local runtime,
+  // or the profile chosen for the next runtime when no local runtime is active.
+  useEffect(() => {
+    setSessionProfile(historyProfile)
+  }, [historyProfile, setSessionProfile])
 
   // Keep long-lived open tabs authenticated by hitting /api/auth/me.  The
   // backend renews the signed cookie on successful auth checks.
@@ -336,12 +343,16 @@ export function AppShell() {
       // Fleet is optional; local HermelinChat remains fully usable.
     })
 
-    // Auto-spawn terminal on first auth, but let the local runtime manager
-    // discover/create a default runtime first. If runtime discovery fails, the
-    // terminal still falls back to the legacy /ws/pty path.
+    // Auto-attach only when there is a real managed tmux runtime.  The legacy
+    // backend still owns /ws/pty, but an intentional zero-runtime tmux state must
+    // remain empty instead of manufacturing an unmanaged Hermes process.
     void useRuntimeStore.getState().refresh().finally(() => {
-      if (cancelled) return
-      if (useTerminalStore.getState().state.phase === 'idle') {
+      if (cancelled || useTerminalStore.getState().state.phase !== 'idle') return
+      const runtimeState = useRuntimeStore.getState()
+      const selected = runtimeState.runtimes.find(
+        (runtime) => runtime.runtime_id === runtimeState.activeRuntimeId && isAttachableLocalRuntime(runtime),
+      )
+      if (runtimeState.config.backend !== 'tmux' || selected) {
         useTerminalStore.getState().spawn(useSessionStore.getState().activeSessionId ?? null)
       }
     })
@@ -481,7 +492,7 @@ export function AppShell() {
     setActiveFleetRuntimeTarget(null)
     const runtimeState = useRuntimeStore.getState()
     if (runtimeState.config.enabled && runtimeState.config.backend === 'tmux') {
-      void runtimeState.createRuntime(session.title || session.id, { resumeId: session.id }).then((runtime) => {
+      void runtimeState.createRuntime(session.title || session.id, { resumeId: session.id, profile: session.profile || historyProfile }).then((runtime) => {
         if (runtime) {
           useSessionStore.getState().setActiveSessionId(session.id)
           useTerminalStore.getState().spawn(session.id)
@@ -492,7 +503,7 @@ export function AppShell() {
     }
     useSessionStore.getState().resumeSession(session.id)
     useSearchStore.getState().closePeek()
-  }, [])
+  }, [historyProfile])
 
   const handleToggleRuntimeMenu = useCallback(() => {
     setRuntimeMenuOpen((open) => {
@@ -552,7 +563,13 @@ export function AppShell() {
     await useFleetStore.getState().stopRuntime(node, rid)
     if (activeFleetRuntimeTarget?.kind === 'runtime' && activeFleetRuntimeTarget.node === node && activeFleetRuntimeTarget.runtimeId === rid) {
       setActiveFleetRuntimeTarget(null)
-      useTerminalStore.getState().spawn(useSessionStore.getState().activeSessionId ?? null)
+      const runtimeState = useRuntimeStore.getState()
+      const localFallback = runtimeState.runtimes.find(isAttachableLocalRuntime) || null
+      if (localFallback) {
+        runtimeState.setActiveRuntimeId(localFallback.runtime_id)
+        void runtimeState.activateRuntime(localFallback.runtime_id)
+        useTerminalStore.getState().spawn(null)
+      }
     }
     useToastStore.getState().show(`remote runtime stopped: ${node}`)
   }, [activeFleetRuntimeTarget])
@@ -570,17 +587,24 @@ export function AppShell() {
 
   const handleStopRuntime = useCallback(async (runtimeId: string) => {
     setActiveFleetRuntimeTarget(null)
+    const wasActive = useRuntimeStore.getState().activeRuntimeId === runtimeId
     await useRuntimeStore.getState().stopRuntime(runtimeId)
-    useTerminalStore.getState().spawn(useSessionStore.getState().activeSessionId ?? null)
+    if (wasActive) {
+      const runtimeState = useRuntimeStore.getState()
+      const nextRuntime = runtimeState.runtimes.find(
+        (runtime) => runtime.runtime_id === runtimeState.activeRuntimeId && isAttachableLocalRuntime(runtime),
+      )
+      if (nextRuntime) useTerminalStore.getState().spawn(null)
+    }
     useToastStore.getState().show('runtime stopped')
   }, [])
 
   const runtimePillLabel = activeFleetRuntimeRecord
-    ? `remote: ${fleetRuntimeNode(activeFleetRuntimeRecord)} · ${activeFleetRuntimeRecord.title || activeFleetRuntimeRecord.runtime_id}`
+    ? `${fleetRuntimeNode(activeFleetRuntimeRecord)} · ${activeFleetRuntimeRecord.title || activeFleetRuntimeRecord.runtime_id}`
     : activeRuntime
-      ? `${activeRuntime.title || activeRuntime.runtime_id} · ${activeRuntime.profile || 'default'}${activeRuntime.backend === 'tmux' ? '' : ' · legacy'}`
-      : runtimeConfig.enabled
-        ? 'runtime…'
+      ? `${activeRuntime.title || activeRuntime.runtime_id} · ${activeRuntime.profile || 'default'}`
+      : runtimeConfig.backend === 'tmux'
+        ? 'none'
         : 'legacy'
   const activeFleetSessionId = activeFleetRuntimeRecord?.active_hermes_session_id || ''
 
@@ -646,6 +670,13 @@ export function AppShell() {
           onNewSession={handleNewSession}
           sessionMenu={sessionMenu}
           updateAvailable={updateAvailable}
+          localRuntimes={liveLocalRuntimes}
+          remoteRuntimes={remoteFleetRuntimes}
+          activeLocalRuntimeId={activeRuntimeId}
+          activeRemoteTarget={activeFleetRuntimeTarget}
+          currentActivityState={petActivityState}
+          onSelectLocalRuntime={handleSelectRuntime}
+          onSelectRemoteRuntime={handleSelectFleetTmuxRuntime}
         />
 
         {/* ── Main area ── */}
@@ -757,7 +788,7 @@ export function AppShell() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
                   <span style={{ fontSize: 10, color: SLATE.muted }}>
-                    {runtimeConfig.backend === 'tmux' ? `persistent local runtimes · ${liveLocalRuntimes.length} live` : 'legacy runtime fallback'}
+                    {runtimeConfig.backend === 'tmux' ? 'Local' : 'Legacy'}
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 5, color: SLATE.muted, fontSize: 10 }}>
@@ -860,7 +891,7 @@ export function AppShell() {
                               {runtime.title || runtime.runtime_id}
                             </span>
                             <span style={{ color: SLATE.muted, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {`${runtime.backend} · ${runtime.state} · profile ${runtime.profile || 'default'}${runtime.hermes_pid ? ` · pid ${runtime.hermes_pid}` : ''}`}
+                              {`${runtime.profile || 'default'} · ${runtime.runtime_activity === 'working' ? 'working' : 'idle'}`}
                             </span>
                           </span>
                           <span
@@ -894,20 +925,13 @@ export function AppShell() {
                     )
                   })
                 )}
-                {hiddenStoppedLocalRuntimeCount > 0 && (
-                  <div style={{ color: SLATE.dim, fontSize: 10, padding: '8px 4px 0' }}>
-                    {`${hiddenStoppedLocalRuntimeCount} stopped runtime${hiddenStoppedLocalRuntimeCount === 1 ? '' : 's'} hidden`}
-                  </div>
-                )}
 
                 {fleetConfig.enabled && (
                   <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${SLATE.border}` }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontSize: 10, color: SLATE.muted }}>
-                      {`remote fleet tmux${fleetConfig.enabled ? ` · ${remoteFleetRuntimes.length} runtimes · ${remoteFleetStartNodes.length} hosts` : ''}`}
-                    </span>
-                    <span style={{ fontSize: 10, color: fleetError ? SLATE.danger : fleetConfig.enabled ? SLATE.success : SLATE.muted }}>
-                      {fleetLoading ? 'sync' : fleetError ? 'error' : fleetConfig.enabled ? `${fleetSessions.length} sessions` : 'disabled'}
+                    <span style={{ fontSize: 10, color: SLATE.muted }}>Fleet</span>
+                    <span style={{ fontSize: 10, color: fleetError ? SLATE.danger : SLATE.muted }}>
+                      {fleetLoading ? 'syncing' : fleetError ? 'error' : ''}
                     </span>
                   </div>
                   {!fleetConfig.enabled ? (
@@ -955,7 +979,7 @@ export function AppShell() {
                                   {runtime.title || runtime.runtime_id}
                                 </span>
                                 <span style={{ color: SLATE.muted, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {`fleet tmux · ${node} · ${runtime.state || 'idle'}${runtime.hermes_pid ? ` · pid ${runtime.hermes_pid}` : ''}`}
+                                  {`${node} · ${runtime.profile || 'default'} · ${runtime.runtime_activity === 'working' ? 'working' : 'idle'}`}
                                 </span>
                               </span>
                               <span style={{ border: `1px solid ${active ? AMBER[800] : SLATE.border}`, borderRadius: 999, color: active ? AMBER[300] : SLATE.muted, padding: '2px 7px', fontSize: 10, whiteSpace: 'nowrap' }}>
@@ -1005,7 +1029,7 @@ export function AppShell() {
                               {fleetNodeLabel(node)}
                             </span>
                             <span style={{ color: SLATE.muted, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {`fleet host · ${node.state || 'online'} · start tmux Hermes`}
+                              {`${node.state || 'online'} · start session`}
                             </span>
                           </span>
                           <span style={{ border: `1px solid ${AMBER[800]}`, borderRadius: 999, color: AMBER[300], padding: '2px 7px', fontSize: 10, whiteSpace: 'nowrap' }}>
@@ -1027,7 +1051,9 @@ export function AppShell() {
                 ? 'auth\u2026'
                 : locked
                   ? 'login required'
-                  : activeFleetRuntimeRecord
+                  : !hasAttachableTerminal
+                    ? 'none'
+                    : activeFleetRuntimeRecord
                     ? activeFleetSessionId || activeFleetRuntimeRecord.runtime_id
                     : activeSessionId
                       ? activeSessionId
@@ -1089,13 +1115,14 @@ export function AppShell() {
                 transition: 'background 0.3s ease',
               }}
             />
-            <span style={{ fontSize: 11, color: SLATE.muted }}>{activeFleetRuntimeRecord ? 'FLEET' : 'PTY'}</span>
+            <span style={{ fontSize: 11, color: SLATE.muted }}>{!hasAttachableTerminal ? 'OFF' : activeFleetRuntimeRecord ? 'FLEET' : 'PTY'}</span>
           </div>
 
           {/* ── Terminal + Artifact/Peek panels ── */}
           <div style={{ flex: 1, display: 'flex', position: 'relative', minWidth: 0, minHeight: 0 }}>
             <div style={{ flex: 1, position: 'relative', minWidth: 0, minHeight: 0 }}>
               {authenticated ? (
+                hasAttachableTerminal ? (
                 <>
                   <TerminalPane attachPathOverride={activeFleetRuntimeAttachPath} />
                   <FloatingPetOverlay
@@ -1124,6 +1151,41 @@ export function AppShell() {
                     spriteHeight={activeTheme?.icons?.alignmentSpriteHeight}
                   />
                 </>
+                ) : (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      zIndex: 5,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 14,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ color: SLATE.textBright, fontSize: 15, fontWeight: 600 }}>
+                      No Hermes Session Active
+                    </div>
+                    <button
+                      type="button"
+                      className="hm-btn"
+                      onClick={handleNewSession}
+                      disabled={!runtimeConfig.enabled}
+                      style={{
+                        border: `1px solid ${AMBER[800]}`,
+                        background: `${AMBER[900]}44`,
+                        color: AMBER[300],
+                        borderRadius: 9,
+                        padding: '8px 12px',
+                        fontSize: 11,
+                      }}
+                    >
+                      Start New Session
+                    </button>
+                  </div>
+                )
               ) : (
                 <div
                   style={{

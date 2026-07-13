@@ -8,6 +8,7 @@ import { buildWsUrl, stripAnsi } from './utils'
 import { handleControlMessage } from '../artifacts/bridge'
 import { useArtifactStore } from '../../stores/artifacts'
 import { useTerminalStore } from '../../stores/terminal'
+import { useSessionStore } from '../../stores/sessions'
 import { runtimeAttachPath, useRuntimeStore } from '../../stores/runtimes'
 import { useUiPrefsStore } from '../../stores/ui-prefs'
 import { AMBER, SLATE } from '../../theme/index'
@@ -356,6 +357,7 @@ function TerminalPane({ attachPathOverride = null }: TerminalPaneProps = {}) {
   const noteHermesPetEvent = useTerminalStore((s) => s.noteHermesPetEvent)
   const setPetActivityScope = useTerminalStore((s) => s.setPetActivityScope)
   const terminalState = useTerminalStore((s) => s.state)
+  const sessionProfile = useSessionStore((s) => s.activeSession?.profile || s.profile)
   const selectedRuntimeWsPath = useRuntimeStore((s) => runtimeAttachPath(s.runtimes.find((runtime) => runtime.runtime_id === s.activeRuntimeId)))
   const runtimeWsPath = attachPathOverride || selectedRuntimeWsPath
 
@@ -826,6 +828,7 @@ function TerminalPane({ attachPathOverride = null }: TerminalPaneProps = {}) {
         rows: initialRows,
         themeId: themeIdRef.current,
         attachPath: runtimeWsPath,
+        profile: sessionProfile,
       })
       ws = new WebSocket(wsUrl)
       ws.binaryType = 'arraybuffer'
@@ -954,7 +957,7 @@ function TerminalPane({ attachPathOverride = null }: TerminalPaneProps = {}) {
 
       wsRef.current = null
     }
-  }, [termReady, resumeId, spawnNonce, onConnectionChange, runtimeWsPath])
+  }, [termReady, resumeId, spawnNonce, onConnectionChange, runtimeWsPath, sessionProfile])
 
   return (
     <div

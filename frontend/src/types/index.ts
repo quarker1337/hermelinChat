@@ -3,6 +3,7 @@
 export interface Session {
   id: string
   title: string
+  profile?: string
   title_source?: string
   model?: string | null
   started_at?: number
@@ -86,6 +87,10 @@ export interface PetOverlayPrefs {
   slug: string
 }
 
+export interface SidebarPrefs {
+  mode: 'history' | 'active'
+}
+
 export interface UiPrefs {
   theme: string
   appName: string
@@ -95,6 +100,7 @@ export interface UiPrefs {
   terminal: TerminalPrefs
   videoFx: VideoFxPrefs
   petOverlay: PetOverlayPrefs
+  sidebar: SidebarPrefs
 }
 
 // ─── Auth ──────────────────────────────────────────────────────────
@@ -145,6 +151,7 @@ export interface HermesRuntime {
   profile: string
   cwd: string
   state: string
+  runtime_activity?: 'idle' | 'working' | string
   source: string
   backend: string
   tmux_name?: string | null

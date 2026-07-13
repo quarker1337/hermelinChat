@@ -46,6 +46,9 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
     size: 100,
     slug: '',
   },
+  sidebar: {
+    mode: 'history',
+  },
 }
 
 // ─── Pure utils ─────────────────────────────────────────────────────────────
@@ -64,6 +67,7 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
   const term = r.terminal && typeof r.terminal === 'object' ? (r.terminal as Record<string, unknown>) : {}
   const vx = r.videoFx && typeof r.videoFx === 'object' ? (r.videoFx as Record<string, unknown>) : {}
   const pet = r.petOverlay && typeof r.petOverlay === 'object' ? (r.petOverlay as Record<string, unknown>) : {}
+  const sidebar = r.sidebar && typeof r.sidebar === 'object' ? (r.sidebar as Record<string, unknown>) : {}
 
   const cursorStyleRaw = term.cursorStyle ?? DEFAULT_UI_PREFS.terminal.cursorStyle
   const cursorStyleStr = String(cursorStyleRaw || '').toLowerCase()
@@ -97,6 +101,8 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
     .replace(/[^A-Za-z0-9._-]/g, '')
     .slice(0, 80)
 
+  const sidebarMode = sidebar.mode === 'active' ? 'active' : 'history'
+
   return {
     theme,
     appName: appName.trim(),
@@ -124,6 +130,9 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
       position: petPosition,
       size: clampNum(pet.size ?? DEFAULT_UI_PREFS.petOverlay.size, 50, 180),
       slug: petSlug,
+    },
+    sidebar: {
+      mode: sidebarMode,
     },
   }
 }

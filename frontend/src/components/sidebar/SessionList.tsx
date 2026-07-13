@@ -23,7 +23,7 @@ export const SessionList = ({
   onOpenSessionMenu,
   sessionMenu,
 }: SessionListProps) => {
-  const { grouped, activeSessionId } = useSessionStore()
+  const { grouped, activeSessionId, profile } = useSessionStore()
   const { setQuery, closePeek } = useSearchStore()
   const prefs = useUiPrefsStore((s) => s.prefs)
 
@@ -41,7 +41,7 @@ export const SessionList = ({
           color: SLATE.muted,
         }}
       >
-        Active
+        {`History · ${profile}`}
       </div>
       <SidebarItem
         label={
