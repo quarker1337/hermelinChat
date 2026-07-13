@@ -11,6 +11,14 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from hermes_sidecar_patch import (  # noqa: E402
+    SIDECAR_RECONNECT_PATCH_MARKER,
+    patch_event_publisher as _patch_event_publisher,
+)
+
 ASSET_DIR = SCRIPT_DIR / "hermes_artifact_patch"
 ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
@@ -56,7 +64,7 @@ ARTIFACT_TOOLSETS_BLOCK = '''
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Patch the active Hermes installation with hermelinChat artifact tools.",
+        description="Patch the active Hermes installation for hermelinChat integration.",
     )
     parser.add_argument(
         "--hermes-exe",
@@ -231,6 +239,7 @@ def _discover_live_paths(hermes_exe: Path, hermes_python: Path) -> dict[str, Pat
     - model_tools (for tool discovery imports)
     - toolsets (for toolset definitions)
     - tools package directory (to install artifact_tool.py)
+    - tui_gateway.event_publisher (for restart-safe activity events)
 
     This works for both normal installs and editable (PEP 660) installs.
     """
@@ -253,6 +262,7 @@ def _origin(name: str) -> str:
 
 model_tools = _origin("model_tools")
 toolsets = _origin("toolsets")
+event_publisher = _origin("tui_gateway.event_publisher")
 
 tools_spec = importlib.util.find_spec("tools")
 if tools_spec is None:
@@ -269,6 +279,7 @@ print(json.dumps({
     "model_tools": model_tools,
     "toolsets": toolsets,
     "tools_dir": tools_dir,
+    "event_publisher": event_publisher,
 }, ensure_ascii=False))
 '''
 
@@ -427,12 +438,13 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    print("Hermes artifact patch target")
+    print("Hermes integration patch target")
     print(f"  hermes exe:    {hermes_exe}")
     print(f"  hermes python: {hermes_python}")
     print(f"  model_tools:   {live_paths['model_tools']}")
     print(f"  toolsets:      {live_paths['toolsets']}")
     print(f"  tools dir:     {live_paths['tools_dir']}")
+    print(f"  event pub:     {live_paths['event_publisher']}")
 
     if args.dry_run:
         print("\nDry run only. No files changed.")
@@ -446,6 +458,8 @@ def main() -> int:
         changes.append((changed, message))
         changed, message = _patch_toolsets(live_paths["toolsets"])
         changes.append((changed, message))
+        changed, message = _patch_event_publisher(live_paths["event_publisher"])
+        changes.append((changed, message))
     except Exception as exc:
         print(f"ERROR: failed to patch Hermes installation: {exc}", file=sys.stderr)
         return 1
@@ -457,9 +471,11 @@ def main() -> int:
 
     print()
     print("Next steps")
-    print("  1) restart hermelinChat / Hermes services if they are already running")
-    print("  2) if your Hermes config uses restricted toolsets, enable 'artifacts' for the panel")
-    print("  3) add 'strudel' only if you want Strudel-specific agent controls")
+    print("  1) restart any already-running Hermes runtime/session once to load this patch")
+    print("     (restarting only HermelinChat preserves tmux runtimes and cannot hot-reload Hermes code)")
+    print("  2) restart HermelinChat if its server code also changed")
+    print("  3) if your Hermes config uses restricted toolsets, enable 'artifacts' for the panel")
+    print("  4) add 'strudel' only if you want Strudel-specific agent controls")
     return 0
 
 

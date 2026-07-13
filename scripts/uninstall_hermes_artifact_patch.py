@@ -10,6 +10,11 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from hermes_sidecar_patch import unpatch_event_publisher as _unpatch_event_publisher  # noqa: E402
+
 ASSET_DIR = SCRIPT_DIR / "hermes_artifact_patch"
 ARTIFACT_TOOL_SRC = ASSET_DIR / "artifact_tool.py"
 
@@ -21,7 +26,7 @@ PATCH_MARKER_LINE = "    # hermelinChat artifact panel toolsets (installed by he
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Undo the hermelinChat artifact tools patch from the active Hermes installation.",
+        description="Undo the hermelinChat integration patch from the active Hermes installation.",
     )
     parser.add_argument(
         "--hermes-exe",
@@ -121,6 +126,7 @@ def _origin(name: str) -> str:
 
 model_tools = _origin("model_tools")
 toolsets = _origin("toolsets")
+event_publisher = _origin("tui_gateway.event_publisher")
 
 tools_spec = importlib.util.find_spec("tools")
 if tools_spec is None:
@@ -137,6 +143,7 @@ print(json.dumps({
     "model_tools": model_tools,
     "toolsets": toolsets,
     "tools_dir": tools_dir,
+    "event_publisher": event_publisher,
 }, ensure_ascii=False))
 '''
 
@@ -274,12 +281,13 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    print("Hermes artifact UNpatch target")
+    print("Hermes integration UNpatch target")
     print(f"  hermes exe:    {hermes_exe}")
     print(f"  hermes python: {hermes_python}")
     print(f"  model_tools:   {live_paths['model_tools']}")
     print(f"  toolsets:      {live_paths['toolsets']}")
     print(f"  tools dir:     {live_paths['tools_dir']}")
+    print(f"  event pub:     {live_paths['event_publisher']}")
 
     if args.dry_run:
         print("\nDry run only. No files changed.")
@@ -292,6 +300,8 @@ def main() -> int:
         changed, message = _unpatch_model_tools(live_paths["model_tools"])
         changes.append((changed, message))
         changed, message = _unpatch_toolsets(live_paths["toolsets"])
+        changes.append((changed, message))
+        changed, message = _unpatch_event_publisher(live_paths["event_publisher"])
         changes.append((changed, message))
     except Exception as exc:
         print(f"ERROR: failed to unpatch Hermes installation: {exc}", file=sys.stderr)

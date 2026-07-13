@@ -178,9 +178,9 @@ if [[ "$SKIP_PYTHON" -eq 0 ]]; then
 fi
 
 if [[ "$SKIP_HERMES_PATCH" -eq 0 ]]; then
-  echo "==> patching active Hermes installation for artifact tools"
+  echo "==> patching active Hermes installation for HermelinChat integration"
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "ERROR: python3 not found (needed for Hermes artifact patch installer)." >&2
+    echo "ERROR: python3 not found (needed for Hermes integration patch installer)." >&2
     exit 1
   fi
   python3 scripts/install_hermes_artifact_patch.py
