@@ -32,7 +32,6 @@ interface RuntimeStore {
   activateRuntime: (runtimeId: string) => Promise<void>
   stopRuntime: (runtimeId: string) => Promise<void>
   setActiveRuntimeId: (runtimeId: string | null) => void
-  setRuntimeActivity: (runtimeId: string, activity: 'idle' | 'working') => void
   reset: () => void
 }
 
@@ -201,18 +200,6 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   },
 
   setActiveRuntimeId: (runtimeId: string | null) => set({ activeRuntimeId: runtimeId }),
-
-  setRuntimeActivity: (runtimeId: string, activity: 'idle' | 'working') => {
-    const rid = String(runtimeId || '').trim()
-    if (!rid) return
-    set((state) => ({
-      runtimes: state.runtimes.map((runtime) => (
-        runtime.runtime_id === rid && runtime.runtime_activity !== activity
-          ? { ...runtime, runtime_activity: activity }
-          : runtime
-      )),
-    }))
-  },
 
   reset: () => {
     if (_pollTimer) clearInterval(_pollTimer)

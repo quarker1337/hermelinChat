@@ -254,7 +254,7 @@ test('terminal pet follows structured Hermes sidecar events and never falls back
   useTerminalStore.getState().reset()
 })
 
-test('terminal pet activity resets when switching runtime scopes', () => {
+test('terminal focus changes never rewrite another runtime activity label', () => {
   installAssetStubs()
   clearCompiledModules()
   setWindow(undefined)
@@ -265,7 +265,7 @@ test('terminal pet activity resets when switching runtime scopes', () => {
   useTerminalStore.getState().reset()
   useRuntimeStore.setState({
     runtimes: [
-      { runtime_id: 'rt-one', title: 'one', profile: 'default', cwd: '/tmp', state: 'idle', source: 'user_ui', backend: 'tmux', runtime_activity: 'idle' },
+      { runtime_id: 'rt-one', title: 'one', profile: 'default', cwd: '/tmp', state: 'idle', source: 'user_ui', backend: 'tmux', runtime_activity: 'working' },
       { runtime_id: 'rt-two', title: 'two', profile: 'default', cwd: '/tmp', state: 'idle', source: 'user_ui', backend: 'tmux', runtime_activity: 'idle' },
     ],
     activeRuntimeId: 'rt-one',
@@ -279,10 +279,13 @@ test('terminal pet activity resets when switching runtime scopes', () => {
   assert.equal(useTerminalStore.getState().petActivityScope, '/ws/runtimes/rt-two/attach')
   assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
   assert.equal(useRuntimeStore.getState().runtimes.find((runtime) => runtime.runtime_id === 'rt-one').runtime_activity, 'working')
+  assert.equal(useRuntimeStore.getState().runtimes.find((runtime) => runtime.runtime_id === 'rt-two').runtime_activity, 'idle')
 
-  useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'runtime-sidecar' })
-  useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'reading this session' } })
-  assert.equal(useTerminalStore.getState().petActivity.state, 'review')
+  // Simulate a late live animation at the focus boundary. Navigation itself
+  // must not copy that transient state into the outgoing runtime record.
+  useTerminalStore.setState({ petActivity: { state: 'run', updatedAt: Date.now() } })
+  useTerminalStore.getState().setPetActivityScope('/ws/runtimes/rt-one/attach')
+  assert.equal(useRuntimeStore.getState().runtimes.find((runtime) => runtime.runtime_id === 'rt-two').runtime_activity, 'idle')
 
   useTerminalStore.getState().reset()
   useRuntimeStore.getState().reset()

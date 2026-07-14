@@ -5,7 +5,6 @@ import {
   registerTerminalStore,
   startFallbackDetection,
 } from './sessions'
-import { useRuntimeStore } from './runtimes'
 
 // ---------------------------------------------------------------------------
 // Store interface
@@ -85,19 +84,6 @@ const petSyncTrace: PetSyncDebug['trace'] = []
 function normalizePetActivityScope(scope: unknown): string {
   const text = String(scope || '').trim()
   return (text || 'legacy:/ws/pty').slice(0, 256)
-}
-
-function snapshotLocalRuntimeActivity(scope: string, state: PetActivityState) {
-  const match = /^\/ws\/runtimes\/([^/?#]+)\/attach(?:[?#]|$)/.exec(scope)
-  if (!match) return
-  let runtimeId = match[1]
-  try {
-    runtimeId = decodeURIComponent(runtimeId)
-  } catch {
-    // Keep the bounded path segment if it is not valid URI encoding.
-  }
-  const activity = ['idle', 'wave', 'jump', 'failed'].includes(state) ? 'idle' : 'working'
-  useRuntimeStore.getState().setRuntimeActivity(runtimeId, activity)
 }
 
 function resetStructuredPetState() {
@@ -310,8 +296,6 @@ export const useTerminalStore = create<TerminalStore>((set, get) => {
     setPetActivityScope: (scope: string) => {
       const nextScope = normalizePetActivityScope(scope)
       if (get().petActivityScope === nextScope) return
-
-      snapshotLocalRuntimeActivity(get().petActivityScope, get().petActivity.state)
 
       // Each tmux/Fleet runtime has its own Hermes sidecar stream. Reset the
       // local reducer when the visible terminal switches so Pepe does not carry
