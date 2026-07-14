@@ -34,6 +34,8 @@ def test_main_installer_exposes_fleet_modes_and_local_service_dependency() -> No
     assert "--fleet-manager-profile" in help_result.stdout
     assert "--fleet-manager-host" in help_result.stdout
     assert "--fleet-token-file" in help_result.stdout
+    assert "preflight Go 1.22+" in help_result.stdout
+    assert "HermelinChat integration" in help_result.stdout
     script = INSTALLER.read_text(encoding="utf-8")
     assert 'FLEET_ROLE="standalone"' in script  # -y default
     assert 'FLEET_REPOSITORY="git@github.com:quarker1337/hermelinfleet.git"' in script

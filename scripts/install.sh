@@ -3,6 +3,11 @@ set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SELF_DIR}/.." && pwd)"
+source "$SELF_DIR/go_prereq.sh"
+
+# Honor the supported per-user Go location even when shell startup files have
+# not added it to PATH (common in fresh user-service installs).
+export PATH="$HOME/.local/go/bin:$PATH"
 
 SERVICE="hermelin"
 ENV_FILE="${ROOT_DIR}/.hermelin.env"
@@ -41,6 +46,8 @@ FLEET_MANAGER_HOST=""
 FLEET_ALLOW_INSECURE_HTTP=0
 FLEET_TOKEN_STDIN_VALUE=""
 FLEET_ENROLLMENT_TOKEN_STDIN_VALUE=""
+INSTALL_GO=0
+GO_INSTALL_COMMAND=""
 
 usage() {
   cat <<EOF
@@ -51,6 +58,7 @@ This is a first-time setup helper.
 It will:
   - create .hermelin.env (gitignored) if missing
   - run ./scripts/update.sh (creates .venv, installs backend deps, builds frontend, patches Hermes)
+  - preflight Go 1.22+ for FleetManager role and offer a confirmed sudo package install when missing
   - optionally install + start a systemd service
 
 Options:
@@ -66,7 +74,7 @@ Options:
 
   --skip-frontend        Skip npm install/build (NOT recommended; UI will 404 on /)
   --skip-python          Skip pip install -e .
-  --skip-hermes-patch    Skip patching the active Hermes installation with artifact tools
+  --skip-hermes-patch    Skip patching the active Hermes installation for HermelinChat integration
   --skip-hermes-skins    Skip installing hermelinChat CLI skins into ~/.hermes/skins/
   --skip-hermes-themes   (deprecated alias for --skip-hermes-skins)
 
@@ -541,6 +549,52 @@ elif [[ "$FLEET_ROLE" == "external" ]]; then
   fi
 fi
 
+# Manager mode builds the pinned HermelinFleet checkout. Resolve this before
+# showing the final plan so a missing Go toolchain is not discovered only after
+# cloning/configuring Fleet. Automatic package installation remains opt-in and
+# is deferred until after the user confirms the complete plan.
+if [[ "$FLEET_ROLE" == "manager" ]]; then
+  FLEET_GO_BIN="$(hermelin_find_go 2>/dev/null || true)"
+  if [[ -n "$FLEET_GO_BIN" ]] && hermelin_go_meets_minimum "$FLEET_GO_BIN"; then
+    echo "==> Go prerequisite satisfied: $(hermelin_go_version_text "$FLEET_GO_BIN")"
+  else
+    echo
+    if [[ -n "$FLEET_GO_BIN" ]]; then
+      echo "HermelinFleet manager mode needs Go 1.22 or newer."
+      echo "Found unsupported toolchain: $(hermelin_go_version_text "$FLEET_GO_BIN" 2>/dev/null || echo unknown)"
+    else
+      echo "HermelinFleet manager mode needs Go 1.22 or newer, but Go was not found."
+    fi
+
+    if [[ "$YES" -eq 1 ]]; then
+      echo "ERROR: --yes never performs an unrequested sudo package installation." >&2
+      hermelin_print_go_fix_help
+      exit 1
+    fi
+
+    if ! GO_INSTALL_COMMAND="$(hermelin_go_install_command)"; then
+      hermelin_print_go_fix_help
+      exit 1
+    fi
+    if ! command -v sudo >/dev/null 2>&1; then
+      echo "ERROR: sudo is unavailable, so the installer cannot install Go automatically." >&2
+      hermelin_print_go_fix_help
+      exit 1
+    fi
+
+    echo "The installer can run: $GO_INSTALL_COMMAND"
+    echo "This uses sudo and may ask for your account password."
+    read -r -p "Install Go now as part of this setup? [y/N] " _install_go
+    if [[ "${_install_go,,}" == "y" || "${_install_go,,}" == "yes" ]]; then
+      INSTALL_GO=1
+    else
+      echo "Go was not installed."
+      hermelin_print_go_fix_help
+      exit 1
+    fi
+  fi
+fi
+
 echo "==> hermelinChat install"
 echo "    root:     $ROOT_DIR"
 echo "    env file: $ENV_FILE"
@@ -578,6 +632,10 @@ elif [[ "$FLEET_ROLE" == "manager" ]]; then
     echo "    advertised host: $FLEET_MANAGER_HOST"
   fi
   echo "    managed service: hermelinfleet-central.service"
+  if [[ "$INSTALL_GO" -eq 1 ]]; then
+    echo "    prerequisite: install Go 1.22+ using sudo"
+    echo "    command: $GO_INSTALL_COMMAND"
+  fi
 fi
 if [[ "$PULL" -eq 1 ]]; then
   echo "  - git pull: yes"
@@ -600,6 +658,21 @@ if [[ "$YES" -eq 0 ]]; then
     echo "Aborted."
     exit 0
   fi
+fi
+
+if [[ "$INSTALL_GO" -eq 1 ]]; then
+  echo "==> installing Go prerequisite for HermelinFleet"
+  echo "    sudo may ask for your account password"
+  hermelin_install_go_package
+  hash -r
+  export PATH="$HOME/.local/go/bin:$PATH"
+  FLEET_GO_BIN="$(hermelin_find_go 2>/dev/null || true)"
+  if [[ -z "$FLEET_GO_BIN" ]] || ! hermelin_go_meets_minimum "$FLEET_GO_BIN"; then
+    echo "ERROR: Go installation completed but Go 1.22+ is still unavailable." >&2
+    hermelin_print_go_fix_help
+    exit 1
+  fi
+  echo "==> Go prerequisite satisfied: $(hermelin_go_version_text "$FLEET_GO_BIN")"
 fi
 
 if [[ "$WRITE_ENV" -eq 1 ]]; then
