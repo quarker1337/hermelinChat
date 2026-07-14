@@ -260,8 +260,16 @@ test('terminal pet activity resets when switching runtime scopes', () => {
   setWindow(undefined)
 
   const { useTerminalStore } = loadCompiled('stores/terminal.js')
+  const { useRuntimeStore } = loadCompiled('stores/runtimes.js')
 
   useTerminalStore.getState().reset()
+  useRuntimeStore.setState({
+    runtimes: [
+      { runtime_id: 'rt-one', title: 'one', profile: 'default', cwd: '/tmp', state: 'idle', source: 'user_ui', backend: 'tmux', runtime_activity: 'idle' },
+      { runtime_id: 'rt-two', title: 'two', profile: 'default', cwd: '/tmp', state: 'idle', source: 'user_ui', backend: 'tmux', runtime_activity: 'idle' },
+    ],
+    activeRuntimeId: 'rt-one',
+  })
   useTerminalStore.getState().setPetActivityScope('/ws/runtimes/rt-one/attach')
   useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'runtime-sidecar' })
   useTerminalStore.getState().noteHermesPetEvent({ type: 'message.start', payload: {} })
@@ -270,12 +278,14 @@ test('terminal pet activity resets when switching runtime scopes', () => {
   useTerminalStore.getState().setPetActivityScope('/ws/runtimes/rt-two/attach')
   assert.equal(useTerminalStore.getState().petActivityScope, '/ws/runtimes/rt-two/attach')
   assert.equal(useTerminalStore.getState().petActivity.state, 'idle')
+  assert.equal(useRuntimeStore.getState().runtimes.find((runtime) => runtime.runtime_id === 'rt-one').runtime_activity, 'working')
 
   useTerminalStore.getState().notePetSyncMode({ mode: 'structured', source: 'runtime-sidecar' })
   useTerminalStore.getState().noteHermesPetEvent({ type: 'reasoning.delta', payload: { text: 'reading this session' } })
   assert.equal(useTerminalStore.getState().petActivity.state, 'review')
 
   useTerminalStore.getState().reset()
+  useRuntimeStore.getState().reset()
 })
 
 test('terminal pet does not let missing tool ids pin structured sync on run', () => {

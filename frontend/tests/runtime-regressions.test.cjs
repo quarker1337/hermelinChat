@@ -102,7 +102,7 @@ test('runtime store refresh/create is standalone and never calls fleet endpoints
       }
       return jsonResponse({
         runtimes: [
-          { runtime_id: 'rt-old', title: 'Old', profile: 'default', cwd: '/tmp', state: 'idle', source: 'user_ui', backend: 'tmux', can_attach: true, can_stop: true, attach_ws_path: '/ws/runtimes/rt-old/attach' },
+          { runtime_id: 'rt-old', title: 'Old', profile: 'default', cwd: '/tmp', state: 'idle', runtime_activity: 'working', source: 'user_ui', backend: 'tmux', can_attach: true, can_stop: true, attach_ws_path: '/ws/runtimes/rt-old/attach' },
           { runtime_id: 'rt-stopped', title: 'Stopped ghost', profile: 'default', cwd: '/tmp', state: 'stopped', source: 'user_ui', backend: 'tmux', can_attach: false, can_stop: false, attach_ws_path: '/ws/runtimes/rt-stopped/attach' },
           { runtime_id: 'rt-active', title: 'Active', profile: 'default', cwd: '/tmp', state: 'idle', source: 'user_ui', backend: 'tmux', can_attach: true, can_stop: true, attach_ws_path: '/ws/runtimes/rt-active/attach' },
         ],
@@ -122,6 +122,8 @@ test('runtime store refresh/create is standalone and never calls fleet endpoints
     assert.equal(useRuntimeStore.getState().config.backend, 'tmux')
     assert.deepEqual(useRuntimeStore.getState().config.profiles.map((profile) => profile.name), ['default', 'otrod'])
     assert.equal(useRuntimeStore.getState().activeRuntimeId, 'rt-active')
+    const backgroundRuntime = useRuntimeStore.getState().runtimes.find((runtime) => runtime.runtime_id === 'rt-old')
+    assert.equal(backgroundRuntime.runtime_activity, 'working', 'background runtime activity must survive API normalization when focus moves elsewhere')
     assert.equal(runtimeAttachPath(useRuntimeStore.getState().runtimes[2]), '/ws/runtimes/rt-active/attach')
 
     useRuntimeStore.getState().setActiveRuntimeId('rt-old')
@@ -218,6 +220,7 @@ test('sidebar mode defaults to profile-aware history and can persist active runt
   assert.match(sidebarSource, /<ActiveRuntimeList/)
   assert.match(activeListSource, /working/)
   assert.match(activeListSource, /idle/)
+  assert.match(activeListSource, /runtime\.runtime_activity/, 'inactive runtime rows must use per-runtime activity from the API')
   assert.match(activeListSource, /onSelectLocal/)
   assert.match(activeListSource, /onSelectRemote/)
   assert.match(sessionStoreSource, /profile: string/)

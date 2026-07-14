@@ -32,6 +32,7 @@ interface RuntimeStore {
   activateRuntime: (runtimeId: string) => Promise<void>
   stopRuntime: (runtimeId: string) => Promise<void>
   setActiveRuntimeId: (runtimeId: string | null) => void
+  setRuntimeActivity: (runtimeId: string, activity: 'idle' | 'working') => void
   reset: () => void
 }
 
@@ -78,6 +79,7 @@ function normalizeRuntime(raw: Partial<HermesRuntime> | null | undefined): Herme
     profile: String(raw.profile || 'default'),
     cwd: String(raw.cwd || ''),
     state: String(raw.state || 'idle'),
+    runtime_activity: String(raw.runtime_activity || '').trim() || undefined,
     source: String(raw.source || 'user_ui'),
     backend: String(raw.backend || 'legacy'),
     tmux_name: raw.tmux_name ?? null,
@@ -199,6 +201,18 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   },
 
   setActiveRuntimeId: (runtimeId: string | null) => set({ activeRuntimeId: runtimeId }),
+
+  setRuntimeActivity: (runtimeId: string, activity: 'idle' | 'working') => {
+    const rid = String(runtimeId || '').trim()
+    if (!rid) return
+    set((state) => ({
+      runtimes: state.runtimes.map((runtime) => (
+        runtime.runtime_id === rid && runtime.runtime_activity !== activity
+          ? { ...runtime, runtime_activity: activity }
+          : runtime
+      )),
+    }))
+  },
 
   reset: () => {
     if (_pollTimer) clearInterval(_pollTimer)
