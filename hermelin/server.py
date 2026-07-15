@@ -1807,6 +1807,9 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
                     record.runtime_id,
                     state=status.state,
                     hermes_pid=status.hermes_pid,
+                    active_hermes_session_id=(
+                        status.active_hermes_session_id or record.active_hermes_session_id
+                    ),
                     last_seen_at=utc_ts(),
                 )
             except Exception:

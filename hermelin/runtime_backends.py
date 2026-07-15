@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -13,6 +14,73 @@ from typing import Mapping, Protocol
 
 from .pty_handler import PtyProcess
 from .runtime_registry import RuntimeRecord, utc_ts
+
+
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_PROC_FIELD_LIMIT = 1_048_576
+
+
+def _safe_session_id(value: object) -> str | None:
+    session_id = str(value or "").strip()
+    return session_id if _SESSION_ID_RE.fullmatch(session_id) else None
+
+
+def _session_id_for_process_tree(
+    root_pid: int | None,
+    *,
+    proc_root: Path = Path("/proc"),
+    max_processes: int = 256,
+) -> str | None:
+    """Find a validated Hermes session ID in a managed process tree."""
+    try:
+        root = int(root_pid or 0)
+    except (TypeError, ValueError):
+        return None
+    if root <= 0:
+        return None
+
+    queue = [root]
+    seen: set[int] = set()
+    while queue and len(seen) < max(1, int(max_processes)):
+        pid = queue.pop(0)
+        if pid <= 0 or pid in seen:
+            continue
+        seen.add(pid)
+        proc_dir = proc_root / str(pid)
+
+        try:
+            environ = (proc_dir / "environ").read_bytes()[:_PROC_FIELD_LIMIT]
+            for item in environ.split(b"\0"):
+                if item.startswith(b"HERMES_SESSION_ID="):
+                    value = item.split(b"=", 1)[1].decode("utf-8", errors="replace")
+                    session_id = _safe_session_id(value)
+                    if session_id:
+                        return session_id
+        except (OSError, ValueError):
+            pass
+
+        try:
+            cmdline = (proc_dir / "cmdline").read_bytes()[:_PROC_FIELD_LIMIT]
+            args = [part.decode("utf-8", errors="replace") for part in cmdline.split(b"\0") if part]
+            for index, arg in enumerate(args):
+                candidate = None
+                if arg == "--session-key" and index + 1 < len(args):
+                    candidate = args[index + 1]
+                elif arg.startswith("--session-key="):
+                    candidate = arg.split("=", 1)[1]
+                session_id = _safe_session_id(candidate)
+                if session_id:
+                    return session_id
+        except (OSError, ValueError):
+            pass
+
+        try:
+            children_path = proc_dir / "task" / str(pid) / "children"
+            child_values = children_path.read_text(encoding="utf-8", errors="replace")[:_PROC_FIELD_LIMIT].split()
+            queue.extend(int(value) for value in child_values if value.isdigit())
+        except (OSError, ValueError):
+            pass
+    return None
 
 
 class RuntimeBackendError(RuntimeError):
@@ -39,6 +107,7 @@ class RuntimeStatus:
     exists: bool
     state: str
     hermes_pid: int | None = None
+    active_hermes_session_id: str | None = None
 
 
 class RuntimeBackend(Protocol):
@@ -281,7 +350,13 @@ class TmuxRuntimeBackend:
         if not exists:
             return RuntimeStatus(exists=False, state="stopped", hermes_pid=None)
         pid = await asyncio.to_thread(self.pane_pid, name)
-        return RuntimeStatus(exists=True, state="idle", hermes_pid=pid)
+        session_id = await asyncio.to_thread(_session_id_for_process_tree, pid)
+        return RuntimeStatus(
+            exists=True,
+            state="idle",
+            hermes_pid=pid,
+            active_hermes_session_id=session_id,
+        )
 
     def attach_process(self, runtime: RuntimeRecord, *, cols: int = 120, rows: int = 30) -> PtyProcess:
         name = runtime.tmux_name or self.tmux_name_for(runtime.runtime_id)

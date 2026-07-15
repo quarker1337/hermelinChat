@@ -15,6 +15,7 @@ from hermelin.runtime_backends import (
     LegacyRuntimeBackend,
     RuntimeCreateRequest,
     TmuxRuntimeBackend,
+    _session_id_for_process_tree,
     select_runtime_backend,
 )
 from hermelin.runtime_registry import RuntimeRecord, RuntimeRegistry
@@ -189,6 +190,28 @@ class RuntimeBackendSelectionTests(unittest.TestCase):
             self.assertIn('rm -f -- "$0"', str(captured["script"]))
             self.assertEqual(captured["mode"], 0o600)
             Path(captured["launcher"]).unlink(missing_ok=True)  # type: ignore[arg-type]
+
+    def test_process_tree_discovers_valid_descendant_hermes_session_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            proc_root = Path(tmpdir)
+            root_pid = 101
+            child_pid = 202
+            root_task = proc_root / str(root_pid) / "task" / str(root_pid)
+            child_task = proc_root / str(child_pid) / "task" / str(child_pid)
+            root_task.mkdir(parents=True)
+            child_task.mkdir(parents=True)
+            (root_task / "children").write_text(str(child_pid), encoding="utf-8")
+            (child_task / "children").write_text("", encoding="utf-8")
+            (proc_root / str(root_pid) / "cmdline").write_bytes(b"hermes\0chat\0--tui\0")
+            (proc_root / str(child_pid) / "environ").write_bytes(b"HERMES_SESSION_ID=../../invalid\0")
+            (proc_root / str(child_pid) / "cmdline").write_bytes(
+                b"python3\0-m\0tui_gateway.slash_worker\0--session-key\0"
+                b"20260715_045926_da9d4e\0"
+            )
+
+            session_id = _session_id_for_process_tree(root_pid, proc_root=proc_root)
+
+            self.assertEqual(session_id, "20260715_045926_da9d4e")
 
 
 class RuntimeProfileTests(unittest.TestCase):
