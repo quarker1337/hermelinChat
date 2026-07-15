@@ -10,6 +10,7 @@ import { useArtifactStore } from '../../stores/artifacts'
 import { useTerminalStore } from '../../stores/terminal'
 import { useSessionStore } from '../../stores/sessions'
 import { runtimeAttachPath, useRuntimeStore } from '../../stores/runtimes'
+import { useFleetStore } from '../../stores/fleet'
 import { useUiPrefsStore } from '../../stores/ui-prefs'
 import { AMBER, SLATE } from '../../theme/index'
 import { CURSOR_STYLE_VALUES, DEFAULT_UI_PREFS } from '../../utils/ui-prefs'
@@ -763,6 +764,17 @@ function TerminalPane({ attachPathOverride = null }: TerminalPaneProps = {}) {
     const maybeDetectSessionId = createSessionIdDetector((sid) => {
       const cb = onDetectedSessionIdRef.current
       if (cb) cb(sid)
+
+      // Bind the marker to the runtime that emitted it, not whichever runtime
+      // happens to be selected after an async render. This lets runtime labels
+      // follow the real conversation title without cross-runtime contamination.
+      const runtimeState = useRuntimeStore.getState()
+      const localRuntime = runtimeState.runtimes.find((runtime) => runtimeAttachPath(runtime) === runtimeWsPath)
+      if (localRuntime) {
+        void runtimeState.bindRuntimeSession(localRuntime.runtime_id, sid).catch(() => {})
+      } else {
+        useFleetStore.getState().bindRuntimeSession(runtimeWsPath, sid)
+      }
     })
 
     const sendResize = () => {

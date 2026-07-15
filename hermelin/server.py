@@ -297,7 +297,14 @@ from .meta_db import (
 from .pty_handler import PtyProcess
 from . import __version__
 from .security import extract_client_ip, ip_allowed, parse_allowlist
-from .state_reader import get_message_context, list_sessions, resolve_resume_session_id, search_messages
+from .state_reader import (
+    get_message_context,
+    get_session_title,
+    is_valid_session_id,
+    list_sessions,
+    resolve_resume_session_id,
+    search_messages,
+)
 from .config_editor import (
     _yaml_inline_scalar,
     _update_display_skin_config_text,
@@ -1702,8 +1709,32 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             return selected, Path(config.db_path)
         return selected, _hermes_profile_state_db_path(config.hermes_home, selected)
 
+    def _runtime_placeholder_title(value: object) -> str:
+        title = str(value or "").strip()
+        if not title or title.lower() in {"default", "hermes", "new session"}:
+            return "New session"
+        if re.fullmatch(r"Hermes\s+\d+", title, flags=re.IGNORECASE):
+            return "New session"
+        return title
+
+    def _runtime_session_title(record: RuntimeRecord) -> str | None:
+        session_id = str(record.active_hermes_session_id or "").strip()
+        if not session_id:
+            return None
+        try:
+            _, state_db = _profile_state_db(record.profile)
+            base_title = get_session_title(state_db, session_id)
+            meta_title = get_titles_map(config.meta_db_path, [session_id]).get(session_id)
+            return str(meta_title or base_title or "").strip() or None
+        except Exception:
+            logger.debug("failed to resolve runtime session title", exc_info=True)
+            return None
+
     def _runtime_dict(record: RuntimeRecord) -> dict:
         data = record.to_dict()
+        session_title = _runtime_session_title(record)
+        data["session_title"] = session_title
+        data["display_title"] = session_title or _runtime_placeholder_title(record.title)
         channel = str((record.metadata or {}).get("pet_event_channel") or "")
         observed_activity = _pet_activity_state().get(channel) if channel else None
         data["runtime_activity"] = observed_activity or ("working" if record.state == "starting" else "idle")
@@ -1786,7 +1817,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         payload = payload or {}
         backend = _runtime_backend_or_error()
         rid = str(payload.get("runtime_id") or payload.get("runtimeId") or new_runtime_id()).strip()
-        title = str(payload.get("title") or "default").strip() or "default"
+        title = str(payload.get("title") or "New session").strip() or "New session"
         profile, profile_db = _profile_state_db(payload.get("profile") or "default")
         source = str(payload.get("source") or "user_ui").strip() or "user_ui"
         resume_raw = str(payload.get("resume") or payload.get("resume_id") or payload.get("resumeId") or "").strip()
@@ -1800,7 +1831,6 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         argv, env = _runtime_launch_env_and_argv(rid, source, profile)
         if safe_resume:
             argv += ["--resume", safe_resume]
-            title = title if title != "default" else safe_resume
         tmux_name = backend.tmux_name_for(rid) if isinstance(backend, TmuxRuntimeBackend) else None
         req = RuntimeCreateRequest(
             runtime_id=rid,
@@ -1816,6 +1846,8 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
             rows=rows,
         )
         record = await backend.create(req)
+        if safe_resume:
+            record.active_hermes_session_id = safe_resume
         runtime_metadata = dict(record.metadata or {})
         if env.get("HERMELIN_PET_EVENT_CHANNEL"):
             runtime_metadata["pet_event_channel"] = env.get("HERMELIN_PET_EVENT_CHANNEL")
@@ -1862,7 +1894,7 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         records = runtime_registry.list_runtimes()
         if not records and config.runtime_autostart_default and str(config.runtime_backend or "auto").lower() != "off":
             try:
-                records = [await _create_runtime_from_payload({"title": "default"})]
+                records = [await _create_runtime_from_payload({"title": "New session"})]
             except Exception:
                 logger.debug("failed to autostart default runtime", exc_info=True)
                 records = []
@@ -1907,6 +1939,22 @@ def create_app(config: HermelinConfig | None = None) -> FastAPI:
         except Exception:
             pass
         return {"runtime": _runtime_dict(runtime_registry.get_runtime(runtime_id) or record)}
+
+    @app.post("/api/runtimes/{runtime_id}/session")
+    async def api_runtime_bind_session(runtime_id: str, payload: dict = Body(default={})):  # type: ignore[assignment]
+        if not isinstance(payload, dict):
+            return JSONResponse({"detail": "payload must be an object"}, status_code=400)
+        record = runtime_registry.get_runtime(runtime_id)
+        if not record:
+            return JSONResponse({"detail": "runtime not found"}, status_code=404)
+        session_id = str(payload.get("session_id") or payload.get("sessionId") or "").strip()
+        if not is_valid_session_id(session_id):
+            return JSONResponse({"detail": "invalid session id"}, status_code=400)
+        try:
+            record = runtime_registry.update_runtime(runtime_id, active_hermes_session_id=session_id)
+        except Exception:
+            return JSONResponse({"detail": "failed to bind runtime session"}, status_code=500)
+        return {"runtime": _runtime_dict(record)}
 
     @app.post("/api/runtimes/{runtime_id}/stop")
     async def api_runtime_stop(runtime_id: str):

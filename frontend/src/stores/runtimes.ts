@@ -29,6 +29,7 @@ interface RuntimeStore {
   stopPolling: () => void
   refresh: () => Promise<void>
   createRuntime: (title?: string, opts?: { resumeId?: string | null; profile?: string | null }) => Promise<HermesRuntime | null>
+  bindRuntimeSession: (runtimeId: string, sessionId: string) => Promise<void>
   activateRuntime: (runtimeId: string) => Promise<void>
   stopRuntime: (runtimeId: string) => Promise<void>
   setActiveRuntimeId: (runtimeId: string | null) => void
@@ -70,11 +71,19 @@ function normalizeConfig(raw: Partial<HermesRuntimeConfig> | null | undefined): 
   }
 }
 
+export function runtimeDisplayTitle(runtime: Partial<HermesRuntime> | null | undefined, sessionTitle?: string | null): string {
+  const title = String(sessionTitle || runtime?.display_title || runtime?.session_title || runtime?.title || '').trim()
+  if (!title || /^(?:default|new session|hermes(?:\s+\d+)?)$/i.test(title)) return 'New session'
+  return title
+}
+
 function normalizeRuntime(raw: Partial<HermesRuntime> | null | undefined): HermesRuntime | null {
   if (!raw?.runtime_id) return null
   return {
     runtime_id: String(raw.runtime_id),
-    title: String(raw.title || raw.runtime_id || 'default'),
+    title: String(raw.title || raw.runtime_id || 'New session'),
+    display_title: raw.display_title ? String(raw.display_title) : null,
+    session_title: raw.session_title ? String(raw.session_title) : null,
     profile: String(raw.profile || 'default'),
     cwd: String(raw.cwd || ''),
     state: String(raw.state || 'idle'),
@@ -156,7 +165,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     }
   },
 
-  createRuntime: async (title = 'Hermes', opts = {}) => {
+  createRuntime: async (title = 'New session', opts = {}) => {
     if (!useAuthStore.getState().authenticated) return null
     const body: Record<string, unknown> = { title }
     if (opts.resumeId) body.resume = opts.resumeId
@@ -171,6 +180,21 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       error: '',
     }))
     return runtime
+  },
+
+  bindRuntimeSession: async (runtimeId: string, sessionId: string) => {
+    const rid = String(runtimeId || '').trim()
+    const sid = String(sessionId || '').trim()
+    if (!rid || !sid || !useAuthStore.getState().authenticated) return
+    const data = await apiPost<{ runtime?: HermesRuntime }>(
+      `/api/runtimes/${encodeURIComponent(rid)}/session`,
+      { session_id: sid },
+    )
+    const runtime = normalizeRuntime(data.runtime)
+    if (!runtime) return
+    set((state) => ({
+      runtimes: state.runtimes.map((entry) => (entry.runtime_id === runtime.runtime_id ? runtime : entry)),
+    }))
   },
 
   activateRuntime: async (runtimeId: string) => {

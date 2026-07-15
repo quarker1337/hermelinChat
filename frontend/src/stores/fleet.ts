@@ -96,10 +96,17 @@ export function normalizeFleetConfig(value: Partial<FleetConfig> | null | undefi
 
 function normalizeFleetRuntime(raw: Partial<HermesRuntime> | null | undefined): HermesRuntime | null {
   if (!raw?.runtime_id) return null
+  const runtimeId = String(raw.runtime_id)
+  const node = raw.node ? String(raw.node) : String(raw.metadata?.node || '')
+  const derivedAttachPath = node
+    ? `/ws/fleet/nodes/${encodeURIComponent(node)}/runtimes/${encodeURIComponent(runtimeId)}/attach`
+    : ''
   return {
-    runtime_id: String(raw.runtime_id),
-    node: raw.node ? String(raw.node) : String(raw.metadata?.node || ''),
-    title: String(raw.title || raw.runtime_id),
+    runtime_id: runtimeId,
+    node,
+    title: String(raw.title || runtimeId),
+    display_title: raw.display_title ? String(raw.display_title) : null,
+    session_title: raw.session_title ? String(raw.session_title) : null,
     profile: String(raw.profile || 'fleet'),
     cwd: String(raw.cwd || ''),
     state: String(raw.state || 'idle'),
@@ -115,7 +122,7 @@ function normalizeFleetRuntime(raw: Partial<HermesRuntime> | null | undefined): 
     metadata: raw.metadata || {},
     can_attach: raw.can_attach !== false,
     can_stop: raw.can_stop !== false,
-    attach_ws_path: String(raw.attach_ws_path || ''),
+    attach_ws_path: String(derivedAttachPath || raw.attach_ws_path || ''),
   }
 }
 
@@ -145,6 +152,7 @@ export interface FleetStore {
   fetchLogs: (agentId: string) => Promise<void>
   injectAgent: (agentId: string, message: string, sessionId?: string) => Promise<void>
   createRuntime: (node: string, title?: string, opts?: { resumeId?: string | null; uiTheme?: string | null; skin?: string | null }) => Promise<HermesRuntime | null>
+  bindRuntimeSession: (attachPath: string, sessionId: string) => void
   stopRuntime: (node: string, runtimeId: string) => Promise<void>
   reset: () => void
 }
@@ -201,7 +209,17 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
       const snapshot = await apiCall<FleetSnapshot>('/api/fleet/snapshot')
       const nextConfig = normalizeFleetConfig(snapshot?.config || config)
       const nextAgents = asArray<FleetAgent>(snapshot?.agents)
-      const nextRuntimes = asArray<HermesRuntime>(snapshot?.runtimes?.runtimes).map(normalizeFleetRuntime).filter(Boolean) as HermesRuntime[]
+      const previousRuntimes = get().runtimes
+      const nextRuntimes = asArray<HermesRuntime>(snapshot?.runtimes?.runtimes)
+        .map(normalizeFleetRuntime)
+        .filter((runtime): runtime is HermesRuntime => runtime !== null)
+        .map((runtime) => {
+          if (runtime.active_hermes_session_id) return runtime
+          const previous = previousRuntimes.find((entry) => entry.node === runtime.node && entry.runtime_id === runtime.runtime_id)
+          return previous?.active_hermes_session_id
+            ? { ...runtime, active_hermes_session_id: previous.active_hermes_session_id }
+            : runtime
+        }) as HermesRuntime[]
       const nextSessions = asArray<FleetSession>(snapshot?.sessions)
       const selectedAgentId = preferredFleetAgentId(nextAgents, nextSessions, get().selectedAgentId)
       _pollFailures = 0
@@ -295,7 +313,7 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
     }
   },
 
-  createRuntime: async (node, title = 'Hermes', opts = {}) => {
+  createRuntime: async (node, title = 'New session', opts = {}) => {
     const safeNode = String(node || '').trim()
     if (!safeNode) return null
     const body: Record<string, unknown> = { title }
@@ -320,6 +338,19 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
       set({ error: errorMessage(err, 'fleet runtime start failed') })
       throw err
     }
+  },
+
+  bindRuntimeSession: (attachPath, sessionId) => {
+    const path = String(attachPath || '').trim()
+    const sid = String(sessionId || '').trim()
+    if (!path || !sid) return
+    set((state) => ({
+      runtimes: state.runtimes.map((runtime) => (
+        String(runtime.attach_ws_path || '') === path
+          ? { ...runtime, active_hermes_session_id: sid }
+          : runtime
+      )),
+    }))
   },
 
   stopRuntime: async (node, runtimeId) => {

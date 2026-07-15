@@ -988,6 +988,9 @@ test('TerminalPane guards websocket lifecycle callbacks against stale sockets', 
   assert.match(source, /const isCurrentSocket = \(\) => !cancelled && !!ws && ws === wsRef\.current/)
   assert.match(source, /ws\.onopen = \(\) => \{\s*if \(!isCurrentSocket\(\)\) return/)
   assert.match(source, /ws\.onmessage = \(ev: MessageEvent\) => \{\s*if \(!isCurrentSocket\(\)\) return/)
+  assert.match(source, /runtimeAttachPath\(runtime\) === runtimeWsPath/, 'session markers should bind to the runtime that owns the emitting websocket')
+  assert.match(source, /bindRuntimeSession\(localRuntime\.runtime_id, sid\)/, 'local runtime should persist the exact detected session id')
+  assert.match(source, /bindRuntimeSession\(runtimeWsPath, sid\)/, 'remote runtime should retain the exact detected session id')
 })
 
 test('artifact store does not stringify huge payloads to preserve render data', () => {

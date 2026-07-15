@@ -11,7 +11,7 @@ import { useVideoFxStore } from '../stores/video-fx'
 import { useUiPrefsStore } from '../stores/ui-prefs'
 import { useToastStore } from '../stores/toast'
 import { useFleetStore } from '../stores/fleet'
-import { useRuntimeStore } from '../stores/runtimes'
+import { runtimeDisplayTitle, useRuntimeStore } from '../stores/runtimes'
 
 // ─── Utils ─────────────────────────────────────────────────────────
 import { formatModelLabel } from '../utils/formatting'
@@ -213,6 +213,7 @@ export function AppShell() {
   const fleetConfig = useFleetStore((s) => s.config)
   const fleetNodes = useFleetStore((s) => s.nodes)
   const fleetRuntimes = useFleetStore((s) => s.runtimes)
+  const fleetSessions = useFleetStore((s) => s.sessions)
   const fleetLoading = useFleetStore((s) => s.loading)
   const fleetError = useFleetStore((s) => s.error)
 
@@ -236,8 +237,17 @@ export function AppShell() {
   const currentModel = formatModelLabel(currentModelRaw)
   const currentCwd = runtimeInfo.spawnCwd || null
   const remoteFleetRuntimes = useMemo(
-    () => fleetRuntimes.filter((runtime) => runtime.can_attach !== false && runtime.state !== 'stopped' && Boolean(fleetRuntimeAttachPath(runtime))),
-    [fleetRuntimes],
+    () => fleetRuntimes
+      .filter((runtime) => runtime.can_attach !== false && runtime.state !== 'stopped' && Boolean(fleetRuntimeAttachPath(runtime)))
+      .map((runtime) => {
+        const sessionId = String(runtime.active_hermes_session_id || '').trim()
+        const session = sessionId
+          ? fleetSessions.find((item) => item.session_id === sessionId && (!item.node || item.node === fleetRuntimeNode(runtime)))
+          : null
+        const sessionTitle = String(session?.title || session?.last_user_message || '').trim()
+        return sessionTitle ? { ...runtime, display_title: sessionTitle } : runtime
+      }),
+    [fleetRuntimes, fleetSessions],
   )
   const remoteFleetStartNodes = useMemo(
     () => fleetNodes.filter(isFleetNodeOnline),
@@ -256,7 +266,7 @@ export function AppShell() {
   const [updateAvailable, setUpdateAvailable] = useState(false)
 
   const activeFleetRuntimeRecord = activeFleetRuntimeTarget?.kind === 'runtime'
-    ? fleetRuntimes.find((runtime) => runtime.runtime_id === activeFleetRuntimeTarget.runtimeId && fleetRuntimeNode(runtime) === activeFleetRuntimeTarget.node) || null
+    ? remoteFleetRuntimes.find((runtime) => runtime.runtime_id === activeFleetRuntimeTarget.runtimeId && fleetRuntimeNode(runtime) === activeFleetRuntimeTarget.node) || null
     : null
   const activeFleetRuntimeAttachPath = fleetRuntimeAttachPath(activeFleetRuntimeRecord)
   const hasAttachableTerminal = runtimeConfig.enabled && (runtimeConfig.backend !== 'tmux' || Boolean(activeRuntime || activeFleetRuntimeRecord))
@@ -477,8 +487,7 @@ export function AppShell() {
     const runtimeState = useRuntimeStore.getState()
     if (runtimeState.config.enabled && runtimeState.config.backend === 'tmux') {
       useSessionStore.getState().startNewSession({ spawn: false })
-      const count = runtimeState.runtimes.filter(isAttachableLocalRuntime).length + 1
-      void runtimeState.createRuntime(`Hermes ${count}`, { profile: selectedRuntimeProfile }).then((runtime) => {
+      void runtimeState.createRuntime('New session', { profile: selectedRuntimeProfile }).then((runtime) => {
         if (runtime) useTerminalStore.getState().spawn(null)
       }).catch((err) => {
         useToastStore.getState().show(err instanceof Error ? err.message : 'failed to start runtime')
@@ -548,9 +557,8 @@ export function AppShell() {
   const handleStartFleetTmuxRuntime = useCallback(async (node: string) => {
     const safeNode = String(node || '').trim()
     if (!safeNode) return
-    const count = useFleetStore.getState().runtimes.filter((runtime) => fleetRuntimeNode(runtime) === safeNode && runtime.can_attach !== false && runtime.state !== 'stopped').length + 1
     const uiTheme = useUiPrefsStore.getState().prefs.theme
-    const runtime = await useFleetStore.getState().createRuntime(safeNode, `Hermes ${count}`, { uiTheme })
+    const runtime = await useFleetStore.getState().createRuntime(safeNode, 'New session', { uiTheme })
     if (!runtime) return
     handleSelectFleetTmuxRuntime(runtime)
     useToastStore.getState().show(`remote runtime started: ${safeNode}`)
@@ -576,8 +584,7 @@ export function AppShell() {
 
   const handleNewRuntime = useCallback(async () => {
     setActiveFleetRuntimeTarget(null)
-    const count = useRuntimeStore.getState().runtimes.filter(isAttachableLocalRuntime).length + 1
-    const runtime = await useRuntimeStore.getState().createRuntime(`Hermes ${count}`, { profile: selectedRuntimeProfile })
+    const runtime = await useRuntimeStore.getState().createRuntime('New session', { profile: selectedRuntimeProfile })
     if (runtime) {
       useTerminalStore.getState().spawn(null)
       useToastStore.getState().show(`runtime started · profile ${runtime.profile || selectedRuntimeProfile}`)
@@ -600,9 +607,9 @@ export function AppShell() {
   }, [])
 
   const runtimePillLabel = activeFleetRuntimeRecord
-    ? `${fleetRuntimeNode(activeFleetRuntimeRecord)} · ${activeFleetRuntimeRecord.title || activeFleetRuntimeRecord.runtime_id}`
+    ? `${fleetRuntimeNode(activeFleetRuntimeRecord)} · ${runtimeDisplayTitle(activeFleetRuntimeRecord)}`
     : activeRuntime
-      ? `${activeRuntime.title || activeRuntime.runtime_id} · ${activeRuntime.profile || 'default'}`
+      ? `${runtimeDisplayTitle(activeRuntime)} · ${activeRuntime.profile || 'default'}`
       : runtimeConfig.backend === 'tmux'
         ? 'none'
         : 'legacy'
@@ -871,7 +878,7 @@ export function AppShell() {
                           type="button"
                           className="hm-btn"
                           onClick={() => handleSelectRuntime(runtime.runtime_id)}
-                          title={active ? 'Current runtime' : `Switch to ${runtime.title || runtime.runtime_id}`}
+                          title={active ? 'Current runtime' : `Switch to ${runtimeDisplayTitle(runtime)}`}
                           style={{
                             display: 'grid',
                             gridTemplateColumns: 'minmax(0, 1fr) auto',
@@ -888,7 +895,7 @@ export function AppShell() {
                         >
                           <span style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                             <span style={{ color: statusColor, fontSize: 12, fontWeight: active ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {runtime.title || runtime.runtime_id}
+                              {runtimeDisplayTitle(runtime)}
                             </span>
                             <span style={{ color: SLATE.muted, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {`${runtime.profile || 'default'} · ${runtime.runtime_activity === 'working' ? 'working' : 'idle'}`}
@@ -915,7 +922,7 @@ export function AppShell() {
                               ev.stopPropagation()
                               void handleStopRuntime(runtime.runtime_id)
                             }}
-                            title={`Stop ${runtime.title || runtime.runtime_id}`}
+                            title={`Stop ${runtimeDisplayTitle(runtime)}`}
                             style={{ color: SLATE.muted, fontSize: 10, border: `1px solid ${SLATE.border}`, borderRadius: 9, padding: '0 8px', background: SLATE.surface }}
                           >
                             stop
@@ -976,7 +983,7 @@ export function AppShell() {
                             >
                               <span style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                                 <span style={{ color: active ? AMBER[300] : SLATE.textBright, fontSize: 12, fontWeight: active ? 700 : 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {runtime.title || runtime.runtime_id}
+                                  {runtimeDisplayTitle(runtime)}
                                 </span>
                                 <span style={{ color: SLATE.muted, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {`${node} · ${runtime.profile || 'default'} · ${runtime.runtime_activity === 'working' ? 'working' : 'idle'}`}
@@ -994,7 +1001,7 @@ export function AppShell() {
                                   ev.stopPropagation()
                                   void handleStopFleetTmuxRuntime(runtime)
                                 }}
-                                title={`Stop remote runtime ${runtime.title || runtime.runtime_id}`}
+                                title={`Stop remote runtime ${runtimeDisplayTitle(runtime)}`}
                                 style={{ color: SLATE.muted, fontSize: 10, border: `1px solid ${SLATE.border}`, borderRadius: 9, padding: '0 8px', background: SLATE.surface }}
                               >
                                 stop

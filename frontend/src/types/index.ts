@@ -148,6 +148,8 @@ export interface HermesRuntime {
   runtime_id: string
   node?: string
   title: string
+  display_title?: string | null
+  session_title?: string | null
   profile: string
   cwd: string
   state: string

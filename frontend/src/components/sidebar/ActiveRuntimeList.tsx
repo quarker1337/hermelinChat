@@ -1,3 +1,4 @@
+import { runtimeDisplayTitle } from '../../stores/runtimes'
 import { AMBER, SLATE } from '../../theme/index'
 import type { HermesRuntime, PetActivityState } from '../../types'
 
@@ -50,7 +51,7 @@ function RuntimeRow({
       type="button"
       className="hm-btn"
       onClick={onClick}
-      title={current ? 'Current Hermes session' : `Switch to ${runtime.title || runtime.runtime_id}`}
+      title={current ? 'Current Hermes session' : `Switch to ${runtimeDisplayTitle(runtime)}`}
       style={{
         width: '100%',
         display: 'grid',
@@ -66,7 +67,7 @@ function RuntimeRow({
     >
       <span style={{ minWidth: 0, display: 'grid', gap: 2 }}>
         <span style={{ color, fontSize: 11, fontWeight: current ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {runtime.title || runtime.runtime_id}
+          {runtimeDisplayTitle(runtime)}
         </span>
         <span style={{ color: SLATE.muted, fontSize: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {`${location} · ${runtime.profile || 'default'}`}

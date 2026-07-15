@@ -10,6 +10,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from hermelin.config import HermelinConfig
+from hermelin.meta_db import upsert_title
 from hermelin.runtime_backends import (
     LegacyRuntimeBackend,
     RuntimeCreateRequest,
@@ -264,6 +265,49 @@ class RuntimeApiTests(unittest.TestCase):
             self.assertEqual(raw["last_active_runtime_id"], "local-one")
             self.assertEqual(raw["runtimes"][0]["source"], "user_ui")
 
+    def test_runtime_binding_uses_live_session_title_and_manual_rename(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir, runtime_backend="legacy", runtime_autostart_default=False)
+            session_id = "20260714_120000_abcdef"
+            _write_history_session(config.db_path, session_id, "")
+            with sqlite3.connect(config.db_path) as conn:
+                conn.execute(
+                    "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, 'user', ?, 2.0)",
+                    (session_id, "Investigate Fleet install"),
+                )
+            app = create_app(config)
+
+            with TestClient(app) as client:
+                created = client.post(
+                    "/api/runtimes",
+                    json={"runtime_id": "local-one", "title": "Hermes 1", "source": "user_ui"},
+                )
+                bound = client.post(
+                    "/api/runtimes/local-one/session",
+                    json={"session_id": session_id},
+                )
+                upsert_title(
+                    config.meta_db_path,
+                    session_id=session_id,
+                    title="Fleet manager setup",
+                    source="ui",
+                )
+                refreshed = client.get("/api/runtimes/local-one")
+                invalid = client.post(
+                    "/api/runtimes/local-one/session",
+                    json={"session_id": "--help"},
+                )
+
+            self.assertEqual(created.status_code, 200)
+            self.assertEqual(created.json()["runtime"]["display_title"], "New session")
+            self.assertEqual(bound.status_code, 200)
+            self.assertEqual(bound.json()["runtime"]["active_hermes_session_id"], session_id)
+            self.assertEqual(bound.json()["runtime"]["session_title"], "Investigate Fleet install")
+            self.assertEqual(bound.json()["runtime"]["display_title"], "Investigate Fleet install")
+            self.assertEqual(refreshed.status_code, 200)
+            self.assertEqual(refreshed.json()["runtime"]["display_title"], "Fleet manager setup")
+            self.assertEqual(invalid.status_code, 400)
+
     def test_runtime_create_validates_resume_session_ids(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir, runtime_backend="legacy", runtime_autostart_default=False)
@@ -275,6 +319,7 @@ class RuntimeApiTests(unittest.TestCase):
 
             self.assertEqual(valid.status_code, 200)
             self.assertEqual(valid.json()["runtime"]["title"], "Resume")
+            self.assertEqual(valid.json()["runtime"]["active_hermes_session_id"], "20260630_123456_resume")
             self.assertEqual(invalid.status_code, 400)
 
     def test_session_history_and_resume_use_selected_profile_database(self):

@@ -25,7 +25,7 @@ def new_runtime_id() -> str:
 @dataclass(slots=True)
 class RuntimeRecord:
     runtime_id: str
-    title: str = "default"
+    title: str = "New session"
     profile: str = "default"
     cwd: str = ""
     state: str = "starting"
@@ -44,7 +44,7 @@ class RuntimeRecord:
     def from_dict(cls, raw: dict[str, Any]) -> "RuntimeRecord":
         data = dict(raw or {})
         data["runtime_id"] = str(data.get("runtime_id") or data.get("id") or new_runtime_id())
-        data["title"] = str(data.get("title") or "default")
+        data["title"] = str(data.get("title") or "New session")
         data["profile"] = str(data.get("profile") or "default")
         data["cwd"] = str(data.get("cwd") or "")
         data["state"] = str(data.get("state") or "starting")
@@ -175,7 +175,7 @@ class RuntimeRegistry:
         value = self._read().get("last_active_runtime_id")
         return str(value) if value else None
 
-    def ensure_default_runtime(self, *, backend: str, title: str = "default", cwd: str = "", profile: str = "default", tmux_name: str | None = None) -> RuntimeRecord:
+    def ensure_default_runtime(self, *, backend: str, title: str = "New session", cwd: str = "", profile: str = "default", tmux_name: str | None = None) -> RuntimeRecord:
         last = self.get_last_active()
         if last:
             found = self.get_runtime(last)

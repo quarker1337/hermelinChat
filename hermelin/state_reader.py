@@ -24,9 +24,13 @@ def connect_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def is_valid_session_id(value: Optional[str]) -> bool:
+    return bool(_SESSION_ID_RE.fullmatch(str(value or "").strip()))
+
+
 def resolve_resume_session_id(db_path: Path, value: Optional[str]) -> Optional[str]:
     session_id = str(value or "").strip()
-    if not session_id or not _SESSION_ID_RE.fullmatch(session_id):
+    if not is_valid_session_id(session_id):
         return None
     if not db_path.exists():
         return None
@@ -50,6 +54,36 @@ def _truncate_one_line(s: Optional[str], n: int) -> Optional[str]:
     if len(line) <= n:
         return line
     return line[: n - 1].rstrip() + "…"
+
+
+def get_session_title(db_path: Path, session_id: str) -> Optional[str]:
+    """Return an exact session's explicit/first-message title without listing history."""
+    sid = str(session_id or "").strip()
+    if not is_valid_session_id(sid) or not db_path.exists():
+        return None
+    try:
+        with connect_db(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT s.title AS session_title,
+                       (SELECT m.content FROM messages m
+                          WHERE m.session_id = s.id
+                            AND m.role = 'user'
+                            AND m.content IS NOT NULL
+                            AND m.content != ''
+                          ORDER BY m.timestamp ASC LIMIT 1) AS first_user_message
+                  FROM sessions s
+                 WHERE s.id = ?
+                 LIMIT 1
+                """,
+                (sid,),
+            ).fetchone()
+    except sqlite3.Error:
+        logger.debug("failed to read session title for %s", sid, exc_info=True)
+        return None
+    if not row:
+        return None
+    return _truncate_one_line(row["session_title"], 60) or _truncate_one_line(row["first_user_message"], 60)
 
 
 def list_sessions(

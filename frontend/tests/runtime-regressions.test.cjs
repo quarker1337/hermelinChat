@@ -109,12 +109,23 @@ test('runtime store refresh/create is standalone and never calls fleet endpoints
         last_active_runtime_id: 'rt-active',
       })
     }
+    if (requestPath === '/api/runtimes/rt-active/session') {
+      assert.equal(opts.method, 'POST')
+      assert.deepEqual(JSON.parse(opts.body), { session_id: 'sess-live' })
+      return jsonResponse({
+        runtime: {
+          runtime_id: 'rt-active', title: 'Hermes 2', display_title: 'Investigate Fleet install', session_title: 'Investigate Fleet install',
+          active_hermes_session_id: 'sess-live', profile: 'default', cwd: '/tmp', state: 'idle', source: 'user_ui', backend: 'tmux',
+          can_attach: true, can_stop: true, attach_ws_path: '/ws/runtimes/rt-active/attach',
+        },
+      })
+    }
     throw new Error(`unexpected fetch ${requestPath}`)
   }
 
   try {
     const { useAuthStore } = loadCompiled('stores/auth.js')
-    const { useRuntimeStore, runtimeAttachPath } = loadCompiled('stores/runtimes.js')
+    const { useRuntimeStore, runtimeAttachPath, runtimeDisplayTitle } = loadCompiled('stores/runtimes.js')
     useAuthStore.setState({ loading: false, enabled: false, authenticated: true, logoutReason: null })
     useRuntimeStore.getState().reset()
 
@@ -125,6 +136,13 @@ test('runtime store refresh/create is standalone and never calls fleet endpoints
     const backgroundRuntime = useRuntimeStore.getState().runtimes.find((runtime) => runtime.runtime_id === 'rt-old')
     assert.equal(backgroundRuntime.runtime_activity, 'working', 'background runtime activity must survive API normalization when focus moves elsewhere')
     assert.equal(runtimeAttachPath(useRuntimeStore.getState().runtimes[2]), '/ws/runtimes/rt-active/attach')
+    assert.equal(runtimeDisplayTitle({ title: 'Hermes 9' }), 'New session')
+    assert.equal(runtimeDisplayTitle({ title: 'New session', session_title: 'Investigate Fleet install' }), 'Investigate Fleet install')
+
+    await useRuntimeStore.getState().bindRuntimeSession('rt-active', 'sess-live')
+    const boundRuntime = useRuntimeStore.getState().runtimes.find((runtime) => runtime.runtime_id === 'rt-active')
+    assert.equal(boundRuntime.active_hermes_session_id, 'sess-live')
+    assert.equal(runtimeDisplayTitle(boundRuntime), 'Investigate Fleet install')
 
     useRuntimeStore.getState().setActiveRuntimeId('rt-old')
     await useRuntimeStore.getState().refresh()
@@ -171,9 +189,9 @@ test('sidebar new session keeps session-store new-session semantics in tmux mode
   const body = match[1]
 
   assert.match(body, /startNewSession\(\{ spawn: false \}\)/, 'tmux sidebar new session should snapshot session detection before runtime creation')
-  assert.match(body, /createRuntime\(`Hermes \$\{count\}`, \{ profile: selectedRuntimeProfile \}\)/, 'tmux sidebar new session should allocate a fresh local runtime with the selected profile')
+  assert.match(body, /createRuntime\('New session', \{ profile: selectedRuntimeProfile \}\)/, 'tmux sidebar new session should allocate a clearly named fresh local runtime')
   assert.match(body, /if \(runtime\) useTerminalStore\.getState\(\)\.spawn\(null\)/, 'tmux sidebar new session should attach only after runtime creation')
-  assert.ok(body.indexOf('startNewSession({ spawn: false })') < body.indexOf('createRuntime(`Hermes ${count}`, { profile: selectedRuntimeProfile })'), 'new-session detection baseline must be captured before the runtime starts')
+  assert.ok(body.indexOf('startNewSession({ spawn: false })') < body.indexOf("createRuntime('New session', { profile: selectedRuntimeProfile })"), 'new-session detection baseline must be captured before the runtime starts')
   assert.match(body, /useSessionStore\.getState\(\)\.startNewSession\(\)/, 'legacy sidebar new session should still run session-store new-session flow')
 })
 
@@ -185,7 +203,9 @@ test('runtime dropdown is live-only and keeps compact switch affordances', () =>
   assert.match(appSource, />\s*refresh\s*<\/button>/, 'runtime dropdown should include a manual refresh action')
   assert.match(appSource, /<span>profile<\/span>/, 'runtime dropdown should expose a local Hermes profile selector')
   assert.match(appSource, /runtimeProfiles\.map\(\(profile\)/, 'runtime dropdown should render Hermes profiles from runtime config')
-  assert.match(appSource, /createRuntime\(`Hermes \$\{count\}`, \{ profile: selectedRuntimeProfile \}\)/, 'new local runtime should start with the selected profile')
+  assert.match(appSource, /createRuntime\('New session', \{ profile: selectedRuntimeProfile \}\)/, 'new local runtime should use a clear fallback label and selected profile')
+  assert.doesNotMatch(appSource, /`Hermes \$\{count\}`/, 'runtime names should describe sessions rather than numbered Hermes processes')
+  assert.match(appSource, /runtimeDisplayTitle\(runtime\)/, 'runtime rows should prefer the bound conversation title')
   assert.match(appSource, /runtime\.profile \|\| 'default'/, 'runtime rows should show the profile actually backing that runtime')
   assert.match(appSource, /liveLocalRuntimes\.map/, 'runtime dropdown should render only live local runtimes')
   assert.doesNotMatch(appSource, /isStopped \? 'stopped'/, 'runtime dropdown should not render stopped local runtimes as disabled rows')
@@ -266,7 +286,7 @@ test('runtime dropdown connects Fleet tmux remotes through the normal xterm atta
   assert.doesNotMatch(appSource, /fleetAgentAttachPath/, 'only central-mediated managed runtimes may be attached')
 
   assert.match(appSource, /const uiTheme = useUiPrefsStore\.getState\(\)\.prefs\.theme/, 'remote runtime create should read the active HermelinChat theme at click time')
-  assert.match(appSource, /createRuntime\(safeNode, `Hermes \$\{count\}`, \{ uiTheme \}\)/, 'remote runtime create should send active UI theme to Fleet')
+  assert.match(appSource, /createRuntime\(safeNode, 'New session', \{ uiTheme \}\)/, 'remote runtime create should send active UI theme to Fleet with the clear fallback label')
   assert.match(fleetStoreSource, /apiCall<FleetSnapshot>\('\/api\/fleet\/snapshot'\)/, 'Fleet store should poll remote runtimes through the aggregate snapshot')
   assert.match(fleetStoreSource, /apiPost<FleetRuntimeCreateResponse>\(`\/api\/fleet\/nodes\/\$\{encodeURIComponent\(safeNode\)\}\/runtimes`/, 'Fleet store should create remote node runtimes')
   assert.match(fleetStoreSource, /body\.ui_theme = uiTheme/, 'Fleet store should forward UI theme for remote startup skin sync')

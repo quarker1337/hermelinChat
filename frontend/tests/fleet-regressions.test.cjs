@@ -210,8 +210,8 @@ test('remote Fleet runtime create propagates the active HermelinChat theme as He
     calls.push({ url: requestPath, opts })
     if (requestPath === '/api/fleet/nodes/node-a/runtimes') {
       assert.equal(opts.method, 'POST')
-      assert.deepEqual(JSON.parse(opts.body), { title: 'Hermes 1', ui_theme: 'nous', skin: 'nous' })
-      return jsonResponse({ runtime: { runtime_id: 'remote-nous', node: 'node-a', title: 'Hermes 1', profile: 'default', cwd: '/home/test', state: 'idle', source: 'fleet_remote', backend: 'fleet-tmux', can_attach: true, can_stop: true } })
+      assert.deepEqual(JSON.parse(opts.body), { title: 'New session', ui_theme: 'nous', skin: 'nous' })
+      return jsonResponse({ runtime: { runtime_id: 'remote-nous', node: 'node-a', title: 'New session', profile: 'default', cwd: '/home/test', state: 'idle', source: 'fleet_remote', backend: 'fleet-tmux', can_attach: true, can_stop: true } })
     }
     throw new Error(`unexpected fetch: ${requestPath}`)
   }
@@ -221,8 +221,10 @@ test('remote Fleet runtime create propagates the active HermelinChat theme as He
     assert.equal(hermesSkinForUiTheme('nous'), 'nous')
     assert.equal(hermesSkinForUiTheme('unknown-theme'), '')
     useFleetStore.getState().reset()
-    const runtime = await useFleetStore.getState().createRuntime('node-a', 'Hermes 1', { uiTheme: 'nous' })
+    const runtime = await useFleetStore.getState().createRuntime('node-a', 'New session', { uiTheme: 'nous' })
     assert.equal(runtime.runtime_id, 'remote-nous')
+    useFleetStore.getState().bindRuntimeSession('/ws/fleet/nodes/node-a/runtimes/remote-nous/attach', 'sess-remote')
+    assert.equal(useFleetStore.getState().runtimes[0].active_hermes_session_id, 'sess-remote')
     assert.ok(calls.some((call) => call.url === '/api/fleet/nodes/node-a/runtimes'))
   } finally {
     useFleetStoreSafeReset()
